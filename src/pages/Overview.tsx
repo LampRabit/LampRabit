@@ -695,6 +695,10 @@ function ServiceRow({
             <Button size="sm" variant="primary" onClick={() => navigate("services")}>
               Install
             </Button>
+          ) : service.external ? (
+            <span className="px-2 text-xs text-muted" title="Started by the Ollama app; quit it there to stop it.">
+              Ollama app
+            </span>
           ) : running || service.state === "stopping" ? (
             <>
               <Button size="sm" onClick={() => stop.mutate()} disabled={busy} aria-label={`Stop ${service.label}`}>

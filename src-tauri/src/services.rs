@@ -246,6 +246,8 @@ pub struct ServiceInfo {
     pub health: Option<Health>,
     /// Why the last start failed or the service stopped unexpectedly.
     pub problem: Option<Problem>,
+    /// Running, but not started by LampRabit (the Ollama app): it can't be stopped here.
+    pub external: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -303,7 +305,35 @@ fn admin_port(kind: ServiceKind, settings: &Settings) -> Option<u16> {
     }
 }
 
+/// Ollama installed outside LampRabit, used when LampRabit has none of its own. It keeps
+/// its models where it always does, so the user's downloaded models stay available.
+fn system_ollama(settings: &Settings) -> Option<LaunchSpec> {
+    if settings.versions.get("ollama").is_some() {
+        return None;
+    }
+    let program = runtimes::ollama_elsewhere()?;
+    Some(LaunchSpec {
+        cwd: program.parent().map(Path::to_path_buf).unwrap_or_default(),
+        program,
+        args: vec!["serve".into()],
+        test: None,
+        stop_cmd: None,
+        path_prepend: vec![],
+        env: vec![("OLLAMA_HOST", format!("127.0.0.1:{}", settings.ports.ollama))],
+    })
+}
+
+/// Whether something already answers on a service's port on this machine.
+fn answers(port: u16) -> bool {
+    std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_millis(150)).is_ok()
+}
+
 fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
+    if kind == ServiceKind::Ollama {
+        if let Some(spec) = system_ollama(settings) {
+            return Ok(spec);
+        }
+    }
     let version = kind
         .version(settings)
         .ok_or_else(|| Error::msg(format!("{} is not installed", kind.label())))?;
@@ -1012,10 +1042,13 @@ impl Supervisor {
                 let installed = launch_spec(kind, settings, layout)
                     .map(|s| s.program.exists())
                     .unwrap_or(false);
+                // The Ollama app usually serves on its own; that counts as running.
+                let external = handle.is_none() && kind == ServiceKind::Ollama && installed && answers(kind.port(settings));
                 ServiceInfo {
                     kind,
                     label: kind.label(),
-                    state: handle.map_or(ServiceState::Stopped, |h| h.state),
+                    external,
+                    state: if external { ServiceState::Running } else { handle.map_or(ServiceState::Stopped, |h| h.state) },
                     pid: handle.and_then(|h| h.pid),
                     port: kind.port(settings),
                     version: kind.version(settings),
@@ -1138,6 +1171,11 @@ impl Supervisor {
         settings: &Settings,
         layout: &Layout,
     ) -> Result<()> {
+        // The Ollama app already serving is what's wanted; there's nothing to start.
+        if kind == ServiceKind::Ollama && !self.is_running(kind).await && answers(kind.port(settings)) {
+            logs::system(app, Level::Info, "Ollama is already running (the Ollama app); LampRabit uses it as is");
+            return Ok(());
+        }
         {
             let mut running = self.running.lock().await;
             if running.contains_key(&kind) {

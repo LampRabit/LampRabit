@@ -397,10 +397,10 @@ function ProjectDetail({ site, info, status, tab, setTab }: { site: Site; info?:
         <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
           {stackParts(site, {
             php: site.server === "frankenphp" ? "FrankenPHP's built-in PHP" : php ? `PHP ${php}` : "PHP (none installed)",
-            java: settings.data?.versions.java ? `Java ${settings.data.versions.java}` : "Java",
-            python: settings.data?.versions.python ? `Python ${settings.data.versions.python}` : "Python",
-            go: settings.data?.versions.go ? `Go ${settings.data.versions.go}` : "Go",
-            rust: settings.data?.versions.rust ? `Rust ${settings.data.versions.rust}` : "Rust",
+            java: languageLine("Java", site),
+            python: languageLine("Python", site),
+            go: languageLine("Go", site),
+            rust: languageLine("Rust", site),
             node: site.language === "node" || devServer ? `Node.js ${status?.node ?? app.data?.config.node ?? site.node ?? nodeStatus.data?.current ?? ""}`.trim() : null,
             pm: site.nodeProject && app.data ? (app.data.config.packageManager ?? app.data.detectedPackageManager) : null,
           }).map((part, i) => (
@@ -464,6 +464,12 @@ function ProjectDetail({ site, info, status, tab, setTab }: { site: Site; info?:
       {tab === "settings" && <SettingsTab site={site} settings={settings.data} status={status} />}
     </div>
   );
+}
+
+/** "Python 3.12.9 (.python-version)": the version a project runs on, and why. */
+function languageLine(label: string, site: Site): string {
+  if (!site.languageVersion) return site.versionRequest ? `${label} ${site.versionRequest.version} (not installed)` : `${label} (not installed)`;
+  return site.versionRequest ? `${label} ${site.languageVersion} (${site.versionRequest.file})` : `${label} ${site.languageVersion}`;
 }
 
 /** The project's language, runtime versions and package manager, for the header line. */
@@ -879,6 +885,9 @@ function SettingsTab({ site, settings, status }: { site: Site; settings?: Settin
   const toggleSsl = useMutation({ mutationFn: (ssl: boolean) => api.setSiteSsl(site.name, ssl), onSuccess, onError });
   const setPhp = useMutation({ mutationFn: (v: string | null) => api.setSitePhp(site.name, v), onSuccess, onError });
   const setServer = useMutation({ mutationFn: (v: Server | null) => api.setSiteServer(site.name, v), onSuccess, onError });
+  const setLanguage = useMutation({ mutationFn: (v: string | null) => api.setLanguageVersion(site.name, v), onSuccess, onError });
+  const languageRuntime = (["python", "java", "go", "rust"] as const).find((l) => l === site.language);
+  const languageVersions = languageRuntime ? (installed.data?.find((i) => i.runtime === languageRuntime)?.versions ?? []) : [];
   const busy = toggleSsl.isPending || setPhp.isPending || setServer.isPending;
   const select = clsx(inputClass.replace("w-full", ""), "w-52");
 
@@ -886,6 +895,34 @@ function SettingsTab({ site, settings, status }: { site: Site; settings?: Settin
     <div className="space-y-4">
       <Section title="Web server">
         <div className={clsx("space-y-4 text-sm", busy && "opacity-60")}>
+          {(languageRuntime === "python" || languageRuntime === "java") && (
+            <Row
+              title={`${runtimeLabels[languageRuntime]} version`}
+              hint={`Saved in the project's ${languageRuntime === "python" ? ".python-version" : ".java-version"}, so other tools (pyenv, jenv) read it too. python/java in the project's folder use it.`}
+            >
+              <select value={site.versionRequest?.version ?? ""} disabled={setLanguage.isPending} onChange={(e) => setLanguage.mutate(e.target.value || null)} className={select}>
+                <option value="">Default · {settings?.versions[languageRuntime] ?? "none"}</option>
+                {site.versionRequest && !languageVersions.includes(site.versionRequest.version) && (
+                  <option value={site.versionRequest.version}>{site.versionRequest.version} (from {site.versionRequest.file})</option>
+                )}
+                {languageVersions.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </Row>
+          )}
+          {(languageRuntime === "go" || languageRuntime === "rust") && (
+            <Row
+              title={`${runtimeLabels[languageRuntime]} version`}
+              hint={languageRuntime === "go" ? "Set by the go and toolchain lines in go.mod." : "Set by rust-toolchain.toml; rustup installs that toolchain on first use."}
+            >
+              <span className="text-muted">
+                {site.versionRequest ? `${site.versionRequest.version} (${site.versionRequest.file})` : `Default · ${settings?.versions[languageRuntime] ?? "none"}`}
+              </span>
+            </Row>
+          )}
           {site.language === "php" && site.server === "frankenphp" && (
             <Row title="PHP version" hint="FrankenPHP runs its own built-in PHP, so the PHP versions and extensions installed in LampRabit don't apply here.">
               <span className="text-muted">FrankenPHP's PHP</span>

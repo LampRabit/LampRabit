@@ -312,7 +312,48 @@ fn version_key(v: &str) -> Vec<u32> {
     v.split(|c: char| !c.is_ascii_digit()).filter_map(|p| p.parse().ok()).collect()
 }
 
-pub async fn available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec<Release>> {
+/// How long a downloaded catalog is used before it's fetched again.
+const CATALOG_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+
+fn catalog_file(runtime: Runtime) -> Option<PathBuf> {
+    Some(dirs::cache_dir()?.join("LampRabit").join("catalogs").join(format!("{}-{}.json", runtime.id(), std::env::consts::OS)))
+}
+
+/// The versions available for a runtime. Catalogs are kept on disk for a few hours: most
+/// come from GitHub's API, which allows few anonymous requests an hour, and browsing the
+/// Services page would otherwise use them up. `fresh` (the refresh button) fetches anew; a
+/// failed fetch falls back to the last catalog, however old.
+pub async fn available(client: &reqwest::Client, runtime: Runtime, fresh: bool) -> Result<Vec<Release>> {
+    let file = catalog_file(runtime);
+    let cached = file.as_ref().and_then(|f| {
+        let age = std::fs::metadata(f).ok()?.modified().ok()?.elapsed().unwrap_or_default();
+        let releases: Vec<Release> = serde_json::from_slice(&std::fs::read(f).ok()?).ok()?;
+        Some((age, releases))
+    });
+    if let Some((age, releases)) = &cached {
+        if !fresh && *age < CATALOG_TTL && !releases.is_empty() {
+            return Ok(releases.clone());
+        }
+    }
+    match fetch_available(client, runtime).await {
+        Ok(releases) => {
+            if let (Some(f), Ok(json)) = (&file, serde_json::to_vec(&releases)) {
+                let _ = std::fs::create_dir_all(f.parent().unwrap_or(f));
+                let _ = std::fs::write(f, json);
+            }
+            Ok(releases)
+        }
+        Err(e) => match cached {
+            Some((_, releases)) if !releases.is_empty() => Ok(releases),
+            _ if e.to_string().contains("rate limit") => Err(Error::msg(
+                "GitHub's limit for downloads lists was reached (60 an hour without an account). Try again within the hour, or set a GITHUB_TOKEN environment variable and restart LampRabit.",
+            )),
+            _ => Err(e),
+        },
+    }
+}
+
+async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec<Release>> {
     let mut releases = match runtime {
         Runtime::Php => php_releases(client).await?,
         Runtime::Apache => apache_releases(client).await?,
@@ -622,9 +663,16 @@ async fn nginx_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
 }
 
 async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value> {
-    client
-        .get(url)
-        .header("Accept", "application/vnd.github+json")
+    let mut request = client.get(url);
+    // GitHub's API wants its own media type (other hosts, npm's registry for one, refuse
+    // it), and allows 60 anonymous requests an hour; a token raises that to 5000.
+    if url.starts_with("https://api.github.com/") {
+        request = request.header("Accept", "application/vnd.github+json");
+        if let Some(token) = ["GITHUB_TOKEN", "GH_TOKEN"].iter().find_map(|v| std::env::var(v).ok().filter(|t| !t.is_empty())) {
+            request = request.bearer_auth(token);
+        }
+    }
+    request
         .send()
         .await
         .and_then(|r| r.error_for_status())
@@ -1588,13 +1636,13 @@ pub async fn setup_n8n(layout: &Layout, version: &str) -> Result<()> {
     Ok(())
 }
 
-/// An Ollama installed outside LampRabit (its own installer or app), which many people
-/// already have: its location, so the Services page can say so.
+/// The ollama program of an Ollama installed outside LampRabit (its own installer or app),
+/// which many people already have. LampRabit uses it instead of downloading another.
 pub fn ollama_elsewhere() -> Option<PathBuf> {
     let candidates: Vec<PathBuf> = if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA").map(|d| vec![PathBuf::from(d).join("Programs").join("Ollama").join("ollama.exe")]).unwrap_or_default()
     } else if cfg!(target_os = "macos") {
-        vec![PathBuf::from("/Applications/Ollama.app"), PathBuf::from("/usr/local/bin/ollama")]
+        vec![PathBuf::from("/Applications/Ollama.app/Contents/Resources/ollama"), PathBuf::from("/usr/local/bin/ollama"), PathBuf::from("/opt/homebrew/bin/ollama")]
     } else {
         vec![PathBuf::from("/usr/local/bin/ollama"), PathBuf::from("/usr/bin/ollama")]
     };
@@ -2128,7 +2176,7 @@ pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNot
             if installed.is_empty() {
                 return Vec::new();
             }
-            let Ok(catalog) = available(client, runtime).await else { return Vec::new() };
+            let Ok(catalog) = available(client, runtime, false).await else { return Vec::new() };
             let mut out = Vec::new();
             for have in &installed {
                 if let Some(newer) = catalog.iter().find(|r| {

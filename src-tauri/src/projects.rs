@@ -236,7 +236,7 @@ async fn ensure_composer(ctx: &Ctx<'_>) -> Result<PathBuf> {
         return Ok(phar);
     }
     ctx.step("Installing Composer");
-    let release = runtimes::available(ctx.http, Runtime::Composer)
+    let release = runtimes::available(ctx.http, Runtime::Composer, false)
         .await?
         .into_iter()
         .next()

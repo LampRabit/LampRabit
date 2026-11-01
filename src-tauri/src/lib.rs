@@ -8,6 +8,7 @@ mod diagnose;
 mod error;
 mod extensions;
 mod facts;
+mod langver;
 mod layout;
 mod logs;
 mod node;
@@ -519,6 +520,24 @@ async fn move_environment(app: AppHandle, state: State<'_, AppState>, target: Pa
     logs::set_system_file(&app, layout.logs().join("lampRabit.log"));
     logs::system(&app, logs::Level::Info, format!("The LampRabit folder is now {}", target.display()));
     Ok(settings)
+}
+
+/// Sets the version a Python or Java project uses, by writing its version file (None
+/// removes it, back to the active version); its shims follow straight away.
+#[tauri::command]
+async fn set_language_version(app: AppHandle, state: State<'_, AppState>, name: String, version: Option<String>) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = layout.www().join(&name);
+    let runtime = match sites::language(&dir) {
+        sites::Language::Python => "python",
+        sites::Language::Java => "java",
+        sites::Language::Go => "go",
+        sites::Language::Rust => "rust",
+        _ => return Err(Error::msg("This project's language has no version to choose.")),
+    };
+    langver::set(&dir, runtime, version.as_deref())?;
+    refresh_shims(&app, &settings);
+    Ok(())
 }
 
 /// Where an Ollama installed outside LampRabit is, if there is one.
@@ -1163,6 +1182,8 @@ async fn watch_ports(handle: AppHandle) {
     // A route is dropped only after its port has been gone for two scans, so a dev server
     // restarting itself (on a config change) doesn't flip the site to its files and back.
     let mut missing: std::collections::BTreeMap<String, u8> = Default::default();
+    // What the projects' version files ask for; the shims are rewritten when it changes.
+    let mut versions = String::new();
     loop {
         tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {}
@@ -1170,6 +1191,13 @@ async fn watch_ports(handle: AppHandle) {
         }
         let state = handle.state::<AppState>();
         let (settings, layout) = state.snapshot().await;
+        let now = langver::signature(&layout);
+        if now != versions {
+            if !versions.is_empty() {
+                refresh_shims(&handle, &settings);
+            }
+            versions = now;
+        }
         let sites = sites::scan(&settings, &layout);
         let projects: Vec<(String, PathBuf)> = sites.iter().map(|s| (s.name.clone(), s.path.clone())).collect();
         let Ok((found, back)) = tauri::async_runtime::spawn_blocking(move || {
@@ -1989,8 +2017,8 @@ fn check_port(port: u16) -> bool {
 }
 
 #[tauri::command]
-async fn runtime_catalog(state: State<'_, AppState>, runtime: Runtime) -> Result<Vec<Release>> {
-    runtimes::available(&state.http, runtime).await
+async fn runtime_catalog(state: State<'_, AppState>, runtime: Runtime, fresh: Option<bool>) -> Result<Vec<Release>> {
+    runtimes::available(&state.http, runtime, fresh.unwrap_or(false)).await
 }
 
 #[tauri::command]
@@ -2379,6 +2407,7 @@ pub fn run() {
             stop_environment_holder,
             move_environment,
             ollama_elsewhere,
+            set_language_version,
             open_db_client,
             runtime_catalog,
             installed_runtimes,

@@ -234,9 +234,7 @@ export default function Services() {
   if (runtime === "minio") openUrl = settings.data ? `http://localhost:${settings.data.ports.minioConsole}/` : undefined;
   if (runtime === "rabbitmq") openUrl = settings.data ? `http://localhost:${settings.data.ports.rabbitmqManagement}/` : undefined;
   if (runtime === "n8n") openUrl = toolUrl("n8n", sites.data, settings.data?.ports.mailUi, settings.data?.ports.n8n);
-  if (runtime === "ollama" && ollamaElsewhere.data && !find("ollama")?.active) {
-    note = `Ollama is already installed on this computer (${ollamaElsewhere.data}). You can keep using it; LampRabit's own keeps its models separately.`;
-  }
+
 
   const status = (item: ServiceSelection) => {
     if (item === "node") return "NVM managed";
@@ -296,7 +294,9 @@ export default function Services() {
           <div className="mb-3">
             <p className="text-sm text-muted">{selectedGroup.blurb}</p>
           </div>
-          {runtime ? (
+          {runtime === "ollama" && ollamaElsewhere.data && !find("ollama")?.active ? (
+            <SystemOllamaCard path={ollamaElsewhere.data} />
+          ) : runtime ? (
             <RuntimeCard
               key={runtime}
               runtime={runtime}
@@ -356,6 +356,12 @@ function RuntimeCard({
     staleTime: 10 * 60 * 1000,
   });
 
+  // Catalogs are cached for a few hours; this asks for a fresh one.
+  const recheck = useMutation({
+    mutationFn: () => api.runtimeCatalog(runtime, true),
+    onSuccess: (data) => queryClient.setQueryData(["catalog", runtime], data),
+    onError: (e) => notify("error", String(e)),
+  });
   const refresh = () => {
     for (const key of ["installed", "services", "settings"]) queryClient.invalidateQueries({ queryKey: [key] });
   };
@@ -408,8 +414,8 @@ function RuntimeCard({
               <ExternalLink size={14} /> Open
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => catalog.refetch()} disabled={catalog.isFetching} aria-label={`Check for new ${label} versions`} title="Check for new versions">
-            <RefreshCw size={14} className={clsx(catalog.isFetching && "animate-spin")} />
+          <Button size="sm" variant="ghost" onClick={() => recheck.mutate()} disabled={catalog.isFetching || recheck.isPending} aria-label={`Check for new ${label} versions`} title="Check for new versions">
+            <RefreshCw size={14} className={clsx((catalog.isFetching || recheck.isPending) && "animate-spin")} />
           </Button>
         </div>
       </div>
@@ -489,6 +495,34 @@ function RuntimeCard({
           }}
         />
       </VersionsLayout>
+    </Card>
+  );
+}
+
+/**
+ * Ollama already installed on the computer: LampRabit uses it (and its models) rather
+ * than offering a second copy to download.
+ */
+function SystemOllamaCard({ path }: { path: string }) {
+  const notify = useAppStore((s) => s.notify);
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-4 px-5 py-4">
+        <IconTile className={runtimeTiles.ollama.className}>{runtimeTiles.ollama.icon(22)}</IconTile>
+        <div className="min-w-0 flex-1 basis-60">
+          <h3 className="text-lg font-bold tracking-tight">Ollama</h3>
+          <p className="text-sm text-muted">Using the Ollama installed on this computer, with the models you already have.</p>
+          <p className="mt-1 truncate font-mono text-xs text-muted" title={path}>
+            {path}
+          </p>
+        </div>
+        <Button size="sm" onClick={() => openPath(path.replace(/[\\/][^\\/]+$/, "")).catch((e) => notify("error", String(e)))}>
+          <FolderOpen size={14} /> Folder
+        </Button>
+      </div>
+      <p className="border-t border-line px-5 py-3 text-xs text-muted">
+        Start it from Home (or let the Ollama app run it); the ollama command in LampRabit's terminal talks to it. Update it with Ollama's own updater.
+      </p>
     </Card>
   );
 }

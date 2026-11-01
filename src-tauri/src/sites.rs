@@ -86,6 +86,10 @@ pub struct Site {
     pub git_branch: Option<String>,
     /// The database the project's config names (Laravel/Symfony .env, wp-config.php).
     pub database: Option<String>,
+    /// What the project's version file asks for (Python, Java, Go, Rust).
+    pub version_request: Option<crate::langver::Request>,
+    /// The installed version it runs on: the request's match, else the active version.
+    pub language_version: Option<String>,
 }
 
 /// Framework, git branch and database name of a project, read from a few small files.
@@ -387,6 +391,8 @@ pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {
             framework: None,
             git_branch: None,
             database: None,
+            version_request: None,
+            language_version: None,
         });
     };
     if let Some(ver) = &v.adminer {
@@ -456,6 +462,28 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
                 framework = Some(deps_framework(&path, language));
             }
             let app = own.and_then(|s| s.app.clone());
+            // Python, Java, Go and Rust projects can ask for a version in a file of their own.
+            let runtime = match language {
+                Language::Python => Some("python"),
+                Language::Java => Some("java"),
+                Language::Go => Some("go"),
+                Language::Rust => Some("rust"),
+                _ => None,
+            };
+            let version_request = runtime.and_then(|r| crate::langver::request(&path, r));
+            let language_version = runtime.and_then(|r| {
+                // rustup runs (and if needed installs) the toolchain the project names.
+                if r == "rust" {
+                    if let Some(req) = &version_request {
+                        return Some(req.version.clone());
+                    }
+                }
+                let installed = crate::runtimes::installed(layout, crate::runtimes::Runtime::from_id(r)?);
+                version_request
+                    .as_ref()
+                    .and_then(|req| crate::langver::matching(&installed, &req.version))
+                    .or_else(|| settings.versions.get(r).cloned())
+            });
             // Dynamic is preferred: a Node project with a dev server (from its template or
             // package.json) is served through it, unless it was switched to its files.
             // Python and Java projects have one once it's set up (from their template).
@@ -521,6 +549,8 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
                 framework,
                 git_branch,
                 database,
+                version_request,
+                language_version,
             })
         })
         .collect();
@@ -1188,6 +1218,8 @@ mod tests {
             framework: None,
             git_branch: None,
             database: None,
+            version_request: None,
+            language_version: None,
         }
     }
 

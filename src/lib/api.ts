@@ -184,6 +184,8 @@ export interface ServiceInfo {
   logPath: string;
   health: Health | null;
   problem: Problem | null;
+  /** Running, but not started by LampRabit (the Ollama app): it can't be stopped here. */
+  external: boolean;
 }
 
 export interface Health {
@@ -252,6 +254,10 @@ export interface Site {
   gitBranch: string | null;
   /** The database the project's config names. */
   database: string | null;
+  /** What the project's version file asks for (Python, Java, Go, Rust). */
+  versionRequest: { version: string; file: string } | null;
+  /** The installed version it runs on: the request's match, else the active version. */
+  languageVersion: string | null;
 }
 
 export interface NodeStatus {
@@ -642,6 +648,7 @@ export const api = {
   applySites: () => invoke<void>("apply_sites"),
   setSiteSsl: (name: string, ssl: boolean) => invoke<void>("set_site_ssl", { name, ssl }),
   setSitePhp: (name: string, version: string | null) => invoke<void>("set_site_php", { name, version }),
+  setLanguageVersion: (name: string, version: string | null) => invoke<void>("set_language_version", { name, version }),
   setSiteServer: (name: string, server: Server | null) => invoke<void>("set_site_server", { name, server }),
   phpStatus: () => invoke<PoolStatus[]>("php_status"),
   createProject: (request: NewProject) => invoke<{ url: string; note: string | null }>("create_project", { request }),
@@ -712,7 +719,7 @@ export const api = {
   saveText: (path: string, contents: string) => invoke<void>("save_text", { path, contents }),
   logHistory: () => invoke<LogHistory>("log_history"),
   clearLogs: () => invoke<void>("clear_logs"),
-  runtimeCatalog: (runtime: Runtime) => invoke<Release[]>("runtime_catalog", { runtime }),
+  runtimeCatalog: (runtime: Runtime, fresh = false) => invoke<Release[]>("runtime_catalog", { runtime, fresh }),
   installedRuntimes: () => invoke<InstalledRuntime[]>("installed_runtimes"),
   installRuntime: (release: Release) => invoke<void>("install_runtime", { release }),
   removeRuntime: (runtime: Runtime, version: string) => invoke<void>("remove_runtime", { runtime, version }),

@@ -83,14 +83,16 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
             }
         }
     }
-    // The JDK's tools, with JAVA_HOME for build tools (Maven, Gradle) they start.
-    if let Some(home) = settings.versions.get("java").map(|v| layout.bin("java", v)) {
-        for name in ["java", "javac", "jar", "jshell"] {
+    // The JDK's tools, with JAVA_HOME for build tools (Maven, Gradle) they start; each
+    // project gets the Java its .java-version or .sdkmanrc asks for.
+    for name in ["java", "javac", "jar", "jshell"] {
+        let cases = language_cases(settings, layout, "java", |v, folder| {
+            let home = layout.bin("java", v);
             let target = home.join("bin").join(exe(name));
-            if target.exists() {
-                let env = vec![("JAVA_HOME".to_string(), path(&home))];
-                shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env }])?;
-            }
+            target.exists().then(|| Case { folder, target, args: Vec::new(), env: vec![("JAVA_HOME".to_string(), path(&home))] })
+        });
+        if cases.iter().any(|c| c.folder.is_none()) {
+            shim(&dir, name, &cases)?;
         }
     }
         // mongosh, pointed at LampRabit's MongoDB when it isn't on the usual port.
@@ -124,21 +126,27 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
             shim(&dir, "clickhouse-client", &[Case { folder: None, target, args, env: Vec::new() }])?;
         }
     }
-    // ollama's CLI, talking to LampRabit's Ollama (models go where its server keeps them).
-    if let Some(v) = settings.versions.get("ollama") {
-        let target = layout.bin("ollama", v).join(crate::runtimes::Runtime::Ollama.marker());
+    // ollama's CLI, talking to LampRabit's Ollama port: LampRabit's own, else the one
+    // installed on the computer.
+    let ollama = match settings.versions.get("ollama") {
+        Some(v) => Some(layout.bin("ollama", v).join(crate::runtimes::Runtime::Ollama.marker())),
+        None => crate::runtimes::ollama_elsewhere(),
+    };
+    if let Some(target) = ollama {
         if target.exists() {
             let env = vec![("OLLAMA_HOST".to_string(), format!("127.0.0.1:{}", settings.ports.ollama))];
             shim(&dir, "ollama", &[Case { folder: None, target, args: Vec::new(), env }])?;
         }
     }
-    // Go's tools; Go finds its own root from where it runs.
-    if let Some(v) = settings.versions.get("go") {
-        for name in ["go", "gofmt"] {
+    // Go's tools (Go finds its own root from where it runs); each project gets the
+    // installed Go its go.mod asks for.
+    for name in ["go", "gofmt"] {
+        let cases = language_cases(settings, layout, "go", |v, folder| {
             let target = layout.bin("go", v).join("bin").join(exe(name));
-            if target.exists() {
-                shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env: Vec::new() }])?;
-            }
+            target.exists().then(|| Case { folder, target, args: Vec::new(), env: Vec::new() })
+        });
+        if cases.iter().any(|c| c.folder.is_none()) {
+            shim(&dir, name, &cases)?;
         }
     }
     // Rust's tools from LampRabit's rustup, with its homes (not the user's ~/.cargo).
@@ -151,14 +159,14 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
             }
         }
     }
-    // Python and its pip.
-    if let Some(home) = settings.versions.get("python").map(|v| layout.bin("python", v)) {
-        let target = home.join(crate::runtimes::Runtime::Python.marker());
-        if target.exists() {
-            let case = |args: &[&str]| Case { folder: None, target: target.clone(), args: args.iter().map(|a| a.to_string()).collect(), env: Vec::new() };
-            shim(&dir, "python", &[case(&[])])?;
-            shim(&dir, "python3", &[case(&[])])?;
-            shim(&dir, "pip", &[case(&["-m", "pip"])])?;
+    // Python and its pip; each project gets the Python its .python-version asks for.
+    for (name, args) in [("python", &[][..]), ("python3", &[][..]), ("pip", &["-m", "pip"][..])] {
+        let cases = language_cases(settings, layout, "python", |v, folder| {
+            let target = layout.bin("python", v).join(crate::runtimes::Runtime::Python.marker());
+            target.exists().then(|| Case { folder, target, args: args.iter().map(|a| a.to_string()).collect(), env: Vec::new() })
+        });
+        if cases.iter().any(|c| c.folder.is_none()) {
+            shim(&dir, name, &cases)?;
         }
     }
     // PostgreSQL's clients, pointed at LampRabit's server as its superuser.
@@ -182,6 +190,26 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
         shim(&dir, "redis-cli", &[Case { folder: None, target, args, env: Vec::new() }])?;
     }
     Ok(dir)
+}
+
+/// A language command's cases: each project asking (through its version file) for an
+/// installed version other than the active one, then the active version for everywhere else.
+fn language_cases(settings: &Settings, layout: &Layout, runtime: &str, case: impl Fn(&str, Option<PathBuf>) -> Option<Case>) -> Vec<Case> {
+    let Some(rt) = crate::runtimes::Runtime::from_id(runtime) else { return Vec::new() };
+    let installed = crate::runtimes::installed(layout, rt);
+    let active = settings.versions.get(runtime).cloned();
+    let mut cases: Vec<Case> = crate::langver::requests(layout, runtime)
+        .into_iter()
+        .filter_map(|(folder, req)| {
+            let v = crate::langver::matching(&installed, &req.version)?;
+            if Some(&v) == active.as_ref() {
+                return None;
+            }
+            case(&v, Some(folder))
+        })
+        .collect();
+    cases.extend(active.and_then(|v| case(&v, None)));
+    cases
 }
 
 fn path(p: &Path) -> String {
