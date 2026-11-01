@@ -590,6 +590,9 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
             }
         }
         ServiceKind::N8n => {
+            if !home.join(runtimes::Runtime::N8n.marker()).exists() {
+                return Err(Error::msg("n8n is still being installed (npm is fetching its packages); start it once that's finished."));
+            }
             let bin = runtimes::n8n_node(24)?;
             let url = sites::tools(settings, layout).into_iter().find(|t| t.tool == Some("n8n")).map(|t| t.url).unwrap_or_default();
             LaunchSpec {

@@ -1965,6 +1965,12 @@ pub struct InstallProgress {
     pub total: Option<u64>,
 }
 
+/// Runtimes whose install continues after the download (npm, pip, rustup, Predis): the
+/// installer reports "setup" rather than "done", and the app reports done when it ends.
+pub fn has_setup(runtime: Runtime) -> bool {
+    matches!(runtime, Runtime::Rust | Runtime::N8n | Runtime::Pgadmin | Runtime::Phpredisadmin)
+}
+
 pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout, release: &Release) -> Result<()> {
     let runtime = release.runtime;
     let dest = layout.bin(runtime.id(), &release.version);
@@ -2033,7 +2039,7 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
         tokio::task::spawn_blocking(move || extract_into(&archive_path, kind, &extract_dir, &dest, &marker))
             .await
             .map_err(|e| Error::msg(e.to_string()))??;
-        progress("done", downloaded, total);
+        progress(if has_setup(runtime) { "setup" } else { "done" }, downloaded, total);
         Ok(())
     }
     .await;

@@ -2043,7 +2043,37 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
     let (_, layout) = state.snapshot().await;
     let label = format!("{} {}", release.runtime.id(), release.version);
     logs::system(&app, logs::Level::Info, format!("Installing {label} from {}", release.url));
-    let result = runtimes::install(&app, &state.http, &layout, &release).await;
+    let result = async {
+        runtimes::install(&app, &state.http, &layout, &release).await?;
+        // Some runtimes need a setup step after the download; the install isn't finished
+        // (and the version isn't used) until it is.
+        let setup = match release.runtime {
+            Runtime::Rust => {
+                logs::system(&app, logs::Level::Info, format!("Installing Rust {} with rustup", release.version));
+                runtimes::setup_rust(&layout, &release.version).await
+            }
+            Runtime::N8n => {
+                logs::system(&app, logs::Level::Info, "Installing n8n and its packages with npm (several minutes)");
+                runtimes::setup_n8n(&layout, &release.version).await
+            }
+            Runtime::Pgadmin => {
+                logs::system(&app, logs::Level::Info, "Installing pgAdmin's Python packages (a few minutes)");
+                let settings = state.snapshot().await.0;
+                runtimes::setup_pgadmin(&app, &settings, &layout, &release.version).await
+            }
+            Runtime::Phpredisadmin => {
+                logs::system(&app, logs::Level::Info, "Adding Predis, phpRedisAdmin's Redis client");
+                runtimes::add_predis(&state.http, &layout, &release.version).await
+            }
+            _ => Ok(()),
+        };
+        if runtimes::has_setup(release.runtime) {
+            let stage = if setup.is_ok() { "done" } else { "error" };
+            let _ = tauri::Emitter::emit(&app, "install-progress", runtimes::InstallProgress { runtime: release.runtime, version: release.version.clone(), stage, downloaded: 0, total: None });
+        }
+        setup
+    }
+    .await;
     state.installing.lock().await.remove(&key);
     match &result {
         Ok(()) => logs::system(&app, logs::Level::Info, format!("Installed {label}")),
@@ -2061,36 +2091,6 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
             }
         })
         .await?;
-    // rustup-init installs the toolchain into the folder it was downloaded to.
-    if release.runtime == Runtime::Rust {
-        logs::system(&app, logs::Level::Info, format!("Installing Rust {} with rustup", release.version));
-        if let Err(e) = runtimes::setup_rust(&layout, &release.version).await {
-            state.update_settings(reconcile_versions).await?;
-            return Err(e);
-        }
-    }
-    // n8n is an npm package: installed with npm into its own folder.
-    if release.runtime == Runtime::N8n {
-        logs::system(&app, logs::Level::Info, "Installing n8n with npm (a few minutes)");
-        if let Err(e) = runtimes::setup_n8n(&layout, &release.version).await {
-            state.update_settings(reconcile_versions).await?;
-            return Err(e);
-        }
-    }
-    // pgAdmin is a Python app: its packages go into a virtual environment of its own.
-    if release.runtime == Runtime::Pgadmin {
-        logs::system(&app, logs::Level::Info, "Installing pgAdmin's Python packages (a few minutes)");
-        let settings = state.snapshot().await.0;
-        if let Err(e) = runtimes::setup_pgadmin(&app, &settings, &layout, &release.version).await {
-            state.update_settings(reconcile_versions).await?;
-            return Err(e);
-        }
-    }
-    // phpRedisAdmin needs its PHP Redis client next to it.
-    if release.runtime == Runtime::Phpredisadmin {
-        logs::system(&app, logs::Level::Info, "Adding Predis, phpRedisAdmin's Redis client");
-        runtimes::add_predis(&state.http, &layout, &release.version).await?;
-    }
     // A new tool brings a domain and, for Mailpit, PHP mail settings: the primary web
     // server picks both up on restart.
     if activated && is_tool(release.runtime) {

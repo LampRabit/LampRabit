@@ -166,7 +166,7 @@ export interface InstalledRuntime {
 export interface InstallProgress {
   runtime: Runtime;
   version: string;
-  stage: "downloading" | "verifying" | "extracting" | "done" | "error";
+  stage: "downloading" | "verifying" | "extracting" | "setup" | "done" | "error";
   downloaded: number;
   total: number | null;
 }

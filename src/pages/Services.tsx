@@ -486,7 +486,8 @@ function RuntimeCard({
               version: r.version,
               label: r.label,
               progress: p ? (p.stage === "downloading" ? pct : null) : undefined,
-              stage: p?.stage,
+              // npm, pip or rustup still working after the download.
+              stage: p?.stage === "setup" ? "Setting up" : p?.stage,
             };
           })}
           onInstall={(v) => {
