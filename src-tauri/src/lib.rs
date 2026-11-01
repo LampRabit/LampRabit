@@ -652,7 +652,55 @@ async fn list_services(state: State<'_, AppState>) -> Result<Vec<ServiceInfo>> {
 async fn start_service(app: AppHandle, state: State<'_, AppState>, kind: ServiceKind) -> Result<()> {
     let _op = state.ops.lock().await;
     let (settings, layout) = state.snapshot().await;
-    state.supervisor.start(&app, kind, &settings, &layout).await
+    state.supervisor.start(&app, kind, &settings, &layout).await?;
+    serve_tool_domain(&app, &state, kind).await;
+    Ok(())
+}
+
+/// Services with a web UI of their own at a .test domain (n8n.test, pgadmin.test…), which
+/// the primary web server proxies.
+fn tool_domain_service(kind: ServiceKind) -> bool {
+    matches!(kind, ServiceKind::N8n | ServiceKind::Pgadmin | ServiceKind::Neo4j | ServiceKind::Mailpit)
+}
+
+/// Makes a just-started service's .test domain answer: the primary web server is started
+/// when it isn't running (which also brings the hosts file up to date), or reloaded when
+/// its config doesn't have the domain yet. A failure is logged; the service itself runs.
+async fn serve_tool_domain(app: &AppHandle, state: &AppState, kind: ServiceKind) {
+    if !tool_domain_service(kind) {
+        return;
+    }
+    let (settings, layout) = state.snapshot().await;
+    let web = server_kind(settings.primary_server());
+    let result = if !state.supervisor.is_running(web).await {
+        let installed = state.supervisor.list(&settings, &layout).await.iter().any(|s| s.kind == web && s.installed);
+        if !installed {
+            return;
+        }
+        logs::system(app, logs::Level::Info, format!("Starting {} so {}'s .test address works", web.label(), kind.label()));
+        state.supervisor.start(app, web, &settings, &layout).await
+    } else {
+        let served = sites::served(&settings, &layout);
+        let plan = php::plan(&settings, &layout, &served);
+        if !sites::config_stale(&settings, &layout, &served, &plan, settings.primary_server()) {
+            return;
+        }
+        // A reload doesn't touch the hosts file the way a start does.
+        services::sync_hosts(app, &settings, &layout, &served).await;
+        match state.supervisor.reload(app, web, &settings, &layout).await {
+            Ok(true) => Ok(()),
+            // No graceful reload (Apache on Windows): a quick restart instead.
+            Ok(false) => {
+                state.supervisor.stop(app, web).await;
+                state.supervisor.wait_stopped(web).await;
+                state.supervisor.start(app, web, &settings, &layout).await
+            }
+            Err(e) => Err(e),
+        }
+    };
+    if let Err(e) = result {
+        logs::system(app, logs::Level::Warn, format!("{}'s .test address may not work yet: {e}", kind.label()));
+    }
 }
 
 #[tauri::command]
@@ -744,6 +792,13 @@ async fn apply_services(
         }
         if let Err(e) = state.supervisor.start(&app, info.kind, &settings, &layout).await {
             errors.push(format!("{}: {e}", info.label));
+        }
+    }
+    // Started together with the web server (Start all), the domains are already in its
+    // config; on their own (a profile without it), it's brought up for them.
+    for kind in start.into_iter().filter(|k| tool_domain_service(*k)) {
+        if state.supervisor.is_running(kind).await {
+            serve_tool_domain(&app, &state, kind).await;
         }
     }
     Ok(errors)

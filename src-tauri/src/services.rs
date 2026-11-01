@@ -610,6 +610,9 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                     ("N8N_EDITOR_BASE_URL", url.clone()),
                     ("WEBHOOK_URL", url),
                     ("N8N_SECURE_COOKIE", "false".into()),
+                    // Requests come through LampRabit's web server: trust its X-Forwarded-*
+                    // headers, so n8n sees https://n8n.test (its live editor checks the origin).
+                    ("N8N_PROXY_HOPS", "1".into()),
                     ("N8N_DIAGNOSTICS_ENABLED", "false".into()),
                     ("N8N_VERSION_NOTIFICATIONS_ENABLED", "false".into()),
                 ],
