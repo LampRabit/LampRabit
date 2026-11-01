@@ -264,6 +264,7 @@ Composer and npm/pnpm/yarn/bun panels per project: installed and outdated packag
 ## Phase 24: languages
 
 **Done (2026-11-01):** Python as a runtime; Python projects (`sites::Language::Python`, Django/Flask/FastAPI detected) and Java projects serve through their template's dev server like Node; templates Django, Flask, FastAPI, Spring Boot (Spring Initializr + Maven wrapper) and a plain Java web app for Tomcat; `requires.python`/`requires.java`; JAVA_HOME for steps and dev servers.
+Then Go (go.dev, the two supported lines) and Rust (rustup-init into bin/rust with RUSTUP_HOME/CARGO_HOME there; Windows uses the GNU host so no Visual Studio is needed), `Language::Go`/`Rust` with Gin/Echo/Fiber/Chi and Axum/Actix/Rocket detection, templates Go (net/http), Gin and Axum. Left: per-project versions (`.python-version`, `.java-version`, `go.mod` toolchain, `rust-toolchain.toml`).
 
 Python, Go, Rust and Java, each as a runtime with versions side by side, like PHP. Decided 2026-11-01: LampRabit installs its own copies under `bin/` (pyenv, sdkman and the like aren't used):
 - Sources in the table above. Rust goes through rustup with `RUSTUP_HOME`/`CARGO_HOME` under `bin/rust`, so it stays inside LampRabit too.

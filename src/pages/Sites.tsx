@@ -57,7 +57,7 @@ const frameworkStyle: Record<string, string> = {
   Static: "bg-surface-2 text-muted",
 };
 
-const languageLabel: Record<Language, string> = { php: "PHP", node: "Node.js", java: "Java", python: "Python", static: "Static" };
+const languageLabel: Record<Language, string> = { php: "PHP", node: "Node.js", java: "Java", python: "Python", go: "Go", rust: "Rust", static: "Static" };
 
 type Sort = "recent" | "name";
 type Tab = "overview" | "commands" | "settings";
@@ -399,6 +399,8 @@ function ProjectDetail({ site, info, status, tab, setTab }: { site: Site; info?:
             php: site.server === "frankenphp" ? "FrankenPHP's built-in PHP" : php ? `PHP ${php}` : "PHP (none installed)",
             java: settings.data?.versions.java ? `Java ${settings.data.versions.java}` : "Java",
             python: settings.data?.versions.python ? `Python ${settings.data.versions.python}` : "Python",
+            go: settings.data?.versions.go ? `Go ${settings.data.versions.go}` : "Go",
+            rust: settings.data?.versions.rust ? `Rust ${settings.data.versions.rust}` : "Rust",
             node: site.language === "node" || devServer ? `Node.js ${status?.node ?? app.data?.config.node ?? site.node ?? nodeStatus.data?.current ?? ""}`.trim() : null,
             pm: site.nodeProject && app.data ? (app.data.config.packageManager ?? app.data.detectedPackageManager) : null,
           }).map((part, i) => (
@@ -465,11 +467,13 @@ function ProjectDetail({ site, info, status, tab, setTab }: { site: Site; info?:
 }
 
 /** The project's language, runtime versions and package manager, for the header line. */
-function stackParts(site: Site, v: { php: string; java: string; python: string; node: string | null; pm: string | null }): string[] {
+function stackParts(site: Site, v: { php: string; java: string; python: string; go: string; rust: string; node: string | null; pm: string | null }): string[] {
   const parts: string[] = [];
   if (site.language === "php") parts.push(v.php);
   if (site.language === "java") parts.push(v.java);
   if (site.language === "python") parts.push(v.python);
+  if (site.language === "go") parts.push(v.go);
+  if (site.language === "rust") parts.push(v.rust);
   if (site.language === "static") parts.push("Static HTML");
   if (v.node) parts.push(v.node);
   if (v.pm) parts.push(v.pm);

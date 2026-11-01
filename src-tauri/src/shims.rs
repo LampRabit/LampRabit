@@ -27,6 +27,10 @@ pub fn tool_env(settings: &Settings, layout: &Layout) -> Vec<(String, String)> {
     if let Some(v) = settings.versions.get("java") {
         env.push(("JAVA_HOME".to_string(), path(&layout.bin("java", v))));
     }
+    // Cargo runs rustc and friends itself; they need the same homes as the shims give it.
+    if let Some(v) = settings.versions.get("rust") {
+        env.extend(crate::runtimes::rust_env(layout, v));
+    }
     env
 }
 
@@ -126,6 +130,25 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
         if target.exists() {
             let env = vec![("OLLAMA_HOST".to_string(), format!("127.0.0.1:{}", settings.ports.ollama))];
             shim(&dir, "ollama", &[Case { folder: None, target, args: Vec::new(), env }])?;
+        }
+    }
+    // Go's tools; Go finds its own root from where it runs.
+    if let Some(v) = settings.versions.get("go") {
+        for name in ["go", "gofmt"] {
+            let target = layout.bin("go", v).join("bin").join(exe(name));
+            if target.exists() {
+                shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env: Vec::new() }])?;
+            }
+        }
+    }
+    // Rust's tools from LampRabit's rustup, with its homes (not the user's ~/.cargo).
+    if let Some(v) = settings.versions.get("rust") {
+        let env = crate::runtimes::rust_env(layout, v);
+        for name in ["cargo", "rustc", "rustup", "rustfmt", "rustdoc"] {
+            let target = layout.bin("rust", v).join("cargo").join("bin").join(exe(name));
+            if target.exists() {
+                shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env: env.clone() }])?;
+            }
         }
     }
     // Python and its pip.

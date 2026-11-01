@@ -89,6 +89,16 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     text: "text-orange-600 dark:text-orange-400",
     icon: (size) => <Inbox size={size} strokeWidth={1.75} />,
   },
+  go: {
+    className: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
+    text: "text-cyan-600 dark:text-cyan-400",
+    icon: (size) => <Code2 size={size} strokeWidth={1.75} />,
+  },
+  rust: {
+    className: "bg-orange-700/10 text-orange-800 dark:text-orange-400",
+    text: "text-orange-800 dark:text-orange-400",
+    icon: (size) => <Cog size={size} strokeWidth={1.75} />,
+  },
   erlang: {
     className: "bg-red-500/10 text-red-600 dark:text-red-400",
     text: "text-red-600 dark:text-red-400",

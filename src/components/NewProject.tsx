@@ -152,7 +152,7 @@ export default function NewProject() {
   const nodeVersions = nodeStatus.data?.installed ?? [];
   const needsNode = !!template?.usesNode && !nodeStatus.isLoading && nodeVersions.length === 0;
   // Python and Java templates run on LampRabit's own versions.
-  const languageMissing = (["python", "java"] as const).find((l) => template?.[l] && !settings.data?.versions[l]);
+  const languageMissing = (["python", "java", "go", "rust"] as const).find((l) => template?.[l] && !settings.data?.versions[l]);
   const phpInUse = php ?? settings.data?.versions.php ?? null;
   const phpTooOld = !!template?.minPhp && !!phpInUse && !atLeast(phpInUse, template.minPhp);
   const dbUse = template?.database ?? "none";
@@ -272,6 +272,8 @@ export default function NewProject() {
         ...(template.usesNode ? [["Node.js", `${nodeVersion ?? "NVM's default"} · ${packageManager}`] as [string, string]] : []),
         ...(template.python ? [["Python", settings.data?.versions.python ?? "not installed"] as [string, string]] : []),
         ...(template.java ? [["Java", settings.data?.versions.java ?? "not installed"] as [string, string]] : []),
+        ...(template.go ? [["Go", settings.data?.versions.go ?? "not installed"] as [string, string]] : []),
+        ...(template.rust ? [["Rust", settings.data?.versions.rust ?? "not installed"] as [string, string]] : []),
         ...(settings.data && settings.data.webServers.length > 1 ? [["Web server", runtimeLabels[server ?? settings.data.webServers[0]]] as [string, string]] : []),
         ...(dbUse !== "none" ? [["Database", usesDb && chosenEngine ? (chosenEngine === "sqlite" ? "SQLite file" : `${db} on ${runtimeLabels[chosenEngine]}`) : "None"] as [string, string]] : []),
         ...shownVariables.map((v) => [v.label, v.type === "bool" ? (variables[v.id] === "true" ? "Yes" : "No") : (variables[v.id] || "—")] as [string, string]),

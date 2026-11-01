@@ -96,10 +96,14 @@ pub enum Runtime {
     Rabbitmq,
     /// Erlang/OTP for RabbitMQ: official builds on Windows only.
     Erlang,
+    /// Go, from go.dev.
+    Go,
+    /// Rust through rustup, with its homes inside LampRabit's folder.
+    Rust,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 39] = [
+    pub const ALL: [Runtime; 41] = [
         Runtime::Apache,
         Runtime::Nginx,
         Runtime::Php,
@@ -139,6 +143,8 @@ impl Runtime {
         Runtime::N8n,
         Runtime::Rabbitmq,
         Runtime::Erlang,
+        Runtime::Go,
+        Runtime::Rust,
     ];
 
     pub fn from_id(id: &str) -> Option<Self> {
@@ -186,6 +192,8 @@ impl Runtime {
             Self::N8n => "n8n",
             Self::Rabbitmq => "rabbitmq",
             Self::Erlang => "erlang",
+            Self::Go => "go",
+            Self::Rust => "rust",
         }
     }
 
@@ -239,6 +247,9 @@ impl Runtime {
             Self::N8n => PathBuf::from("installed.txt"),
             Self::Rabbitmq => Path::new("sbin").join(if cfg!(windows) { "rabbitmq-server.bat" } else { "rabbitmq-server" }),
             Self::Erlang => Path::new("bin").join(exe("erl")),
+            Self::Go => Path::new("bin").join(exe("go")),
+            // Written last by `setup_rust`, so a half-finished install doesn't count.
+            Self::Rust => PathBuf::from("installed.txt"),
         }
     }
 }
@@ -343,6 +354,8 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec
         Runtime::N8n => n8n_releases(client).await?,
         Runtime::Rabbitmq => rabbitmq_releases(client).await?,
         Runtime::Erlang => erlang_releases(client).await?,
+        Runtime::Go => go_releases(client).await?,
+        Runtime::Rust => rust_releases(client).await?,
     };
     releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
     Ok(releases)
@@ -1400,6 +1413,134 @@ async fn erlang_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     Ok(releases)
 }
 
+/// The supported Go releases (the newest two lines) from go.dev, with their SHA-256s.
+async fn go_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let os = match std::env::consts::OS {
+        "windows" => "windows",
+        "linux" => "linux",
+        "macos" => "darwin",
+        _ => return Err(unsupported("Go")),
+    };
+    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
+    let list = get_json(client, "https://go.dev/dl/?mode=json").await?;
+    let releases: Vec<Release> = list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|r| r["stable"].as_bool() == Some(true))
+        .filter_map(|r| {
+            let file = r["files"].as_array()?.iter().find(|f| f["os"] == os && f["arch"] == arch && f["kind"] == "archive")?;
+            let name = file["filename"].as_str()?;
+            Some(Release {
+                runtime: Runtime::Go,
+                version: r["version"].as_str()?.trim_start_matches("go").to_string(),
+                url: format!("https://go.dev/dl/{name}"),
+                sha256: file["sha256"].as_str().map(str::to_string),
+                sha512: None,
+                md5: None,
+                sha3_256: None,
+                archive: if name.ends_with(".zip") { Archive::Zip } else { Archive::TarGz },
+                label: None,
+            })
+        })
+        .collect();
+    if releases.is_empty() {
+        return Err(unsupported("Go"));
+    }
+    Ok(releases)
+}
+
+/// The host rustup installs for: on Windows the GNU toolchain, which links with its own
+/// MinGW tools instead of needing Visual Studio's C++ Build Tools.
+fn rust_host() -> Option<&'static str> {
+    Some(match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("windows", false) => "x86_64-pc-windows-gnu",
+        ("windows", true) => "aarch64-pc-windows-gnullvm",
+        ("linux", false) => "x86_64-unknown-linux-gnu",
+        ("linux", true) => "aarch64-unknown-linux-gnu",
+        ("macos", false) => "x86_64-apple-darwin",
+        ("macos", true) => "aarch64-apple-darwin",
+        _ => return None,
+    })
+}
+
+/// Rust stable, installed by rustup-init (downloaded with its published SHA-256).
+async fn rust_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    // rustup-init itself is the host's normal build; on Windows that's the MSVC one.
+    let init_target = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("windows", false) => "x86_64-pc-windows-msvc",
+        ("windows", true) => "aarch64-pc-windows-msvc",
+        _ => rust_host().ok_or_else(|| unsupported("Rust"))?,
+    };
+    let channel = client
+        .get("https://static.rust-lang.org/dist/channel-rust-stable.toml")
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(http)?
+        .text()
+        .await
+        .map_err(http)?;
+    // [pkg.rust]
+    // version = "1.99.1 (58cf8f9c3 2026-10-13)"
+    let version = channel
+        .split("[pkg.rust]")
+        .nth(1)
+        .and_then(|s| s.lines().find_map(|l| l.strip_prefix("version = \"")))
+        .and_then(|v| v.split_whitespace().next())
+        .ok_or_else(|| Error::msg("Couldn't read Rust's stable version"))?
+        .to_string();
+    let url = format!("https://static.rust-lang.org/rustup/dist/{init_target}/rustup-init{}", if cfg!(windows) { ".exe" } else { "" });
+    let sha256 = published_hash(client, &format!("{url}.sha256")).await;
+    Ok(vec![Release { runtime: Runtime::Rust, version, url, sha256, sha512: None, md5: None, sha3_256: None, archive: Archive::File, label: Some("Stable".into()) }])
+}
+
+/// RUSTUP_HOME and CARGO_HOME for a LampRabit Rust: inside its own folder.
+pub fn rust_env(layout: &Layout, version: &str) -> Vec<(String, String)> {
+    let home = layout.bin("rust", version);
+    vec![
+        ("RUSTUP_HOME".into(), home.join("rustup").to_string_lossy().into_owned()),
+        ("CARGO_HOME".into(), home.join("cargo").to_string_lossy().into_owned()),
+    ]
+}
+
+/// Runs the downloaded rustup-init for the given toolchain, without touching PATH or the
+/// user's own ~/.cargo and ~/.rustup. Leaves nothing behind when it fails.
+pub async fn setup_rust(layout: &Layout, version: &str) -> Result<()> {
+    let home = layout.bin("rust", version);
+    let result = async {
+        let init = home.join(exe("rustup-init"));
+        std::fs::rename(home.join("installed.txt"), &init)?;
+        let mut args: Vec<String> = ["-y", "--no-modify-path", "--profile", "minimal", "--default-toolchain", version].iter().map(|s| s.to_string()).collect();
+        if let Some(host) = rust_host() {
+            args.extend(["--default-host".to_string(), host.to_string()]);
+        }
+        run_quiet_env(&init, &args, &home, &rust_env(layout, version)).await?;
+        let _ = std::fs::remove_file(&init);
+        std::fs::write(home.join("installed.txt"), format!("Rust {version}\n"))?;
+        Ok::<_, Error>(())
+    }
+    .await;
+    if let Err(e) = result {
+        let _ = std::fs::remove_dir_all(&home);
+        return Err(Error::msg(format!("Installing Rust failed: {e}")));
+    }
+    Ok(())
+}
+
+async fn run_quiet_env(program: &Path, args: &[String], cwd: &Path, env: &[(String, String)]) -> Result<()> {
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(args).current_dir(cwd).stdin(std::process::Stdio::null()).envs(env.iter().map(|(k, v)| (k, v)));
+    crate::procgroup::prepare(&mut cmd);
+    let out = cmd.output().await?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let text = String::from_utf8_lossy(&out.stderr);
+    let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
+    Err(Error::msg(format!("{} failed: {last}", program.display())))
+}
+
 /// NVM's Node for n8n: its default version, which must meet n8n's minimum major.
 pub fn n8n_node(minimum: u32) -> Result<PathBuf> {
     let (version, bin) = crate::node::for_project(None, Path::new("."))
@@ -1980,7 +2121,7 @@ pub struct UpdateNotice {
 /// Newer patch releases for installed versions: same "major.minor" line (for example
 /// PHP 8.4.27 → 8.4.30), never a jump to a new minor that could change behaviour.
 pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNotice> {
-    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama, Runtime::Minio, Runtime::Elasticsearch, Runtime::Opensearch, Runtime::N8n, Runtime::Rabbitmq, Runtime::Erlang]
+    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama, Runtime::Minio, Runtime::Elasticsearch, Runtime::Opensearch, Runtime::N8n, Runtime::Rabbitmq, Runtime::Erlang, Runtime::Go]
         .into_iter()
         .map(|runtime| async move {
             let installed = installed(layout, runtime);

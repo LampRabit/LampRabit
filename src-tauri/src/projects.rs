@@ -481,7 +481,12 @@ async fn check_requirements(ctx: &Ctx<'_>, template: &Template, php: Option<&str
         }
     }
     // Python and Java projects run on LampRabit's own versions (they're on PATH as shims).
-    for (id, label, minimum) in [("python", "Python", &template.requires.python), ("java", "Java", &template.requires.java)] {
+    for (id, label, minimum) in [
+        ("python", "Python", &template.requires.python),
+        ("java", "Java", &template.requires.java),
+        ("go", "Go", &template.requires.go),
+        ("rust", "Rust", &template.requires.rust),
+    ] {
         let Some(minimum) = minimum else { continue };
         match ctx.settings.versions.get(id) {
             Some(have) if at_least(have, minimum) => {}

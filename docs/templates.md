@@ -97,6 +97,7 @@ done: "Ready at {{url}}. Register an account to try Breeze."
 | `requires.extensions` | | PHP extensions that must be loaded. Checked with `php -m` before anything is created; the error says to turn them on in Services → PHP → Extensions. |
 | `requires.python` | | Lowest Python version (`"3.10"`) for Python projects. LampRabit's Python must be installed (checked before anything is created); `python` and `pip` are on PATH in steps, and `{{venv.python}}` is a virtual environment's Python. |
 | `requires.java` | | Lowest Java version (`"17"`) for Java projects. LampRabit's Java must be installed; steps and the dev server get `JAVA_HOME`. |
+| `requires.go`, `requires.rust` | | Lowest Go (`"1.22"`) or Rust (`"1.80"`) version. LampRabit's own must be installed; `go`, `cargo` and `rustc` are on PATH in steps and the dev server (Rust with LampRabit's rustup homes). |
 | `requires.node` | | `true` for JavaScript projects: the wizard asks for a Node.js version (from NVM) and a package manager, and the `{{pm.*}}` placeholders work. |
 | `database` | | `none` (default), `optional` (a switch, on when a database server is installed) or `required`. |
 | `engines` | | The database servers the project can be set up for: `mariadb`, `mysql`, `postgres`, `sqlite` (a file: `{{database}}` is then the path `database/database.sqlite`, and nothing is created up front). Default `[mariadb, mysql]`. With more than one installed, the wizard lets the user pick; write the config with the `db.*` placeholders so it works for each. |

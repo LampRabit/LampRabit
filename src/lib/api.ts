@@ -43,7 +43,9 @@ export type Runtime =
   | "opensearch"
   | "n8n"
   | "rabbitmq"
-  | "erlang";
+  | "erlang"
+  | "go"
+  | "rust";
 export const coreRuntimes: Runtime[] = ["apache", "nginx", "caddy", "frankenphp", "php", "mariadb", "mysql"];
 export const toolRuntimes: Runtime[] = ["composer", "mailpit", "adminer", "phpmyadmin", "redis", "phpredisadmin", "memcached", "ngrok", "cloudflared"];
 
@@ -114,6 +116,8 @@ export const runtimeLabels: Record<Runtime, string> = {
   n8n: "n8n",
   rabbitmq: "RabbitMQ",
   erlang: "Erlang",
+  go: "Go",
+  rust: "Rust",
 };
 
 export interface UpdateNotice {
@@ -343,6 +347,8 @@ export interface ProjectTemplate {
   /** Lowest Python / Java version, for templates that run on LampRabit's own. */
   python: string | null;
   java: string | null;
+  go: string | null;
+  rust: string | null;
   minPhp: string | null;
   extensions: string[];
   database: "none" | "optional" | "required";
@@ -417,7 +423,7 @@ export interface RawLogLine {
 export type LogStream = "output" | "error" | "access" | "command";
 
 /** What a project is written in; decides its runtime and how it's served. */
-export type Language = "php" | "node" | "java" | "python" | "static";
+export type Language = "php" | "node" | "java" | "python" | "go" | "rust" | "static";
 export type ServeMode = "dynamic" | "static";
 export interface Route {
   port: number;

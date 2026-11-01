@@ -29,6 +29,10 @@ pub enum Language {
     Java,
     /// Django, Flask, FastAPI…: their own dev server, through port discovery.
     Python,
+    /// go.mod: `go run`, through port discovery.
+    Go,
+    /// Cargo.toml: `cargo run`, through port discovery.
+    Rust,
     /// HTML and assets only.
     Static,
 }
@@ -164,6 +168,8 @@ fn language_of(framework: Option<&str>, dir: &Path) -> Language {
         // Before Node: a Java project's package.json only builds its front end.
         _ if java_project(dir) => Language::Java,
         _ if python_project(dir) => Language::Python,
+        _ if dir.join("go.mod").exists() => Language::Go,
+        _ if dir.join("Cargo.toml").exists() => Language::Rust,
         _ if dir.join("package.json").exists() => Language::Node,
         _ => Language::Static,
     }
@@ -185,6 +191,18 @@ fn python_framework(dir: &Path) -> &'static str {
     } else {
         "Python"
     }
+}
+
+/// The web framework a Go or Rust project depends on, from go.mod or Cargo.toml.
+fn deps_framework(dir: &Path, language: Language) -> &'static str {
+    let file = if language == Language::Go { "go.mod" } else { "Cargo.toml" };
+    let deps = std::fs::read_to_string(dir.join(file)).unwrap_or_default();
+    let known: &[(&str, &'static str)] = if language == Language::Go {
+        &[("gin-gonic/gin", "Gin"), ("labstack/echo", "Echo"), ("gofiber/fiber", "Fiber"), ("go-chi/chi", "Chi")]
+    } else {
+        &[("axum", "Axum"), ("actix-web", "Actix Web"), ("rocket", "Rocket"), ("poem", "Poem")]
+    };
+    known.iter().find(|(dep, _)| deps.contains(dep)).map_or(if language == Language::Go { "Go" } else { "Rust" }, |(_, name)| name)
 }
 
 fn java_project(dir: &Path) -> bool {
@@ -434,6 +452,8 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
                 framework = Some(java_framework(&path));
             } else if language == Language::Python {
                 framework = Some(python_framework(&path));
+            } else if language == Language::Go || language == Language::Rust {
+                framework = Some(deps_framework(&path, language));
             }
             let app = own.and_then(|s| s.app.clone());
             // Dynamic is preferred: a Node project with a dev server (from its template or
@@ -441,7 +461,7 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             // Python and Java projects have one once it's set up (from their template).
             let serves = match language {
                 Language::Node => app.as_ref().map_or(crate::apps::runnable(&path), |a| a.serve),
-                Language::Python | Language::Java => app.as_ref().is_some_and(|a| a.serve && !a.command.is_empty()),
+                Language::Python | Language::Java | Language::Go | Language::Rust => app.as_ref().is_some_and(|a| a.serve && !a.command.is_empty()),
                 _ => false,
             };
             let serve_mode = if serves {

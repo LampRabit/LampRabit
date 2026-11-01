@@ -39,6 +39,9 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("fastapi.yaml", include_str!("../templates/fastapi.yaml")),
     ("spring-boot.yaml", include_str!("../templates/spring-boot.yaml")),
     ("java-webapp.yaml", include_str!("../templates/java-webapp.yaml")),
+    ("go.yaml", include_str!("../templates/go.yaml")),
+    ("gin.yaml", include_str!("../templates/gin.yaml")),
+    ("axum.yaml", include_str!("../templates/axum.yaml")),
     ("static.yaml", include_str!("../templates/static.yaml")),
 ];
 
@@ -125,6 +128,12 @@ pub struct Requires {
     /// Lowest Java version ("17"): LampRabit's Java must be installed.
     #[serde(default)]
     pub java: Option<String>,
+    /// Lowest Go version ("1.22"): LampRabit's Go must be installed.
+    #[serde(default)]
+    pub go: Option<String>,
+    /// Lowest Rust version ("1.80"): LampRabit's Rust must be installed.
+    #[serde(default)]
+    pub rust: Option<String>,
 }
 
 /// How a Node project runs once created; saved as its app setup (Sites → Node app).
@@ -549,8 +558,9 @@ impl Template {
         if let Some(serve) = &self.serve {
             if serve.mode == crate::config::ServeMode::Dynamic {
                 // A dev server runs on a language LampRabit provides.
-                if !self.requires.node && self.requires.python.is_none() && self.requires.java.is_none() {
-                    return Err(Error::msg("serve: dynamic needs requires: node: true, python: \"3.x\" or java: \"17\""));
+                let language = self.requires.node || [&self.requires.python, &self.requires.java, &self.requires.go, &self.requires.rust].iter().any(|r| r.is_some());
+                if !language {
+                    return Err(Error::msg("serve: dynamic needs a language: requires: node, python, java, go or rust"));
                 }
                 if !serve.file.trim().is_empty() && !self.requires.node {
                     return Err(Error::msg("serve: file runs with node, so it needs requires: node: true"));
@@ -795,9 +805,11 @@ pub struct TemplateInfo {
     pub path: Option<PathBuf>,
     pub uses_php: bool,
     pub uses_node: bool,
-    /// Lowest Python and Java versions the template needs (LampRabit's own).
+    /// Lowest Python, Java, Go and Rust versions the template needs (LampRabit's own).
     pub python: Option<String>,
     pub java: Option<String>,
+    pub go: Option<String>,
+    pub rust: Option<String>,
     pub min_php: Option<String>,
     pub extensions: Vec<String>,
     pub database: DatabaseUse,
@@ -902,6 +914,8 @@ pub fn catalog(layout: &Layout) -> Catalog {
             uses_node: t.uses_node(),
             python: t.requires.python.clone(),
             java: t.requires.java.clone(),
+            go: t.requires.go.clone(),
+            rust: t.requires.rust.clone(),
             min_php: t.requires.php.clone().filter(|v| v != "any"),
             extensions: t.requires.extensions.clone(),
             database: t.database,

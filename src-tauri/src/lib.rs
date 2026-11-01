@@ -98,6 +98,8 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         Runtime::Opensearch => &[ServiceKind::Opensearch],
         Runtime::N8n => &[ServiceKind::N8n],
         Runtime::Rabbitmq | Runtime::Erlang => &[ServiceKind::Rabbitmq],
+        // Languages run from the terminal and projects' own processes.
+        Runtime::Go | Runtime::Rust => &[],
         // Projects run Python themselves; pgAdmin keeps the Python it was installed with.
         Runtime::Python => &[],
         Runtime::Phppgadmin => &ServiceKind::WEB,
@@ -1131,7 +1133,7 @@ async fn prepare_app(app: &AppHandle, state: &AppState, name: &str) -> Result<Op
         let to_save = config.clone();
         state.update_settings(|s| s.sites.entry(name.to_string()).or_default().app = Some(to_save)).await?;
     }
-    if !config.serve || !matches!(sites::language(&dir), sites::Language::Node | sites::Language::Python | sites::Language::Java) {
+    if !config.serve || matches!(sites::language(&dir), sites::Language::Php | sites::Language::Static) {
         return Ok(None);
     }
     let kind = server_kind(sites::site_server(&settings, name));
@@ -2031,6 +2033,14 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
             }
         })
         .await?;
+    // rustup-init installs the toolchain into the folder it was downloaded to.
+    if release.runtime == Runtime::Rust {
+        logs::system(&app, logs::Level::Info, format!("Installing Rust {} with rustup", release.version));
+        if let Err(e) = runtimes::setup_rust(&layout, &release.version).await {
+            state.update_settings(reconcile_versions).await?;
+            return Err(e);
+        }
+    }
     // n8n is an npm package: installed with npm into its own folder.
     if release.runtime == Runtime::N8n {
         logs::system(&app, logs::Level::Info, "Installing n8n with npm (a few minutes)");

@@ -89,6 +89,14 @@ const roles: Record<Runtime, { blurb: string; source: string; unix?: string }> =
     blurb: "Message queue",
     source: "Official RabbitMQ releases (checksum checked) with the management console (user guest, password guest)",
   },
+  go: {
+    blurb: "Runs Go code",
+    source: "Official Go releases from go.dev (checksum checked); go and gofmt work in LampRabit's terminal",
+  },
+  rust: {
+    blurb: "Runs Rust code",
+    source: "Rust stable through rustup, kept inside LampRabit's folder (not your ~/.cargo). On Windows the GNU toolchain, which needs no Visual Studio",
+  },
   erlang: {
     blurb: "Runs RabbitMQ",
     source: "Official Erlang/OTP builds for Windows (checksum checked). On Linux and macOS, RabbitMQ uses your system's Erlang",
@@ -176,7 +184,7 @@ const groups: { id: string; title: string; blurb: string; items: ServiceSelectio
     blurb: "Apache, Nginx, Caddy or FrankenPHP serve your sites; Tomcat runs Java web apps behind them. Several can run side by side.",
     items: ["apache", "nginx", "caddy", "frankenphp", "tomcat"],
   },
-  { id: "languages", title: "Languages", blurb: "Several versions side by side; projects pick theirs.", items: ["php", "java", "python", "node"] },
+  { id: "languages", title: "Languages", blurb: "Several versions side by side; projects pick theirs.", items: ["php", "java", "python", "go", "rust", "node"] },
   { id: "packages", title: "Package managers", blurb: "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH.", items: ["composer"] },
   { id: "databases", title: "Databases", blurb: "They can all run side by side, each on its own port.", items: ["mariadb", "mysql", "postgres", "mongodb", "clickhouse", "neo4j", "sqlite"] },
   { id: "search", title: "Search", blurb: "Full-text search engines for your apps.", items: ["meilisearch", "typesense", "elasticsearch", "opensearch"] },
