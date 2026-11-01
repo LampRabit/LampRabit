@@ -57,6 +57,12 @@ pub enum ServiceKind {
     Typesense,
     Rustfs,
     Ollama,
+    Minio,
+    Elasticsearch,
+    Opensearch,
+    /// n8n, behind the web servers at n8n.test.
+    N8n,
+    Rabbitmq,
 }
 
 /// What every service has; the rest (launch, config, probes) is per service below.
@@ -69,7 +75,7 @@ struct Def {
 
 impl ServiceKind {
     pub fn all() -> Vec<Self> {
-        vec![Self::Apache, Self::Nginx, Self::Caddy, Self::Frankenphp, Self::Tomcat, Self::Mariadb, Self::Mysql, Self::Postgres, Self::Mongodb, Self::Clickhouse, Self::Neo4j, Self::Meilisearch, Self::Typesense, Self::Rustfs, Self::Ollama, Self::Mailpit, Self::Redis, Self::Memcached, Self::Pgadmin]
+        vec![Self::Apache, Self::Nginx, Self::Caddy, Self::Frankenphp, Self::Tomcat, Self::Mariadb, Self::Mysql, Self::Postgres, Self::Mongodb, Self::Clickhouse, Self::Neo4j, Self::Meilisearch, Self::Typesense, Self::Rustfs, Self::Minio, Self::Elasticsearch, Self::Opensearch, Self::Rabbitmq, Self::Ollama, Self::N8n, Self::Mailpit, Self::Redis, Self::Memcached, Self::Pgadmin]
     }
 
     /// The web servers' services, in `Server::ALL` order.
@@ -110,6 +116,11 @@ impl ServiceKind {
             Self::Typesense => ("typesense", "Typesense", "typesense-output.log"),
             Self::Rustfs => ("rustfs", "RustFS", "rustfs-output.log"),
             Self::Ollama => ("ollama", "Ollama", "ollama-output.log"),
+            Self::Minio => ("minio", "MinIO", "minio-output.log"),
+            Self::Elasticsearch => ("elasticsearch", "Elasticsearch", "elasticsearch-output.log"),
+            Self::Opensearch => ("opensearch", "OpenSearch", "opensearch-output.log"),
+            Self::N8n => ("n8n", "n8n", "n8n-output.log"),
+            Self::Rabbitmq => ("rabbitmq", "RabbitMQ", "rabbitmq-output.log"),
             Self::Mariadb => ("mariadb", "MariaDB", "mariadb-error.log"),
             Self::Mysql => ("mysql", "MySQL", "mysql-error.log"),
             Self::Mailpit => ("mailpit", "Mailpit", "mailpit-output.log"),
@@ -158,6 +169,11 @@ impl ServiceKind {
             Self::Meilisearch | Self::Typesense => layout.data(self.def().id),
             Self::Rustfs => settings.storage_dir(layout, "rustfs"),
             Self::Ollama => layout.data("ollama"),
+            Self::Minio => settings.storage_dir(layout, "minio"),
+            Self::Elasticsearch => layout.etc("elasticsearch").join("elasticsearch.yml"),
+            Self::Opensearch => layout.etc("opensearch").join("opensearch.yml"),
+            Self::N8n => layout.data("n8n"),
+            Self::Rabbitmq => layout.etc("rabbitmq").join("rabbitmq.conf"),
             Self::Mariadb => layout.etc("mariadb").join("my.ini"),
             Self::Mysql => layout.etc("mysql").join("my.ini"),
             // Configured on the command line; their data folders.
@@ -188,6 +204,11 @@ impl ServiceKind {
             Self::Typesense => settings.ports.typesense,
             Self::Rustfs => settings.ports.rustfs,
             Self::Ollama => settings.ports.ollama,
+            Self::Minio => settings.ports.minio,
+            Self::Elasticsearch => settings.ports.elasticsearch,
+            Self::Opensearch => settings.ports.opensearch,
+            Self::N8n => settings.ports.n8n,
+            Self::Rabbitmq => settings.ports.rabbitmq,
             Self::Mariadb => settings.ports.mysql,
             Self::Mysql => settings.ports.mysql_server,
             Self::Mailpit => settings.ports.mail_smtp,
@@ -508,6 +529,93 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 ("OLLAMA_MODELS", path(layout.data("ollama").join("models"))),
             ],
         },
+        ServiceKind::Minio => LaunchSpec {
+            program: home.join(exe("minio")),
+            args: vec![
+                "server".into(),
+                path(settings.storage_dir(layout, "minio")),
+                "--address".into(),
+                format!("127.0.0.1:{}", settings.ports.minio),
+                "--console-address".into(),
+                format!("127.0.0.1:{}", settings.ports.minio_console),
+            ],
+            test: None,
+            stop_cmd: None,
+            cwd: home.clone(),
+            path_prepend: vec![],
+            env: vec![("MINIO_ROOT_USER", STORAGE_KEY.into()), ("MINIO_ROOT_PASSWORD", STORAGE_SECRET.into()), ("MINIO_UPDATE", "off".into())],
+        },
+        // Their own launchers, on their bundled Java, with LampRabit's config folder.
+        ServiceKind::Elasticsearch | ServiceKind::Opensearch => {
+            let id = kind.id();
+            let conf_var = if kind == ServiceKind::Opensearch { "OPENSEARCH_PATH_CONF" } else { "ES_PATH_CONF" };
+            LaunchSpec {
+                program: home.join(runtimes::Runtime::from_id(id).map(|r| r.marker()).unwrap_or_default()),
+                args: vec![],
+                test: None,
+                stop_cmd: None,
+                cwd: home.clone(),
+                path_prepend: vec![],
+                env: vec![(conf_var, path(layout.etc(id)))],
+            }
+        }
+        ServiceKind::N8n => {
+            let bin = runtimes::n8n_node(24)?;
+            let url = sites::tools(settings, layout).into_iter().find(|t| t.tool == Some("n8n")).map(|t| t.url).unwrap_or_default();
+            LaunchSpec {
+                program: bin.join(exe("node")),
+                args: vec![path(home.join("node_modules").join("n8n").join("bin").join("n8n")), "start".into()],
+                test: None,
+                stop_cmd: None,
+                cwd: layout.data("n8n"),
+                path_prepend: vec![bin.clone()],
+                env: vec![
+                    ("N8N_PORT", settings.ports.n8n.to_string()),
+                    ("N8N_LISTEN_ADDRESS", "127.0.0.1".into()),
+                    ("N8N_USER_FOLDER", path(layout.data("n8n"))),
+                    // Links and webhooks use its .test address, through the web server.
+                    ("N8N_EDITOR_BASE_URL", url.clone()),
+                    ("WEBHOOK_URL", url),
+                    ("N8N_SECURE_COOKIE", "false".into()),
+                    ("N8N_DIAGNOSTICS_ENABLED", "false".into()),
+                    ("N8N_VERSION_NOTIFICATIONS_ENABLED", "false".into()),
+                ],
+            }
+        }
+        // RabbitMQ's own launcher. On Windows it runs on LampRabit's Erlang (ERLANG_HOME);
+        // elsewhere on the system's.
+        ServiceKind::Rabbitmq => {
+            let mut env = vec![
+                ("RABBITMQ_BASE", path(layout.data("rabbitmq"))),
+                ("RABBITMQ_MNESIA_BASE", path(layout.data("rabbitmq").join("mnesia"))),
+                ("RABBITMQ_LOG_BASE", path(layout.logs().join("rabbitmq"))),
+                ("RABBITMQ_CONFIG_FILE", path(layout.etc("rabbitmq").join("rabbitmq.conf"))),
+                ("RABBITMQ_ENABLED_PLUGINS_FILE", path(layout.etc("rabbitmq").join("enabled_plugins"))),
+                ("RABBITMQ_NODENAME", "lamprabit@localhost".into()),
+                ("ERL_EPMD_ADDRESS", "127.0.0.1".into()),
+            ];
+            if cfg!(windows) {
+                let erlang = settings
+                    .versions
+                    .get("erlang")
+                    .ok_or_else(|| Error::msg("RabbitMQ runs on Erlang: install Erlang on the Services page (Queues → Erlang) first."))?;
+                env.push(("ERLANG_HOME", path(layout.bin("erlang", erlang))));
+            } else if !std::env::var_os("PATH").is_some_and(|p| crate::apps::on_path("erl", &p)) {
+                return Err(Error::msg(
+                    "RabbitMQ runs on Erlang, which isn't installed. Install it with your system's packages (sudo apt install erlang-nox, sudo dnf install erlang, or brew install erlang), then start RabbitMQ again.",
+                ));
+            }
+            let ctl = home.join("sbin").join(if cfg!(windows) { "rabbitmqctl.bat" } else { "rabbitmqctl" });
+            LaunchSpec {
+                program: home.join(runtimes::Runtime::Rabbitmq.marker()),
+                args: vec![],
+                test: None,
+                stop_cmd: Some((ctl, vec!["stop".into(), "-n".into(), "lamprabit@localhost".into()])),
+                cwd: home.clone(),
+                path_prepend: vec![],
+                env,
+            }
+        }
         // pgAdmin's own entry point, on the Python of its virtual environment.
         ServiceKind::Pgadmin => {
             let package = runtimes::pgadmin_package(&home)
@@ -668,9 +776,21 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             std::fs::create_dir_all(layout.data(kind.id()))?;
             Ok(vec![])
         }
-        ServiceKind::Rustfs => {
-            let dir = settings.storage_dir(layout, "rustfs");
-            std::fs::create_dir_all(&dir).map_err(|e| Error::msg(format!("Couldn't create RustFS's storage folder {}: {e}", dir.display())))?;
+        ServiceKind::Rustfs | ServiceKind::Minio => {
+            let dir = settings.storage_dir(layout, kind.id());
+            std::fs::create_dir_all(&dir).map_err(|e| Error::msg(format!("Couldn't create {}'s storage folder {}: {e}", kind.label(), dir.display())))?;
+            Ok(vec![])
+        }
+        ServiceKind::Elasticsearch | ServiceKind::Opensearch => {
+            configs::write_search_engine(settings, layout, kind.id())?;
+            Ok(vec![])
+        }
+        ServiceKind::N8n => {
+            std::fs::create_dir_all(layout.data("n8n"))?;
+            Ok(vec![])
+        }
+        ServiceKind::Rabbitmq => {
+            configs::write_rabbitmq(settings, layout)?;
             Ok(vec![])
         }
         ServiceKind::Clickhouse => {
@@ -714,6 +834,10 @@ pub fn required_ports(kind: ServiceKind, settings: &Settings, layout: &Layout) -
         ServiceKind::Clickhouse => ports.push(settings.ports.clickhouse_tcp),
         ServiceKind::Neo4j => ports.push(settings.ports.neo4j_bolt),
         ServiceKind::Rustfs => ports.push(settings.ports.rustfs_console),
+        ServiceKind::Minio => ports.push(settings.ports.minio_console),
+        ServiceKind::Elasticsearch => ports.push(settings.ports.elasticsearch_transport),
+        ServiceKind::Opensearch => ports.push(settings.ports.opensearch_transport),
+        ServiceKind::Rabbitmq => ports.push(settings.ports.rabbitmq_management),
         ServiceKind::Mailpit => ports.push(settings.ports.mail_ui),
         _ => {}
     }
@@ -777,7 +901,7 @@ pub async fn sync_hosts(app: &AppHandle, settings: &Settings, layout: &Layout, s
 /// may be running from a terminal are left alone. Returns what was stopped.
 pub fn reap_orphans(layout: &Layout) -> Vec<String> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-    const SERVERS: &[&str] = &["httpd", "nginx", "caddy", "frankenphp", "postgres", "mongod", "clickhouse", "meilisearch", "typesense-server", "rustfs", "ollama", "mariadbd", "mysqld", "php-fpm", "php-cgi", "mailpit", "redis-server", "memcached",
+    const SERVERS: &[&str] = &["httpd", "nginx", "caddy", "frankenphp", "postgres", "mongod", "clickhouse", "meilisearch", "typesense-server", "rustfs", "ollama", "minio", "epmd", "erl", "beam.smp", "mariadbd", "mysqld", "php-fpm", "php-cgi", "mailpit", "redis-server", "memcached",
         // Redis before 0.2, so one left running is stopped before its folder is removed.
         "GarnetServer"];
     let bin = layout.root().join("bin");
@@ -801,7 +925,9 @@ pub fn reap_orphans(layout: &Layout) -> Vec<String> {
             });
         // pgAdmin's virtual environment only ever runs pgAdmin.
         let pgadmin = exe.starts_with(bin.join("pgadmin"));
-        if exe.starts_with(&bin) && (SERVERS.contains(&name) || tomcat || pgadmin) && process.kill() {
+        // Elasticsearch and OpenSearch run on the Java bundled in their own folders.
+        let search = exe.starts_with(bin.join("elasticsearch")) || exe.starts_with(bin.join("opensearch"));
+        if exe.starts_with(&bin) && (SERVERS.contains(&name) || tomcat || pgadmin || search) && process.kill() {
             stopped.push(format!("{name} (PID {pid})"));
         }
     }
@@ -953,6 +1079,11 @@ impl Supervisor {
                 ServiceKind::Meilisearch => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/health", settings.ports.meilisearch)).await,
                 ServiceKind::Typesense => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/health", settings.ports.typesense)).await,
                 ServiceKind::Rustfs => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/health", settings.ports.rustfs)).await,
+                ServiceKind::Minio => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/minio/health/live", settings.ports.minio)).await,
+                ServiceKind::Elasticsearch => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.elasticsearch)).await,
+                ServiceKind::Opensearch => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.opensearch)).await,
+                ServiceKind::N8n => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/healthz", settings.ports.n8n)).await,
+                ServiceKind::Rabbitmq => diagnose::probe_tcp(settings.ports.rabbitmq).await,
                 ServiceKind::Ollama => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/api/version", settings.ports.ollama)).await,
                 ServiceKind::Pgadmin => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/misc/ping", settings.ports.pgadmin)).await,
                 ServiceKind::Tomcat => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.tomcat_http)).await,

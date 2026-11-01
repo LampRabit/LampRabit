@@ -69,6 +69,30 @@ const roles: Record<Runtime, { blurb: string; source: string; unix?: string }> =
     blurb: "S3 object storage",
     source: "RustFS from its GitHub releases (checksum checked): S3-compatible, with a web console. Access key lamprabit, secret lamprabit-secret",
   },
+  minio: {
+    blurb: "S3 object storage",
+    source: "MinIO's last release (October 2025), built from its source by LampRabit's CI: the project is archived, so there are no security fixes. Access key lamprabit, secret lamprabit-secret",
+  },
+  elasticsearch: {
+    blurb: "Search engine",
+    source: "Official Elasticsearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory",
+  },
+  opensearch: {
+    blurb: "Search engine",
+    source: "Official OpenSearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory. No macOS build",
+  },
+  n8n: {
+    blurb: "Workflow automation",
+    source: "n8n from npm, installed into its own folder and run on NVM's Node.js (24 or newer). Editor at n8n.test",
+  },
+  rabbitmq: {
+    blurb: "Message queue",
+    source: "Official RabbitMQ releases (checksum checked) with the management console (user guest, password guest)",
+  },
+  erlang: {
+    blurb: "Runs RabbitMQ",
+    source: "Official Erlang/OTP builds for Windows (checksum checked). On Linux and macOS, RabbitMQ uses your system's Erlang",
+  },
   ollama: {
     blurb: "Local AI models",
     source: "Ollama's own builds from GitHub (a large download). Models go to LampRabit's data folder; the ollama command uses this server",
@@ -155,9 +179,10 @@ const groups: { id: string; title: string; blurb: string; items: ServiceSelectio
   { id: "languages", title: "Languages", blurb: "Several versions side by side; projects pick theirs.", items: ["php", "java", "python", "node"] },
   { id: "packages", title: "Package managers", blurb: "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH.", items: ["composer"] },
   { id: "databases", title: "Databases", blurb: "They can all run side by side, each on its own port.", items: ["mariadb", "mysql", "postgres", "mongodb", "clickhouse", "neo4j", "sqlite"] },
-  { id: "search", title: "Search", blurb: "Full-text search engines for your apps.", items: ["meilisearch", "typesense"] },
-  { id: "storage", title: "Storage", blurb: "S3-compatible object storage. Its storage folder can be anywhere, even outside the LampRabit folder.", items: ["rustfs"] },
-  { id: "ai", title: "AI and automation", blurb: "Run language models locally.", items: ["ollama"] },
+  { id: "search", title: "Search", blurb: "Full-text search engines for your apps.", items: ["meilisearch", "typesense", "elasticsearch", "opensearch"] },
+  { id: "storage", title: "Storage", blurb: "S3-compatible object storage. Their storage folder can be anywhere, even outside the LampRabit folder.", items: ["rustfs", "minio"] },
+  { id: "queues", title: "Queues", blurb: "Message brokers for background jobs and events.", items: ["rabbitmq", "erlang"] },
+  { id: "ai", title: "AI and automation", blurb: "Run language models locally and automate workflows.", items: ["ollama", "n8n"] },
   { id: "cache", title: "Cache", blurb: "In-memory stores for caches, sessions and queues.", items: ["redis", "memcached"] },
   { id: "tools", title: "Developer tools", blurb: "Mail catching and web interfaces for your databases and caches.", items: ["mailpit", "phpmyadmin", "adminer", "phppgadmin", "pgadmin", "phpredisadmin", "compass", "mongosh", "mongotools"] },
   { id: "sharing", title: "Sharing", blurb: "Put a project or local port on a public URL.", items: ["cloudflared", "ngrok", "tunnels"] },
@@ -198,6 +223,9 @@ export default function Services() {
   if (runtime === "clickhouse") openUrl = settings.data ? `http://localhost:${settings.data.ports.clickhouseHttp}/play` : undefined;
   if (runtime === "meilisearch") openUrl = settings.data ? `http://localhost:${settings.data.ports.meilisearch}/` : undefined;
   if (runtime === "rustfs") openUrl = settings.data ? `http://localhost:${settings.data.ports.rustfsConsole}/` : undefined;
+  if (runtime === "minio") openUrl = settings.data ? `http://localhost:${settings.data.ports.minioConsole}/` : undefined;
+  if (runtime === "rabbitmq") openUrl = settings.data ? `http://localhost:${settings.data.ports.rabbitmqManagement}/` : undefined;
+  if (runtime === "n8n") openUrl = toolUrl("n8n", sites.data, settings.data?.ports.mailUi, settings.data?.ports.n8n);
   if (runtime === "ollama" && ollamaElsewhere.data && !find("ollama")?.active) {
     note = `Ollama is already installed on this computer (${ollamaElsewhere.data}). You can keep using it; LampRabit's own keeps its models separately.`;
   }

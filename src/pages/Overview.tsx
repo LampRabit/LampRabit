@@ -35,6 +35,8 @@ import {
   Search,
   HardDrive,
   Bot,
+  Workflow,
+  Inbox,
   Flame,
   Cpu,
   Square,
@@ -98,6 +100,11 @@ const serviceMeta: Record<ServiceKind, { icon: typeof Feather; tile: string; blu
   typesense: { icon: Search, tile: runtimeTiles.typesense.className, blurb: "Search engine" },
   rustfs: { icon: HardDrive, tile: runtimeTiles.rustfs.className, blurb: "S3 object storage" },
   ollama: { icon: Bot, tile: runtimeTiles.ollama.className, blurb: "Local AI models" },
+  minio: { icon: HardDrive, tile: runtimeTiles.minio.className, blurb: "S3 object storage (unmaintained upstream)" },
+  elasticsearch: { icon: Search, tile: runtimeTiles.elasticsearch.className, blurb: "Search engine" },
+  opensearch: { icon: Search, tile: runtimeTiles.opensearch.className, blurb: "Search engine" },
+  n8n: { icon: Workflow, tile: runtimeTiles.n8n.className, blurb: "Workflow automation" },
+  rabbitmq: { icon: Inbox, tile: runtimeTiles.rabbitmq.className, blurb: "Message queue" },
   mysql: { icon: DatabaseZap, tile: runtimeTiles.mysql.className, blurb: "Oracle MySQL, next to MariaDB" },
   mailpit: { icon: Mail, tile: "bg-sky-500/10 text-sky-500", blurb: "Catches mail sent by your apps" },
   redis: { icon: Zap, tile: "bg-red-500/10 text-red-500", blurb: "Cache, sessions and queues" },
@@ -105,7 +112,7 @@ const serviceMeta: Record<ServiceKind, { icon: typeof Feather; tile: string; blu
 };
 
 /** Services listed only once installed; the core stack is always listed, with an Install button. */
-const optional: ServiceKind[] = ["tomcat", "postgres", "pgadmin", "mongodb", "clickhouse", "neo4j", "meilisearch", "typesense", "rustfs", "ollama", "mysql", "mailpit", "redis", "memcached"];
+const optional: ServiceKind[] = ["tomcat", "postgres", "pgadmin", "mongodb", "clickhouse", "neo4j", "meilisearch", "typesense", "rustfs", "ollama", "minio", "elasticsearch", "opensearch", "n8n", "rabbitmq", "mysql", "mailpit", "redis", "memcached"];
 
 /**
  * Installed services, once there are any; before that, the core stack with Install buttons,
@@ -517,6 +524,16 @@ function openAction(
   }
   if (service.kind === "meilisearch") {
     return { label: "Open search preview", icon: ExternalLink, run: () => openUrl(`http://localhost:${service.port}/`).catch(onError) };
+  }
+  if (service.kind === "minio") {
+    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.minioConsole ?? 9111}/`).catch(onError) };
+  }
+  if (service.kind === "rabbitmq") {
+    return { label: "Open management console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.rabbitmqManagement ?? 15672}/`).catch(onError) };
+  }
+  if (service.kind === "n8n") {
+    const url = toolUrl("n8n", sites, mailUi, service.port);
+    return url ? { label: "Open n8n", icon: ExternalLink, run: () => openUrl(url).catch(onError) } : null;
   }
   if (service.kind === "rustfs") {
     return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.rustfsConsole ?? 9101}/`).catch(onError) };

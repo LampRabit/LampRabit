@@ -67,7 +67,7 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
   const fields = portsFor(runtime, draft, os);
   const workers = runtime === "php" && os === "windows";
   const database = runtime === "mariadb" || runtime === "mysql";
-  const storage = runtime === "rustfs";
+  const storage = runtime === "rustfs" || runtime === "minio";
   if (!server && fields.length === 0 && !workers && runtime !== "mailpit" && !database && !storage) return null;
 
   const set = (patch: Partial<Settings>) => setDraft({ ...draft, ...patch });

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArchiveRestore, BarChart3, Bot, HardDrive, Search, Cloud, Code2, Coffee, Compass, Cpu, Feather as FeatherIcon, Flame, Gauge, Leaf, Network, SquareTerminal, Terminal, Database, DatabaseZap, Feather, Layers3, Mail, Package, Radio, Server, ShieldCheck, Table2, TableProperties, Zap } from "lucide-react";
+import { ArchiveRestore, BarChart3, Bot, Cog, HardDrive, Inbox, Search, Workflow, Cloud, Code2, Coffee, Compass, Cpu, Feather as FeatherIcon, Flame, Gauge, Leaf, Network, SquareTerminal, Terminal, Database, DatabaseZap, Feather, Layers3, Mail, Package, Radio, Server, ShieldCheck, Table2, TableProperties, Zap } from "lucide-react";
 import type { Runtime } from "../lib/api";
 
 /** Icon and colour used for each runtime across the app. */
@@ -63,6 +63,36 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     className: "bg-orange-600/10 text-orange-700 dark:text-orange-400",
     text: "text-orange-700 dark:text-orange-400",
     icon: (size) => <HardDrive size={size} strokeWidth={1.75} />,
+  },
+  minio: {
+    className: "bg-red-600/10 text-red-700 dark:text-red-400",
+    text: "text-red-700 dark:text-red-400",
+    icon: (size) => <HardDrive size={size} strokeWidth={1.75} />,
+  },
+  elasticsearch: {
+    className: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
+    text: "text-teal-600 dark:text-teal-400",
+    icon: (size) => <Search size={size} strokeWidth={1.75} />,
+  },
+  opensearch: {
+    className: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+    text: "text-blue-600 dark:text-blue-400",
+    icon: (size) => <Search size={size} strokeWidth={1.75} />,
+  },
+  n8n: {
+    className: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+    text: "text-rose-600 dark:text-rose-400",
+    icon: (size) => <Workflow size={size} strokeWidth={1.75} />,
+  },
+  rabbitmq: {
+    className: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+    text: "text-orange-600 dark:text-orange-400",
+    icon: (size) => <Inbox size={size} strokeWidth={1.75} />,
+  },
+  erlang: {
+    className: "bg-red-500/10 text-red-600 dark:text-red-400",
+    text: "text-red-600 dark:text-red-400",
+    icon: (size) => <Cog size={size} strokeWidth={1.75} />,
   },
   ollama: {
     className: "bg-zinc-500/15 text-fg",

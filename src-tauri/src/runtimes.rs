@@ -84,10 +84,22 @@ pub enum Runtime {
     Rustfs,
     /// Ollama, for running language models locally.
     Ollama,
+    /// MinIO's last release, built from source by LampRabit's CI (the project is archived).
+    Minio,
+    /// Elasticsearch, with its bundled Java.
+    Elasticsearch,
+    /// OpenSearch, with its bundled Java (no macOS build).
+    Opensearch,
+    /// n8n, an npm package installed into its own folder and run on NVM's Node.
+    N8n,
+    /// RabbitMQ, on Erlang.
+    Rabbitmq,
+    /// Erlang/OTP for RabbitMQ: official builds on Windows only.
+    Erlang,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 33] = [
+    pub const ALL: [Runtime; 39] = [
         Runtime::Apache,
         Runtime::Nginx,
         Runtime::Php,
@@ -121,7 +133,17 @@ impl Runtime {
         Runtime::Typesense,
         Runtime::Rustfs,
         Runtime::Ollama,
+        Runtime::Minio,
+        Runtime::Elasticsearch,
+        Runtime::Opensearch,
+        Runtime::N8n,
+        Runtime::Rabbitmq,
+        Runtime::Erlang,
     ];
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.id() == id)
+    }
 
     pub fn id(self) -> &'static str {
         match self {
@@ -158,6 +180,12 @@ impl Runtime {
             Self::Typesense => "typesense",
             Self::Rustfs => "rustfs",
             Self::Ollama => "ollama",
+            Self::Minio => "minio",
+            Self::Elasticsearch => "elasticsearch",
+            Self::Opensearch => "opensearch",
+            Self::N8n => "n8n",
+            Self::Rabbitmq => "rabbitmq",
+            Self::Erlang => "erlang",
         }
     }
 
@@ -204,6 +232,13 @@ impl Runtime {
             // Linux archives put it in bin/ (next to lib/ollama); Windows and macOS at the top.
             Self::Ollama if cfg!(target_os = "linux") => Path::new("bin").join("ollama"),
             Self::Ollama => PathBuf::from(exe("ollama")),
+            Self::Minio => PathBuf::from(exe("minio")),
+            Self::Elasticsearch => Path::new("bin").join(if cfg!(windows) { "elasticsearch.bat" } else { "elasticsearch" }),
+            Self::Opensearch => Path::new("bin").join(if cfg!(windows) { "opensearch.bat" } else { "opensearch" }),
+            // Written last by `setup_n8n`, so a half-finished install doesn't count.
+            Self::N8n => PathBuf::from("installed.txt"),
+            Self::Rabbitmq => Path::new("sbin").join(if cfg!(windows) { "rabbitmq-server.bat" } else { "rabbitmq-server" }),
+            Self::Erlang => Path::new("bin").join(exe("erl")),
         }
     }
 }
@@ -302,6 +337,12 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec
         Runtime::Typesense => typesense_releases(client).await?,
         Runtime::Rustfs => rustfs_releases(client).await?,
         Runtime::Ollama => ollama_releases(client).await?,
+        Runtime::Minio => own_builds(client, Runtime::Minio).await?,
+        Runtime::Elasticsearch => elasticsearch_releases(client).await?,
+        Runtime::Opensearch => opensearch_releases(client).await?,
+        Runtime::N8n => n8n_releases(client).await?,
+        Runtime::Rabbitmq => rabbitmq_releases(client).await?,
+        Runtime::Erlang => erlang_releases(client).await?,
     };
     releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
     Ok(releases)
@@ -1234,6 +1275,178 @@ async fn ollama_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     Ok(releases)
 }
 
+/// The newest release of each major version from GitHub release tags ("v9.5.5"), at least `min`.
+async fn newest_per_major(client: &reqwest::Client, repo: &str, min: u32) -> Result<Vec<String>> {
+    let list = get_json(client, &format!("https://api.github.com/repos/{repo}/releases?per_page=50")).await?;
+    let mut newest: std::collections::BTreeMap<u32, String> = Default::default();
+    for r in list.as_array().into_iter().flatten().filter(|r| !r["prerelease"].as_bool().unwrap_or(false) && !r["draft"].as_bool().unwrap_or(false)) {
+        let version = r["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
+        if !version.split('.').all(|p| p.parse::<u32>().is_ok()) {
+            continue;
+        }
+        let Some(major) = version.split('.').next().and_then(|m| m.parse::<u32>().ok()).filter(|&m| m >= min) else { continue };
+        if newest.get(&major).is_none_or(|v| version_key(&version) > version_key(v)) {
+            newest.insert(major, version);
+        }
+    }
+    Ok(newest.into_values().collect())
+}
+
+/// "<hash>  <file>" files published next to archives.
+async fn published_hash(client: &reqwest::Client, url: &str) -> Option<String> {
+    let r = client.get(url).send().await.ok()?.error_for_status().ok()?;
+    r.text().await.ok()?.split_whitespace().next().map(str::to_ascii_lowercase)
+}
+
+/// Elasticsearch 8 and 9 from Elastic's artifact server, with the SHA-512 next to each.
+async fn elasticsearch_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let (platform, ext, archive) = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("windows", false) => ("windows-x86_64", "zip", Archive::Zip),
+        ("linux", false) => ("linux-x86_64", "tar.gz", Archive::TarGz),
+        ("linux", true) => ("linux-aarch64", "tar.gz", Archive::TarGz),
+        ("macos", false) => ("darwin-x86_64", "tar.gz", Archive::TarGz),
+        ("macos", true) => ("darwin-aarch64", "tar.gz", Archive::TarGz),
+        _ => return Err(unsupported("Elasticsearch")),
+    };
+    let mut out = Vec::new();
+    for version in newest_per_major(client, "elastic/elasticsearch", 8).await? {
+        let url = format!("https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-{version}-{platform}.{ext}");
+        let sha512 = published_hash(client, &format!("{url}.sha512")).await;
+        out.push(Release { runtime: Runtime::Elasticsearch, version, url, sha256: None, sha512, md5: None, sha3_256: None, archive, label: Some("1 GB+ RAM".into()) });
+    }
+    Ok(out)
+}
+
+/// OpenSearch 2 and 3 from its artifact server. It publishes no macOS build.
+async fn opensearch_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let (platform, ext, archive) = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("windows", false) => ("windows-x64", "zip", Archive::Zip),
+        ("linux", false) => ("linux-x64", "tar.gz", Archive::TarGz),
+        ("linux", true) => ("linux-arm64", "tar.gz", Archive::TarGz),
+        ("macos", _) => return Err(Error::msg("OpenSearch publishes no macOS build. Use Elasticsearch, which has one.")),
+        _ => return Err(unsupported("OpenSearch")),
+    };
+    let mut out = Vec::new();
+    for version in newest_per_major(client, "opensearch-project/OpenSearch", 2).await? {
+        let url = format!("https://artifacts.opensearch.org/releases/bundle/opensearch/{version}/opensearch-{version}-{platform}.{ext}");
+        let sha512 = published_hash(client, &format!("{url}.sha512")).await;
+        out.push(Release { runtime: Runtime::Opensearch, version, url, sha256: None, sha512, md5: None, sha3_256: None, archive, label: Some("1 GB+ RAM".into()) });
+    }
+    Ok(out)
+}
+
+/// n8n's latest release from npm. The package tarball is saved as the marker file;
+/// `setup_n8n` installs it with its dependencies (npm checks their integrity itself).
+async fn n8n_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let latest = get_json(client, "https://registry.npmjs.org/n8n/latest").await?;
+    let version = latest["version"].as_str().ok_or_else(|| Error::msg("Couldn't read n8n's latest release from npm"))?.to_string();
+    let node = latest["engines"]["node"].as_str().unwrap_or("").to_string();
+    Ok(vec![Release {
+        runtime: Runtime::N8n,
+        url: latest["dist"]["tarball"].as_str().unwrap_or_default().to_string(),
+        version,
+        sha256: None,
+        sha512: None,
+        md5: None,
+        sha3_256: None,
+        archive: Archive::File,
+        label: (!node.is_empty()).then(|| format!("Node {node}")),
+    }])
+}
+
+/// The newest RabbitMQ: the Windows zip, or the generic Unix build (which runs on the
+/// system's Erlang).
+async fn rabbitmq_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let (archive, ext) = if cfg!(windows) { (Archive::Zip, "zip") } else { (Archive::TarXz, "tar.xz") };
+    let platform = if cfg!(windows) { "windows" } else { "generic-unix" };
+    github_latest(client, Runtime::Rabbitmq, "rabbitmq/rabbitmq-server", archive, |n, v| n == format!("rabbitmq-server-{platform}-{v}.{ext}")).await
+}
+
+/// Erlang/OTP for RabbitMQ: the newest of the two latest major versions, from the
+/// official Windows zips. Linux and macOS have no official builds.
+async fn erlang_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    if !cfg!(windows) {
+        return Err(Error::msg(
+            "Erlang has no official Linux or macOS builds. Install it with your system's packages (sudo apt install erlang-nox, sudo dnf install erlang, or brew install erlang); LampRabit's RabbitMQ uses it.",
+        ));
+    }
+    let list = get_json(client, "https://api.github.com/repos/erlang/otp/releases?per_page=40").await?;
+    let mut newest: std::collections::BTreeMap<u32, Release> = Default::default();
+    for r in list.as_array().into_iter().flatten().filter(|r| !r["prerelease"].as_bool().unwrap_or(false)) {
+        let version = r["tag_name"].as_str().unwrap_or_default().trim_start_matches("OTP-").to_string();
+        let Some(major) = version.split('.').next().and_then(|m| m.parse::<u32>().ok()) else { continue };
+        if newest.get(&major).is_some_and(|n| version_key(&n.version) >= version_key(&version)) {
+            continue;
+        }
+        let name = format!("otp_win64_{version}.zip");
+        let Some(asset) = r["assets"].as_array().into_iter().flatten().find(|a| a["name"].as_str() == Some(name.as_str())) else { continue };
+        newest.insert(major, Release {
+            runtime: Runtime::Erlang,
+            url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
+            sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
+            version,
+            sha512: None,
+            md5: None,
+            sha3_256: None,
+            archive: Archive::Zip,
+            label: Some(format!("OTP {major}")),
+        });
+    }
+    let mut releases: Vec<Release> = newest.into_values().rev().take(2).collect();
+    releases.reverse();
+    if releases.is_empty() {
+        return Err(Error::msg("Couldn't find Erlang's Windows builds. Check your connection and try again."));
+    }
+    Ok(releases)
+}
+
+/// NVM's Node for n8n: its default version, which must meet n8n's minimum major.
+pub fn n8n_node(minimum: u32) -> Result<PathBuf> {
+    let (version, bin) = crate::node::for_project(None, Path::new("."))
+        .map_err(|_| Error::msg("n8n runs on Node.js: install Node.js 24 or newer on the Services page (Languages → Node.js) first."))?;
+    let major: u32 = version.trim_start_matches('v').split('.').next().and_then(|m| m.parse().ok()).unwrap_or(0);
+    if major < minimum {
+        return Err(Error::msg(format!("n8n needs Node.js {minimum} or newer, and NVM's default is {version}. Install a newer Node.js on the Services page and make it the default.")));
+    }
+    Ok(bin)
+}
+
+/// Installs a downloaded n8n into its own folder with npm, on NVM's Node. Leaves nothing
+/// behind when it fails.
+pub async fn setup_n8n(layout: &Layout, version: &str) -> Result<()> {
+    let home = layout.bin("n8n", version);
+    let result = async {
+        let bin = n8n_node(24)?;
+        // The package tarball was saved as the marker; npm installs from the registry.
+        let _ = std::fs::remove_file(home.join("installed.txt"));
+        let npm = bin.join(if cfg!(windows) { "npm.cmd" } else { "npm" });
+        let path = crate::apps::node_path(&bin, layout);
+        let mut cmd = tokio::process::Command::new(&npm);
+        cmd.args(["install", "--prefix"])
+            .arg(&home)
+            .arg(format!("n8n@{version}"))
+            .args(["--omit=dev", "--no-audit", "--no-fund", "--loglevel=error"])
+            .env("PATH", path)
+            .current_dir(&home)
+            .stdin(std::process::Stdio::null());
+        crate::procgroup::prepare(&mut cmd);
+        let out = cmd.output().await?;
+        if !out.status.success() {
+            let text = String::from_utf8_lossy(&out.stderr);
+            let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
+            return Err(Error::msg(format!("npm install failed: {last}")));
+        }
+        std::fs::write(home.join("installed.txt"), format!("n8n {version}\n"))?;
+        Ok::<_, Error>(())
+    }
+    .await;
+    if let Err(e) = result {
+        let _ = std::fs::remove_dir_all(&home);
+        return Err(Error::msg(format!("Installing n8n failed: {e}")));
+    }
+    Ok(())
+}
+
 /// An Ollama installed outside LampRabit (its own installer or app), which many people
 /// already have: its location, so the Services page can say so.
 pub fn ollama_elsewhere() -> Option<PathBuf> {
@@ -1767,7 +1980,7 @@ pub struct UpdateNotice {
 /// Newer patch releases for installed versions: same "major.minor" line (for example
 /// PHP 8.4.27 → 8.4.30), never a jump to a new minor that could change behaviour.
 pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNotice> {
-    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama]
+    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama, Runtime::Minio, Runtime::Elasticsearch, Runtime::Opensearch, Runtime::N8n, Runtime::Rabbitmq, Runtime::Erlang]
         .into_iter()
         .map(|runtime| async move {
             let installed = installed(layout, runtime);

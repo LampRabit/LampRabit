@@ -38,7 +38,7 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [ ] **13. Logs redesign and dump catcher** (filters and project sources done; dump catcher left)
 - [ ] **14. Movable tab bar**
 - [ ] **15. More databases: PostgreSQL, MongoDB, SQLite, ClickHouse, Neo4j, backups**
-- [ ] **16. More services: Meilisearch, Typesense, RustFS, OpenSearch/Elasticsearch, RabbitMQ, Ollama, n8n**
+- [x] **16. More services: Meilisearch, Typesense, RustFS, MinIO, OpenSearch/Elasticsearch, RabbitMQ, Ollama, n8n**
 - [x] **17. Templates and more frameworks** (first part; Node templates and recording wait for phase 12)
 - [ ] **18. Onboarding**
 - [ ] **19. Project doctor**
@@ -213,6 +213,8 @@ Left: Drupal/CakePHP/CodeIgniter on PostgreSQL; SQLite backups (copy the file).
 ## Phase 16: more services
 
 **Done (2026-11-01), batch 1:** Meilisearch (Community builds, development mode), Typesense (dl.typesense.org, Linux/macOS, fixed local API key), RustFS (S3 on 9100, console 9101; `Settings.storage` puts its buckets anywhere, outside the LampRabit folder too) and Ollama (its own builds incl. Linux .tar.zst through `ruzstd`; models in data/ollama; an Ollama installed elsewhere is pointed out).
+
+**Batch 2 (same day):** Elasticsearch 8/9 and OpenSearch 2/3 (bundled Java, ES_PATH_CONF / OPENSEARCH_PATH_CONF in etc/, single node, security off, 512 MB heap; OpenSearch has no macOS build), n8n (npm install into bin/n8n on NVM's Node 24+, editor at n8n.test), RabbitMQ 4 with its management console (Erlang: official zip on Windows, the system's elsewhere), MinIO's last release built from source in `binaries.yml` (`build-minio.sh`, Go 1.24, AGPL source linked, labelled unmaintained). Phase 16 is complete; the MinIO CI build hasn't run yet.
 
 Same standards as existing runtimes: catalog per OS/arch with checksums, data under `data/`, health probe, logs, ports in Settings, connection details on the Overview, `.test` domain for web UIs, data kept on upgrade/remove. Resource needs (RAM, Java, Erlang) shown before installing. Rough order, cheapest first:
 1. Meilisearch, Typesense (single binaries; Typesense has no Windows build)

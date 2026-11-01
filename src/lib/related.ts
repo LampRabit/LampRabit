@@ -23,6 +23,8 @@ export const related: Partial<Record<Runtime, { needs?: Runtime[]; suggests?: Ru
   mongosh: { needs: ["mongodb"] },
   mongotools: { needs: ["mongodb"] },
   compass: { needs: ["mongodb"] },
+  rabbitmq: { needs: ["erlang"] },
+  n8n: {},
 };
 
 /**

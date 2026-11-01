@@ -60,6 +60,34 @@ export function connection(kind: ServiceKind, port: number): Connection {
           ["AWS_USE_PATH_STYLE_ENDPOINT", "true"],
         ],
       };
+    case "minio":
+      return {
+        url: `http://${HOST}:${port}`,
+        env: [
+          ["AWS_ENDPOINT", `http://${HOST}:${port}`],
+          ["AWS_ACCESS_KEY_ID", "lamprabit"],
+          ["AWS_SECRET_ACCESS_KEY", "lamprabit-secret"],
+          ["AWS_DEFAULT_REGION", "us-east-1"],
+          ["AWS_USE_PATH_STYLE_ENDPOINT", "true"],
+        ],
+      };
+    case "elasticsearch":
+      return { url: `http://${HOST}:${port}`, env: [["ELASTICSEARCH_HOST", `http://${HOST}:${port}`]] };
+    case "opensearch":
+      return { url: `http://${HOST}:${port}`, env: [["OPENSEARCH_HOST", `http://${HOST}:${port}`]] };
+    case "n8n":
+      return { url: `http://${HOST}:${port}`, env: [["N8N_URL", `http://${HOST}:${port}`]] };
+    case "rabbitmq":
+      return {
+        url: `amqp://guest:guest@${HOST}:${port}`,
+        env: [
+          ["QUEUE_CONNECTION", "rabbitmq"],
+          ["RABBITMQ_HOST", HOST],
+          ["RABBITMQ_PORT", String(port)],
+          ["RABBITMQ_USER", "guest"],
+          ["RABBITMQ_PASSWORD", "guest"],
+        ],
+      };
     case "ollama":
       return { url: `http://${HOST}:${port}`, env: [["OLLAMA_HOST", `http://${HOST}:${port}`]] };
     case "neo4j":

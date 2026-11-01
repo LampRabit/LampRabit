@@ -386,6 +386,9 @@ pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {
     if v.mailpit.is_some() {
         add("mailpit", "mail", None, Some(format!("http://127.0.0.1:{}/", settings.ports.mail_ui)));
     }
+    if v.get("n8n").is_some() {
+        add("n8n", "n8n", None, Some(format!("http://127.0.0.1:{}/", settings.ports.n8n)));
+    }
     if v.get("neo4j").is_some() {
         add("neo4j", "neo4j", None, Some(format!("http://127.0.0.1:{}/", settings.ports.neo4j_http)));
     }

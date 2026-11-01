@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type ServiceKind = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "mariadb" | "mailpit" | "redis" | "memcached" | "mysql";
+export type ServiceKind = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "minio" | "elasticsearch" | "opensearch" | "n8n" | "rabbitmq" | "mariadb" | "mailpit" | "redis" | "memcached" | "mysql";
 export type Server = "apache" | "nginx" | "caddy" | "frankenphp";
 export const allServers: Server[] = ["apache", "nginx", "caddy", "frankenphp"];
 export type ServiceState = "stopped" | "starting" | "running" | "stopping" | "error";
@@ -37,7 +37,13 @@ export type Runtime =
   | "meilisearch"
   | "typesense"
   | "rustfs"
-  | "ollama";
+  | "ollama"
+  | "minio"
+  | "elasticsearch"
+  | "opensearch"
+  | "n8n"
+  | "rabbitmq"
+  | "erlang";
 export const coreRuntimes: Runtime[] = ["apache", "nginx", "caddy", "frankenphp", "php", "mariadb", "mysql"];
 export const toolRuntimes: Runtime[] = ["composer", "mailpit", "adminer", "phpmyadmin", "redis", "phpredisadmin", "memcached", "ngrok", "cloudflared"];
 
@@ -56,6 +62,11 @@ export const serviceLabels: Record<ServiceKind, string> = {
   typesense: "Typesense",
   rustfs: "RustFS",
   ollama: "Ollama",
+  minio: "MinIO",
+  elasticsearch: "Elasticsearch",
+  opensearch: "OpenSearch",
+  n8n: "n8n",
+  rabbitmq: "RabbitMQ",
   mariadb: "MariaDB",
   mysql: "MySQL",
   mailpit: "Mailpit",
@@ -97,6 +108,12 @@ export const runtimeLabels: Record<Runtime, string> = {
   typesense: "Typesense",
   rustfs: "RustFS",
   ollama: "Ollama",
+  minio: "MinIO",
+  elasticsearch: "Elasticsearch",
+  opensearch: "OpenSearch",
+  n8n: "n8n",
+  rabbitmq: "RabbitMQ",
+  erlang: "Erlang",
 };
 
 export interface UpdateNotice {
@@ -384,7 +401,7 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export type LogService = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system" | "project";
+export type LogService = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "minio" | "elasticsearch" | "opensearch" | "n8n" | "rabbitmq" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system" | "project";
 
 /** A raw log line from a service's output or one of its log files. */
 export interface RawLogLine {
@@ -536,6 +553,15 @@ export interface Settings {
     rustfs: number;
     rustfsConsole: number;
     ollama: number;
+    minio: number;
+    minioConsole: number;
+    elasticsearch: number;
+    elasticsearchTransport: number;
+    opensearch: number;
+    opensearchTransport: number;
+    n8n: number;
+    rabbitmq: number;
+    rabbitmqManagement: number;
     mailSmtp: number;
     mailUi: number;
     redis: number;

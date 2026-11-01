@@ -93,6 +93,11 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         Runtime::Typesense => &[ServiceKind::Typesense],
         Runtime::Rustfs => &[ServiceKind::Rustfs],
         Runtime::Ollama => &[ServiceKind::Ollama],
+        Runtime::Minio => &[ServiceKind::Minio],
+        Runtime::Elasticsearch => &[ServiceKind::Elasticsearch],
+        Runtime::Opensearch => &[ServiceKind::Opensearch],
+        Runtime::N8n => &[ServiceKind::N8n],
+        Runtime::Rabbitmq | Runtime::Erlang => &[ServiceKind::Rabbitmq],
         // Projects run Python themselves; pgAdmin keeps the Python it was installed with.
         Runtime::Python => &[],
         Runtime::Phppgadmin => &ServiceKind::WEB,
@@ -239,8 +244,8 @@ fn service_fingerprint(kind: ServiceKind, settings: &Settings, layout: &Layout) 
             "{ports:?} {:?} {:?} {} {} {} {}",
             settings.web_servers, settings.ports, settings.tld, settings.https_by_default, settings.php_workers, settings.route_mail
         )
-    } else if kind == ServiceKind::Rustfs {
-        format!("{ports:?} {:?}", settings.storage_dir(layout, "rustfs"))
+    } else if matches!(kind, ServiceKind::Rustfs | ServiceKind::Minio) {
+        format!("{ports:?} {:?}", settings.storage_dir(layout, kind.id()))
     } else {
         format!("{ports:?}")
     }
@@ -278,7 +283,7 @@ fn check_values(settings: &mut Settings) -> Result<()> {
         (p.apache_http, "Apache HTTP"), (p.apache_https, "Apache HTTPS"), (p.caddy_http, "Caddy HTTP"), (p.caddy_https, "Caddy HTTPS"),
         (p.caddy_admin, "Caddy admin"), (p.frankenphp_http, "FrankenPHP HTTP"), (p.frankenphp_https, "FrankenPHP HTTPS"),
         (p.frankenphp_admin, "FrankenPHP admin"), (p.tomcat_http, "Tomcat HTTP"), (p.tomcat_shutdown, "Tomcat shutdown"), (p.mysql, "MariaDB"), (p.mail_smtp, "Mailpit SMTP"), (p.mail_ui, "Mailpit inbox"), (p.redis, "Redis"),
-        (p.memcached, "Memcached"), (p.php_fpm, "PHP FastCGI"), (p.postgres, "PostgreSQL"), (p.pgadmin, "pgAdmin"), (p.mongodb, "MongoDB"), (p.clickhouse_http, "ClickHouse HTTP"), (p.clickhouse_tcp, "ClickHouse native"), (p.neo4j_http, "Neo4j Browser"), (p.neo4j_bolt, "Neo4j Bolt"), (p.meilisearch, "Meilisearch"), (p.typesense, "Typesense"), (p.rustfs, "RustFS"), (p.rustfs_console, "RustFS console"), (p.ollama, "Ollama"),
+        (p.memcached, "Memcached"), (p.php_fpm, "PHP FastCGI"), (p.postgres, "PostgreSQL"), (p.pgadmin, "pgAdmin"), (p.mongodb, "MongoDB"), (p.clickhouse_http, "ClickHouse HTTP"), (p.clickhouse_tcp, "ClickHouse native"), (p.neo4j_http, "Neo4j Browser"), (p.neo4j_bolt, "Neo4j Bolt"), (p.meilisearch, "Meilisearch"), (p.typesense, "Typesense"), (p.rustfs, "RustFS"), (p.rustfs_console, "RustFS console"), (p.ollama, "Ollama"), (p.minio, "MinIO"), (p.minio_console, "MinIO console"), (p.elasticsearch, "Elasticsearch"), (p.elasticsearch_transport, "Elasticsearch transport"), (p.opensearch, "OpenSearch"), (p.opensearch_transport, "OpenSearch transport"), (p.n8n, "n8n"), (p.rabbitmq, "RabbitMQ"), (p.rabbitmq_management, "RabbitMQ console"),
     ] {
         if port == 0 {
             return Err(Error::msg(format!("Choose a port for {name} (1–65535).")));
@@ -341,6 +346,15 @@ fn check_ports(settings: &Settings) -> Result<()> {
         (p.rustfs, "RustFS".into()),
         (p.rustfs_console, "RustFS console".into()),
         (p.ollama, "Ollama".into()),
+        (p.minio, "MinIO".into()),
+        (p.minio_console, "MinIO console".into()),
+        (p.elasticsearch, "Elasticsearch".into()),
+        (p.elasticsearch_transport, "Elasticsearch transport".into()),
+        (p.opensearch, "OpenSearch".into()),
+        (p.opensearch_transport, "OpenSearch transport".into()),
+        (p.n8n, "n8n".into()),
+        (p.rabbitmq, "RabbitMQ".into()),
+        (p.rabbitmq_management, "RabbitMQ console".into()),
         (p.memcached, "Memcached".into()),
     ];
     for server in Server::ALL {
@@ -1750,7 +1764,7 @@ struct PortStatus {
 async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortStatus>> {
     let (settings, layout) = state.snapshot().await;
     let p = &settings.ports;
-    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mysqlServer", p.mysql_server), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm), ("redis", p.redis), ("memcached", p.memcached), ("postgres", p.postgres), ("pgadmin", p.pgadmin), ("mongodb", p.mongodb), ("clickhouseHttp", p.clickhouse_http), ("clickhouseTcp", p.clickhouse_tcp), ("neo4jHttp", p.neo4j_http), ("neo4jBolt", p.neo4j_bolt), ("meilisearch", p.meilisearch), ("typesense", p.typesense), ("rustfs", p.rustfs), ("rustfsConsole", p.rustfs_console), ("ollama", p.ollama)];
+    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mysqlServer", p.mysql_server), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm), ("redis", p.redis), ("memcached", p.memcached), ("postgres", p.postgres), ("pgadmin", p.pgadmin), ("mongodb", p.mongodb), ("clickhouseHttp", p.clickhouse_http), ("clickhouseTcp", p.clickhouse_tcp), ("neo4jHttp", p.neo4j_http), ("neo4jBolt", p.neo4j_bolt), ("meilisearch", p.meilisearch), ("typesense", p.typesense), ("rustfs", p.rustfs), ("rustfsConsole", p.rustfs_console), ("ollama", p.ollama), ("minio", p.minio), ("minioConsole", p.minio_console), ("elasticsearch", p.elasticsearch), ("elasticsearchTransport", p.elasticsearch_transport), ("opensearch", p.opensearch), ("opensearchTransport", p.opensearch_transport), ("n8n", p.n8n), ("rabbitmq", p.rabbitmq), ("rabbitmqManagement", p.rabbitmq_management)];
     // Servers that aren't the primary one have their own pair of ports.
     for &server in settings.web_servers.iter().skip(1) {
         let (http, https) = settings.server_ports(server);
@@ -2017,6 +2031,14 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
             }
         })
         .await?;
+    // n8n is an npm package: installed with npm into its own folder.
+    if release.runtime == Runtime::N8n {
+        logs::system(&app, logs::Level::Info, "Installing n8n with npm (a few minutes)");
+        if let Err(e) = runtimes::setup_n8n(&layout, &release.version).await {
+            state.update_settings(reconcile_versions).await?;
+            return Err(e);
+        }
+    }
     // pgAdmin is a Python app: its packages go into a virtual environment of its own.
     if release.runtime == Runtime::Pgadmin {
         logs::system(&app, logs::Level::Info, "Installing pgAdmin's Python packages (a few minutes)");
@@ -2041,7 +2063,7 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
 }
 
 fn is_tool(runtime: Runtime) -> bool {
-    matches!(runtime, Runtime::Mailpit | Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin | Runtime::Phppgadmin | Runtime::Pgadmin | Runtime::Neo4j)
+    matches!(runtime, Runtime::Mailpit | Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin | Runtime::Phppgadmin | Runtime::Pgadmin | Runtime::Neo4j | Runtime::N8n)
 }
 
 async fn restart_if_running(app: &AppHandle, state: &AppState, kind: ServiceKind) -> Result<()> {
