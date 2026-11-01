@@ -1,5 +1,6 @@
 import { Check, Undo2 } from "lucide-react";
 import { Button } from "./ui";
+import { usePageActive } from "../lib/pageActive";
 
 /**
  * Floats at the bottom right while a form has unsaved changes, above the tab bar, so
@@ -19,7 +20,9 @@ export default function ApplyBar({
   onDiscard: () => void;
   note?: string;
 }) {
-  if (!dirty && !busy) return null;
+  // Its page may be kept in the background; the bar shows only over its own page.
+  const pageActive = usePageActive();
+  if ((!dirty && !busy) || !pageActive) return null;
   return (
     <div
       role="region"

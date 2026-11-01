@@ -119,19 +119,18 @@ export default function Logs() {
   }, [logs, sites.data]);
   const allSources = useMemo(() => [...services.map((s) => s.id as string), ...projects.map((p) => `project:${p}`)], [projects]);
 
-  // Opened from a service's or project's "View logs": start filtered to it, once.
-  const [focus] = useState(() => {
-    const f = useAppStore.getState().logFilter;
-    useAppStore.setState({ logFilter: null });
-    return f;
-  });
+  // A service's or project's "View logs" hands over a source to filter to. The page stays
+  // mounted between visits, so each new one is applied when it arrives, then cleared.
+  const focus = useAppStore((s) => s.logFilter);
   /** Sources switched off; new projects show up switched on. */
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   useEffect(() => {
-    if (focus) setHidden(new Set(allSources.filter((s) => s !== focus)));
-    // Only when the page opens with a focus.
+    if (!focus) return;
+    setHidden(new Set(allSources.filter((s) => s !== focus)));
+    useAppStore.setState({ logFilter: null });
+    // Only when a new focus arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus, allSources.length]);
+  }, [focus]);
 
   const [wrapLines, setWrapLines] = useState(true);
   const [confirmClear, setConfirmClear] = useState(false);
