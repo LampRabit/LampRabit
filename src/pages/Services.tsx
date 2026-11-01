@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FolderOpen, Hexagon, Puzzle, RefreshCw, Share2 } from "lucide-react";
+import { ExternalLink, FolderOpen, Hexagon, Puzzle, RefreshCw, Share2, Trash2 } from "lucide-react";
 import ExtensionsDialog from "../components/ExtensionsDialog";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import clsx from "clsx";
@@ -345,6 +345,7 @@ function RuntimeCard({
   const notify = useAppStore((s) => s.notify);
   const installs = useAppStore((s) => s.installs);
   const [extOpen, setExtOpen] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const label = runtimeLabels[runtime];
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
   const os = paths.data?.os;
@@ -451,6 +452,21 @@ function RuntimeCard({
               {folder(active) && (
                 <Button size="sm" onClick={() => openPath(folder(active)!).catch(onError)}>
                   <FolderOpen size={13} /> Folder
+                </Button>
+              )}
+              {/* Removing the version in use asks twice; another installed version takes over. */}
+              {confirmRemove ? (
+                <>
+                  <Button size="sm" variant="danger" onClick={() => remove.mutate(active, { onSettled: () => setConfirmRemove(false) })} disabled={remove.isPending} autoFocus>
+                    {remove.isPending ? "Removing…" : `Remove ${active}`}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmRemove(false)} disabled={remove.isPending}>
+                    Keep
+                  </Button>
+                </>
+              ) : (
+                <Button size="sm" variant="ghost" onClick={() => setConfirmRemove(true)} aria-label={`Remove ${label} ${active}`} title="Remove">
+                  <Trash2 size={13} /> Remove
                 </Button>
               )}
             </ActiveTile>
