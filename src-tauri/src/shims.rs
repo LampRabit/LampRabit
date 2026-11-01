@@ -20,6 +20,16 @@ const DB_TOOLS: &[(&str, &str, &str)] = &[
 ];
 const MARIADB_TOOLS: &[&str] = &["mariadb", "mariadb-dump", "mariadb-admin"];
 
+/// Environment for processes that run language tools: JAVA_HOME for the active Java (Maven's
+/// wrapper and Gradle look for it; the `java` shim alone isn't enough for them).
+pub fn tool_env(settings: &Settings, layout: &Layout) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    if let Some(v) = settings.versions.get("java") {
+        env.push(("JAVA_HOME".to_string(), path(&layout.bin("java", v))));
+    }
+    env
+}
+
 pub fn dir(layout: &Layout) -> PathBuf {
     layout.root().join("shims")
 }
@@ -66,6 +76,71 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
         for (name, mariadb, mysql) in DB_TOOLS {
             if let Some(case) = db_tool(db, if db == Database::Mariadb { mariadb } else { mysql }) {
                 shim(&dir, name, &[case])?;
+            }
+        }
+    }
+    // The JDK's tools, with JAVA_HOME for build tools (Maven, Gradle) they start.
+    if let Some(home) = settings.versions.get("java").map(|v| layout.bin("java", v)) {
+        for name in ["java", "javac", "jar", "jshell"] {
+            let target = home.join("bin").join(exe(name));
+            if target.exists() {
+                let env = vec![("JAVA_HOME".to_string(), path(&home))];
+                shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env }])?;
+            }
+        }
+    }
+        // mongosh, pointed at LampRabit's MongoDB when it isn't on the usual port.
+    if let Some(home) = settings.versions.get("mongosh").map(|v| layout.bin("mongosh", v)) {
+        let target = home.join("bin").join(exe("mongosh"));
+        if target.exists() {
+            let args = if settings.ports.mongodb == 27017 { Vec::new() } else { vec!["--port".to_string(), settings.ports.mongodb.to_string()] };
+            shim(&dir, "mongosh", &[Case { folder: None, target, args, env: Vec::new() }])?;
+        }
+    }
+    // MongoDB's dump and restore tools.
+    if let Some(home) = settings.versions.get("mongotools").map(|v| layout.bin("mongotools", v)) {
+        for name in ["mongodump", "mongorestore", "mongoexport", "mongoimport"] {
+            let target = home.join("bin").join(exe(name));
+            if target.exists() {
+                shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env: Vec::new() }])?;
+            }
+        }
+    }
+    // sqlite3, and ClickHouse's client pointed at LampRabit's server.
+    if let Some(v) = settings.versions.get("sqlite") {
+        let target = layout.bin("sqlite", v).join(exe("sqlite3"));
+        if target.exists() {
+            shim(&dir, "sqlite3", &[Case { folder: None, target, args: Vec::new(), env: Vec::new() }])?;
+        }
+    }
+    if let Some(v) = settings.versions.get("clickhouse") {
+        let target = layout.bin("clickhouse", v).join("usr").join("bin").join("clickhouse");
+        if target.exists() {
+            let args = vec!["client".to_string(), "--port".to_string(), settings.ports.clickhouse_tcp.to_string()];
+            shim(&dir, "clickhouse-client", &[Case { folder: None, target, args, env: Vec::new() }])?;
+        }
+    }
+    // Python and its pip.
+    if let Some(home) = settings.versions.get("python").map(|v| layout.bin("python", v)) {
+        let target = home.join(crate::runtimes::Runtime::Python.marker());
+        if target.exists() {
+            let case = |args: &[&str]| Case { folder: None, target: target.clone(), args: args.iter().map(|a| a.to_string()).collect(), env: Vec::new() };
+            shim(&dir, "python", &[case(&[])])?;
+            shim(&dir, "python3", &[case(&[])])?;
+            shim(&dir, "pip", &[case(&["-m", "pip"])])?;
+        }
+    }
+    // PostgreSQL's clients, pointed at LampRabit's server as its superuser.
+    if let Some(home) = settings.versions.get("postgres").map(|v| layout.bin("postgres", v)) {
+        let env = vec![
+            ("PGHOST".to_string(), "127.0.0.1".to_string()),
+            ("PGPORT".to_string(), settings.ports.postgres.to_string()),
+            ("PGUSER".to_string(), "postgres".to_string()),
+        ];
+        for name in ["psql", "pg_dump", "pg_dumpall", "pg_restore", "createdb", "dropdb"] {
+            let target = home.join("bin").join(exe(name));
+            if target.exists() {
+                shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env: env.clone() }])?;
             }
         }
     }

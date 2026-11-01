@@ -1,13 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type ServiceInfo, type ServiceKind, type Settings } from "./api";
+import { allServers, api, type Server, type ServiceInfo, type ServiceKind, type Settings } from "./api";
 import { useAppStore } from "./store";
 
-/** Services shown (and started by "Start all") with these settings. */
-export function serverEnabled(kind: ServiceKind, mode: Settings["webServer"] | undefined) {
-  if (kind === "apache") return mode !== "nginx";
-  if (kind === "nginx") return mode === "nginx" || mode === "both";
-  return true;
+/** Services shown (and started by "Start all") with these settings: web servers only while enabled. */
+export function serverEnabled(kind: ServiceKind, servers: Settings["webServers"] | undefined) {
+  if (!isServer(kind)) return true;
+  return (servers ?? ["apache"]).includes(kind);
 }
+
+export const isServer = (kind: ServiceKind): kind is Server => (allServers as string[]).includes(kind);
+
+/** The server with the main ports, localhost and the developer tools. */
+export const primaryServer = (settings: Settings | undefined): Server => settings?.webServers[0] ?? "apache";
 
 /**
  * Starting and stopping groups of services: the active stack profile, a selection, or
@@ -21,7 +25,7 @@ export function useStack() {
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const profile = settings.data?.profiles.find((p) => p.name === activeName) ?? null;
 
-  const usable = (services.data ?? []).filter((s) => s.installed && serverEnabled(s.kind, settings.data?.webServer));
+  const usable = (services.data ?? []).filter((s) => s.installed && serverEnabled(s.kind, settings.data?.webServers));
   const running = usable.filter((s) => s.state === "running" || s.state === "starting");
 
   const apply = useMutation({

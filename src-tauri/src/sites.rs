@@ -24,6 +24,11 @@ use crate::{
 pub enum Language {
     Php,
     Node,
+    /// Maven, Gradle or a plain web app (WEB-INF): served by Tomcat, or by its own server
+    /// (Spring Boot) through port discovery.
+    Java,
+    /// Django, Flask, FastAPI…: their own dev server, through port discovery.
+    Python,
     /// HTML and assets only.
     Static,
 }
@@ -156,9 +161,72 @@ pub fn language(dir: &Path) -> Language {
 fn language_of(framework: Option<&str>, dir: &Path) -> Language {
     match framework {
         Some(f) if f != "Static" => Language::Php,
+        // Before Node: a Java project's package.json only builds its front end.
+        _ if java_project(dir) => Language::Java,
+        _ if python_project(dir) => Language::Python,
         _ if dir.join("package.json").exists() => Language::Node,
         _ => Language::Static,
     }
+}
+
+fn python_project(dir: &Path) -> bool {
+    ["manage.py", "pyproject.toml", "requirements.txt", "Pipfile", ".venv"].iter().any(|f| dir.join(f).exists())
+}
+
+/// What a Python project is built with, from its files and requirements.
+fn python_framework(dir: &Path) -> &'static str {
+    let deps = ["requirements.txt", "pyproject.toml", "Pipfile"].iter().filter_map(|f| std::fs::read_to_string(dir.join(f)).ok()).collect::<String>().to_lowercase();
+    if dir.join("manage.py").exists() || deps.contains("django") {
+        "Django"
+    } else if deps.contains("fastapi") {
+        "FastAPI"
+    } else if deps.contains("flask") {
+        "Flask"
+    } else {
+        "Python"
+    }
+}
+
+fn java_project(dir: &Path) -> bool {
+    ["pom.xml", "build.gradle", "build.gradle.kts", "WEB-INF"].iter().any(|f| dir.join(f).exists())
+}
+
+/// What a Java project is built with, from its build file.
+fn java_framework(dir: &Path) -> &'static str {
+    let build = ["pom.xml", "build.gradle", "build.gradle.kts"].iter().filter_map(|f| std::fs::read_to_string(dir.join(f)).ok()).collect::<String>();
+    if build.contains("spring-boot") {
+        "Spring Boot"
+    } else if build.contains("quarkus") {
+        "Quarkus"
+    } else {
+        "Java"
+    }
+}
+
+/// The web app Tomcat serves for a Java project: an exploded build (Maven's
+/// target/<name>/ with WEB-INF), else a .war from Maven or Gradle, else WEB-INF in the
+/// project itself or in src/main/webapp (JSPs and static files without a build).
+pub fn java_webapp(dir: &Path) -> Option<PathBuf> {
+    let entries = |sub: &str| {
+        let mut found: Vec<PathBuf> = std::fs::read_dir(dir.join(sub)).into_iter().flatten().flatten().map(|e| e.path()).collect();
+        found.sort();
+        found
+    };
+    let war = |p: &PathBuf| p.is_file() && p.extension().is_some_and(|e| e == "war");
+    entries("target")
+        .into_iter()
+        .find(|p| p.join("WEB-INF").is_dir())
+        .or_else(|| entries("target").into_iter().chain(entries("build/libs")).find(war))
+        .or_else(|| [dir.to_path_buf(), dir.join("src/main/webapp")].into_iter().find(|p| p.join("WEB-INF").is_dir()))
+}
+
+/// The Java projects Tomcat serves, as (domain, web app folder or .war).
+pub fn tomcat_apps(settings: &Settings, layout: &Layout) -> Vec<(String, PathBuf)> {
+    scan(settings, layout)
+        .into_iter()
+        .filter(|s| s.language == Language::Java && s.route.is_none())
+        .filter_map(|s| Some((s.domain, java_webapp(&s.path)?)))
+        .collect()
 }
 
 /// Folder name → DNS label: lowercase letters, digits and dashes. Common accented letters
@@ -312,8 +380,17 @@ pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {
     if let Some(ver) = &v.phpredisadmin {
         add("phpredisadmin", "phpredisadmin", Some(layout.bin("phpredisadmin", ver)), None);
     }
+    if let Some(ver) = v.get("phppgadmin") {
+        add("phppgadmin", "phppgadmin", Some(layout.bin("phppgadmin", ver)), None);
+    }
     if v.mailpit.is_some() {
         add("mailpit", "mail", None, Some(format!("http://127.0.0.1:{}/", settings.ports.mail_ui)));
+    }
+    if v.get("neo4j").is_some() {
+        add("neo4j", "neo4j", None, Some(format!("http://127.0.0.1:{}/", settings.ports.neo4j_http)));
+    }
+    if v.get("pgadmin").is_some() {
+        add("pgadmin", "pgadmin", None, Some(format!("http://127.0.0.1:{}/", settings.ports.pgadmin)));
     }
     tools
 }
@@ -350,11 +427,21 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             let language = language_of(framework, &path);
             if language == Language::Node {
                 framework = crate::apps::framework(&path);
+            } else if language == Language::Java {
+                framework = Some(java_framework(&path));
+            } else if language == Language::Python {
+                framework = Some(python_framework(&path));
             }
             let app = own.and_then(|s| s.app.clone());
             // Dynamic is preferred: a Node project with a dev server (from its template or
             // package.json) is served through it, unless it was switched to its files.
-            let serve_mode = if language == Language::Node && app.as_ref().map_or(crate::apps::runnable(&path), |a| a.serve) {
+            // Python and Java projects have one once it's set up (from their template).
+            let serves = match language {
+                Language::Node => app.as_ref().map_or(crate::apps::runnable(&path), |a| a.serve),
+                Language::Python | Language::Java => app.as_ref().is_some_and(|a| a.serve && !a.command.is_empty()),
+                _ => false,
+            };
+            let serve_mode = if serves {
                 ServeMode::Dynamic
             } else {
                 ServeMode::Static
@@ -363,7 +450,17 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             // started it), the files otherwise.
             let route = crate::ports::route_of(&name);
             let ports = crate::ports::detected_of(&name);
-            let proxy = route.as_ref().map(|r| format!("http://{}:{}/", r.host, r.port));
+            // A Java web app without its own server (Spring Boot would be a route) goes to
+            // Tomcat, which picks the app by the Host header.
+            let tomcat = route.is_none()
+                && language == Language::Java
+                && settings.versions.get("tomcat").is_some()
+                && java_webapp(&path).is_some();
+            let proxy = match &route {
+                Some(r) => Some(format!("http://{}:{}/", r.host, r.port)),
+                None if tomcat => Some(format!("http://127.0.0.1:{}/", settings.ports.tomcat_http)),
+                None => None,
+            };
             // Served as files, a JavaScript project shows its build output, else its own
             // index.html; public/ there holds assets, not a site.
             if language == Language::Node && route.is_none() {
@@ -387,7 +484,7 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
                 proxy,
                 // PHP servers (artisan serve, php -S) accept any host and build links from it;
                 // Node dev servers get their own address, since Vite refuses hosts it doesn't know.
-                proxy_keep_host: language == Language::Php,
+                proxy_keep_host: language == Language::Php || tomcat,
                 app,
                 node_project,
                 language,
@@ -424,12 +521,29 @@ fn stopped_page(domain: &str) -> String {
     )
 }
 
-/// With both web servers enabled, the sites the other server serves (on its own ports).
+/// What a PHP project shows while no PHP version is installed, instead of a file listing
+/// (or, on Apache, index.php as plain text: the project's source). Same quoting limits as
+/// `stopped_page`.
+fn no_php_page(domain: &str) -> String {
+    format!(
+        "<!doctype html><meta charset=utf-8><title>PHP is not installed</title>\
+         <body style=font-family:system-ui,sans-serif;max-width:36rem;margin:15vh auto;padding:0 1rem;color:#334155>\
+         <h1 style=font-size:1.4rem>{domain} needs PHP</h1>\
+         <p>No PHP version is installed in LampRabit yet. Open Services, then PHP, install a version, and reload this page.</p>"
+    )
+}
+
+/// A PHP project the server has no PHP pool for.
+fn needs_missing_php(site: &Site, pool: Option<&PoolPlan>) -> bool {
+    site.language == Language::Php && site.tool.is_none() && pool.is_none()
+}
+
+/// With several web servers enabled, the sites the others serve (on their own ports).
 /// Each server answers their domains with a redirect, so an address without the port
 /// (an old bookmark, or one from before the site moved) still arrives, with its own
 /// certificate instead of another site's.
 fn elsewhere<'a>(settings: &Settings, sites: &'a [Site], server: Server) -> Vec<&'a Site> {
-    if settings.web_server != crate::config::WebServer::Both {
+    if settings.web_servers.len() < 2 {
         return Vec::new();
     }
     sites.iter().filter(|s| s.server != server && s.tool.is_none()).collect()
@@ -451,6 +565,8 @@ pub fn config_path(layout: &Layout, server: Server) -> PathBuf {
     match server {
         Server::Apache => layout.etc("apache").join("vhosts.conf"),
         Server::Nginx => layout.etc("nginx").join("nginx.conf"),
+        Server::Caddy => layout.etc("caddy").join("Caddyfile"),
+        Server::Frankenphp => layout.etc("frankenphp").join("Caddyfile"),
     }
 }
 
@@ -458,6 +574,8 @@ pub fn render(settings: &Settings, layout: &Layout, sites: &[Site], plan: &[Pool
     match server {
         Server::Apache => render_apache(settings, layout, sites, plan),
         Server::Nginx => render_nginx(settings, layout, sites, plan),
+        Server::Caddy => render_caddy(settings, layout, sites, plan, Server::Caddy),
+        Server::Frankenphp => render_caddy(settings, layout, sites, plan, Server::Frankenphp),
     }
 }
 
@@ -510,7 +628,7 @@ fn render_apache(settings: &Settings, layout: &Layout, all: &[Site], plan: &[Poo
     }
     for site in &moved {
         let body = format!("    ServerName {domain}\n    ServerAlias *.{domain}\n    Redirect 302 / {url}\n", domain = site.domain, url = site.url);
-        out.push_str(&format!("\n# {} (served by Nginx)\n<VirtualHost *:{http}>\n{body}</VirtualHost>\n", site.name));
+        out.push_str(&format!("\n# {} (served by {})\n<VirtualHost *:{http}>\n{body}</VirtualHost>\n", site.name, site.server.label()));
         if site.ssl {
             let (crt, key) = ssl::site_cert_paths(layout, &site.domain);
             out.push_str(&format!(
@@ -530,6 +648,11 @@ fn render_apache(settings: &Settings, layout: &Layout, all: &[Site], plan: &[Poo
                 keep = if site.proxy_keep_host { "On" } else { "Off" },
                 // mod_proxy answers 503 when the app isn't listening.
                 stopped = if site.tool.is_none() { format!("    ErrorDocument 503 \"{}\"\n", stopped_page(&site.domain)) } else { String::new() },
+            ),
+            None if needs_missing_php(site, php::pool_for(plan, site.php.as_deref(), settings)) => format!(
+                "    ServerName {domain}\n    ServerAlias *.{domain}\n    ErrorDocument 503 \"{page}\"\n    Redirect 503 /\n",
+                domain = site.domain,
+                page = no_php_page(&site.domain),
             ),
             None => format!(
                 "    ServerName {domain}\n    ServerAlias *.{domain}\n    DocumentRoot \"{root}\"\n    <Directory \"{root}\">\n        Options Indexes FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n{handler}",
@@ -618,8 +741,9 @@ fn render_nginx(settings: &Settings, layout: &Layout, all: &[Site], plan: &[Pool
             listen.push_str(&format!("        listen {https} ssl;\n        ssl_certificate \"{}\";\n        ssl_certificate_key \"{}\";\n", slash(&crt), slash(&key)));
         }
         servers.push_str(&format!(
-            "\n    # {name} (served by Apache)\n    server {{\n{listen}        server_name {domain} *.{domain};\n        return 302 {url}$request_uri;\n    }}\n",
+            "\n    # {name} (served by {by})\n    server {{\n{listen}        server_name {domain} *.{domain};\n        return 302 {url}$request_uri;\n    }}\n",
             name = site.name,
+            by = site.server.label(),
             domain = site.domain,
             url = site.url.trim_end_matches('/'),
         ));
@@ -647,6 +771,10 @@ fn render_nginx(settings: &Settings, layout: &Layout, all: &[Site], plan: &[Pool
                 } else {
                     String::new()
                 },
+            ),
+            None if needs_missing_php(site, php::pool_for(plan, site.php.as_deref(), settings)) => format!(
+                "        location / {{\n            default_type text/html;\n            return 503 '{}';\n        }}\n",
+                no_php_page(&site.domain)
             ),
             None => format!(
                 "        root \"{root}\";\n        index index.php index.html index.htm;\n        location / {{\n            try_files $uri $uri/ /index.php?$query_string;\n        }}\n        location ~ /\\.ht {{ deny all; }}\n{php}",
@@ -697,6 +825,119 @@ http {{
 {servers}}}
 "#,
         pid = slash(&layout.tmp().join("nginx").join("nginx.pid")),
+    )
+}
+
+/// A quoted Caddyfile token. Braces would read as placeholders (`{host}`), so they're
+/// escaped; paths use forward slashes like the other servers' configs.
+fn caddy_quote(text: &str) -> String {
+    format!("\"{}\"", text.replace('"', "\\\"").replace('{', "\\{").replace('}', "\\}"))
+}
+
+/// Caddy's (or FrankenPHP's) whole config. Like Nginx it doesn't read .htaccess;
+/// `php_fastcgi` (Caddy, to LampRabit's PHP) and `php_server` (FrankenPHP, its own PHP) do
+/// the usual front-controller fallback (index.php) themselves. Their own certificates are
+/// off (`auto_https off`): sites use LampRabit's CA like on the other servers.
+fn render_caddy(settings: &Settings, layout: &Layout, all: &[Site], plan: &[PoolPlan], server: Server) -> String {
+    let (http, https) = settings.server_ports(server);
+    let sites: Vec<&Site> = all.iter().filter(|s| s.server == server).collect();
+    let moved = elsewhere(settings, all, server);
+    let path = |p: &Path| caddy_quote(&slash(p));
+    let franken = server == Server::Frankenphp;
+    let id = if franken { "frankenphp" } else { "caddy" };
+
+    // Workers of a pool each take one request at a time (php-cgi on Windows), so requests
+    // go to the least busy one and wait briefly for a free one rather than failing.
+    let php = |pool: Option<&PoolPlan>, indent: &str| match pool {
+        _ if franken => format!("{indent}php_server\n"),
+        Some(p) => {
+            let to: Vec<String> = p.ports().map(|port| format!("127.0.0.1:{port}")).collect();
+            format!("{indent}php_fastcgi {} {{\n{indent}\tlb_policy least_conn\n{indent}\tlb_try_duration 5s\n{indent}}}\n", to.join(" "))
+        }
+        None => String::new(),
+    };
+    let tls = |domain: &str| {
+        let (crt, key) = ssl::site_cert_paths(layout, domain);
+        format!("\ttls {} {}\n", path(&crt), path(&key))
+    };
+    // A site block for http, and the same for https when the site has it.
+    let block = |hosts: &[String], ssl_for: Option<&str>, body: &str| {
+        let http_hosts: Vec<String> = hosts.iter().map(|h| format!("http://{h}")).collect();
+        let mut out = format!("{} {{\n{body}}}\n", http_hosts.join(", "));
+        if let Some(domain) = ssl_for {
+            let https_hosts: Vec<String> = hosts.iter().map(|h| format!("https://{h}")).collect();
+            out.push_str(&format!("{} {{\n{}{body}}}\n", https_hosts.join(", "), tls(domain)));
+        }
+        out
+    };
+    let domains = |site: &Site| vec![site.domain.clone(), format!("*.{}", site.domain)];
+
+    let default_pool = php::pool_for(plan, None, settings);
+    // Tools under http://localhost/<tool>/ when Caddy is the primary server.
+    let aliases: String = sites
+        .iter()
+        .filter(|s| s.tool.is_some() && s.proxy.is_none())
+        .map(|s| {
+            format!(
+                "\tredir /{name} /{name}/\n\thandle_path /{name}/* {{\n\t\troot * {dir}\n{php}\t\tfile_server\n\t}}\n",
+                name = s.name,
+                dir = path(&s.docroot),
+                php = php(default_pool, "\t\t"),
+            )
+        })
+        .collect();
+    let localhost = format!(
+        "{aliases}\thandle {{\n\t\troot * {www}\n{php}\t\tfile_server browse\n\t}}\n",
+        www = path(&layout.www()),
+        php = php(default_pool, "\t\t"),
+    );
+    // Hosts nothing else claims (localhost, an unknown name) get the www/ listing, like
+    // Apache's first virtual host and Nginx's default_server.
+    let mut blocks = format!("# localhost and names no site claims\nhttp:// {{\n{localhost}}}\n");
+    if sites.iter().chain(moved.iter()).any(|s| s.ssl) {
+        blocks.push_str(&format!("https:// {{\n{}{localhost}}}\n", tls("localhost")));
+    }
+
+    for site in &moved {
+        let body = format!("\tredir {}{{uri}} 302\n", site.url.trim_end_matches('/'));
+        blocks.push_str(&format!("\n# {} (served by {})\n", site.name, site.server.label()));
+        blocks.push_str(&block(&domains(site), site.ssl.then_some(site.domain.as_str()), &body));
+    }
+
+    for site in sites {
+        let body = match &site.proxy {
+            Some(target) => {
+                let host = if site.proxy_keep_host { String::new() } else { "\t\theader_up Host {upstream_hostport}\n".into() };
+                // Caddy answers 502 when the app isn't listening; the code stays 502.
+                let stopped = if site.tool.is_none() {
+                    let page = stopped_page(&site.domain).replace('{', "\\{").replace('}', "\\}");
+                    format!("\thandle_errors 502 503 504 {{\n\t\theader Content-Type \"text/html; charset=utf-8\"\n\t\trespond `{page}` 502\n\t}}\n")
+                } else {
+                    String::new()
+                };
+                format!("\treverse_proxy {} {{\n{host}\t}}\n{stopped}", target.trim_end_matches('/'))
+            }
+            None if !franken && needs_missing_php(site, php::pool_for(plan, site.php.as_deref(), settings)) => format!(
+                "\theader Content-Type \"text/html; charset=utf-8\"\n\trespond `{}` 503\n",
+                no_php_page(&site.domain).replace('{', "\\{").replace('}', "\\}")
+            ),
+            None => format!(
+                "\troot * {root}\n\t@hidden path */.ht*\n\trespond @hidden 403\n{php}\tfile_server browse\n",
+                root = path(&site.docroot),
+                php = php(php::pool_for(plan, site.php.as_deref(), settings), "\t"),
+            ),
+        };
+        // Tools only have their own name; projects also take their subdomains.
+        let hosts = if site.tool.is_some() { vec![site.domain.clone()] } else { domains(site) };
+        blocks.push_str(&format!("\n# {}\n", site.name));
+        blocks.push_str(&block(&hosts, site.ssl.then_some(site.domain.as_str()), &body));
+    }
+
+    format!(
+        "# Generated by LampRabit. Changes are overwritten on every start.\n{{\n\tadmin 127.0.0.1:{admin}\n\tauto_https off\n\thttp_port {http}\n\thttps_port {https}\n\tdefault_sni localhost\n\tpersist_config off\n\tstorage file_system {storage}\n\tlog {{\n\t\toutput file {log}\n\t\tlevel WARN\n\t}}\n\t# HTTP/3 would need a UDP port and another firewall prompt; local sites don't gain from it.\n\tservers {{\n\t\tprotocols h1 h2\n\t}}\n}}\n\n{blocks}",
+        admin = if franken { settings.ports.frankenphp_admin } else { settings.ports.caddy_admin },
+        storage = path(&layout.tmp().join(id)),
+        log = path(&layout.logs().join(format!("{id}-error.log"))),
     )
 }
 
@@ -964,7 +1205,7 @@ mod tests {
     #[test]
     fn sites_on_the_other_server_redirect_and_unknown_names_reach_localhost() {
         let mut settings = Settings::default();
-        settings.web_server = crate::config::WebServer::Both;
+        settings.web_servers = vec![Server::Apache, Server::Nginx];
         let layout = Layout::new(PathBuf::from("/lr"));
         let mut wp = site("blog.test");
         wp.ssl = true;
@@ -990,8 +1231,155 @@ mod tests {
         return 302"));
 
         // With one web server there's nothing to redirect.
-        settings.web_server = crate::config::WebServer::Apache;
+        settings.web_servers = vec![Server::Apache];
         assert!(!render(&settings, &layout, &sites[..1], &[], Server::Apache).contains("Redirect 302"));
+    }
+
+    #[test]
+    fn caddy_serves_its_sites_with_our_certificates_and_redirects_the_others() {
+        let mut settings = Settings::default();
+        settings.web_servers = vec![Server::Apache, Server::Caddy];
+        let layout = Layout::new(PathBuf::from("/lr"));
+        let mut blog = site("blog.test");
+        blog.ssl = true;
+        blog.url = "https://blog.test/".into();
+        let mut shop = site("shop.test");
+        shop.ssl = true;
+        shop.server = Server::Caddy;
+        shop.docroot = PathBuf::from("/lr/www/my {shop}/public");
+        let mut app = site("app.test");
+        app.server = Server::Caddy;
+        app.proxy = Some("http://127.0.0.1:5173/".into());
+        let plan = [PoolPlan { version: "8.4".into(), port: 9000, workers: 2 }];
+        settings.versions.php = Some("8.4".into());
+        let caddy = render(&settings, &layout, &[blog, shop, app], &plan, Server::Caddy);
+
+        assert!(caddy.contains("auto_https off") && caddy.contains("http_port 8082") && caddy.contains("https_port 8445"));
+        assert!(caddy.contains("http://shop.test, http://*.shop.test {"));
+        assert!(caddy.contains("https://shop.test, https://*.shop.test {"));
+        let (crt, _) = ssl::site_cert_paths(&layout, "shop.test");
+        assert!(caddy.contains(&format!("tls \"{}\"", slash(&crt))));
+        assert!(caddy.contains("php_fastcgi 127.0.0.1:9000 127.0.0.1:9001 {"));
+        assert!(caddy.contains(r"my \{shop\}/public"), "braces in paths aren't placeholders");
+        assert!(caddy.contains("reverse_proxy http://127.0.0.1:5173 {"), "upstreams have no path");
+        assert!(caddy.contains("redir https://blog.test{uri} 302"), "Apache's site is redirected to its own port");
+    }
+
+    #[test]
+    fn old_web_server_choice_becomes_a_list() {
+        let mut settings: Settings = toml::from_str("webServer = \"both\"").unwrap();
+        settings.normalize();
+        assert_eq!(settings.web_servers, vec![Server::Apache, Server::Nginx]);
+        let mut settings: Settings = toml::from_str("webServer = \"nginx\"").unwrap();
+        settings.normalize();
+        assert_eq!(settings.web_servers, vec![Server::Nginx]);
+        assert_eq!(settings.server_ports(Server::Nginx), (80, 443), "the only server has the main ports");
+        let saved = toml::to_string_pretty(&settings).unwrap();
+        assert!(!saved.contains("webServer ="), "the old field isn't written back");
+    }
+
+    #[test]
+    fn new_runtimes_share_the_versions_table() {
+        let mut settings = Settings::default();
+        settings.versions.php = Some("8.4.1".into());
+        settings.versions.set("caddy", Some("2.10.2".into()));
+        let saved = toml::to_string_pretty(&settings).unwrap();
+        let back: Settings = toml::from_str(&saved).unwrap();
+        assert_eq!(back.versions.get("caddy").map(String::as_str), Some("2.10.2"));
+        assert_eq!(back.versions.get("php").map(String::as_str), Some("8.4.1"));
+        assert!(back.versions.other.get("php").is_none(), "known runtimes keep their own field");
+    }
+
+    #[test]
+    fn php_projects_without_php_say_so_instead_of_listing_files() {
+        let layout = Layout::new(PathBuf::from("/lr"));
+        let mut shop = site("shop.test");
+        shop.language = Language::Php;
+        let mut docs = site("docs.test");
+        docs.language = Language::Static;
+        for server in Server::ALL {
+            let mut settings = Settings::default();
+            settings.web_servers = vec![server];
+            for s in [&mut shop, &mut docs] {
+                s.server = server;
+            }
+            let out = render(&settings, &layout, &[shop.clone(), docs.clone()], &[], server);
+            if server == Server::Frankenphp {
+                assert!(!out.contains("needs PHP") && out.contains("php_server"), "FrankenPHP has PHP built in");
+                continue;
+            }
+            assert!(out.contains("shop.test needs PHP"), "{server:?} explains the missing PHP");
+            assert!(!out.contains("docs.test needs PHP"), "{server:?} still serves static sites");
+        }
+    }
+
+    #[test]
+    fn caddy_and_frankenphp_serve_the_tools_when_primary() {
+        let layout = Layout::new(PathBuf::from("/lr"));
+        let plan = [PoolPlan { version: "8.4".into(), port: 9000, workers: 1 }];
+        for primary in [Server::Caddy, Server::Frankenphp] {
+            let mut settings = Settings::default();
+            settings.web_servers = vec![primary, Server::Apache];
+            settings.versions.php = Some("8.4".into());
+            settings.versions.phpmyadmin = Some("5.2.3".into());
+            settings.versions.adminer = Some("5.0".into());
+            settings.versions.phpredisadmin = Some("1.0".into());
+            settings.versions.mailpit = Some("1.0".into());
+            let all = tools(&settings, &layout);
+            let out = render(&settings, &layout, &all, &plan, primary);
+            let php = if primary == Server::Frankenphp { "php_server" } else { "php_fastcgi" };
+            for tool in ["phpmyadmin", "adminer", "phpredisadmin"] {
+                let block = out.split(&format!("# {tool}\n")).nth(1).unwrap_or_else(|| panic!("{primary:?} has no block for {tool}"));
+                let block = block.split("\n# ").next().unwrap();
+                assert!(block.contains(&format!("http://{tool}.test {{")), "{primary:?} {tool}: its own domain");
+                assert!(block.contains(php), "{primary:?} {tool}: PHP runs");
+                assert!(out.contains(&format!("handle_path /{tool}/*")), "{primary:?} {tool}: localhost/{tool}/ works");
+            }
+            assert!(out.contains("http://mail.test {") && out.contains("reverse_proxy http://127.0.0.1:8025"), "{primary:?} proxies Mailpit");
+            let apache = render(&settings, &layout, &all, &plan, Server::Apache);
+            assert!(!apache.contains("phpmyadmin.test"), "only the primary server serves the tools");
+        }
+    }
+
+    #[test]
+    fn frankenphp_uses_its_own_php_ports_and_state() {
+        let mut settings = Settings::default();
+        settings.web_servers = vec![Server::Apache, Server::Frankenphp];
+        let layout = Layout::new(PathBuf::from("/lr"));
+        let mut shop = site("shop.test");
+        shop.language = Language::Php;
+        shop.server = Server::Frankenphp;
+        let plan = [PoolPlan { version: "8.4".into(), port: 9000, workers: 2 }];
+        let out = render(&settings, &layout, &[shop], &plan, Server::Frankenphp);
+        assert!(out.contains("php_server") && !out.contains("php_fastcgi"), "no LampRabit PHP workers");
+        assert!(out.contains("admin 127.0.0.1:2020") && out.contains("http_port 8083"));
+        assert!(out.contains("/lr/tmp/frankenphp") && out.contains("frankenphp-error.log"));
+    }
+
+    #[test]
+    fn java_projects_are_found_and_their_web_app_located() {
+        let dir = std::env::temp_dir().join(format!("lr-java-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src/main/webapp/WEB-INF")).unwrap();
+        std::fs::write(dir.join("pom.xml"), "<artifactId>spring-boot-starter-web</artifactId>").unwrap();
+        std::fs::write(dir.join("package.json"), "{}").unwrap();
+        assert_eq!(language(&dir), Language::Java, "a Java project with front-end tooling stays Java");
+        assert_eq!(java_framework(&dir), "Spring Boot");
+        assert_eq!(java_webapp(&dir), Some(dir.join("src/main/webapp")));
+        std::fs::create_dir_all(dir.join("target/shop-1.0/WEB-INF")).unwrap();
+        assert_eq!(java_webapp(&dir), Some(dir.join("target/shop-1.0")), "a build wins over the sources");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tomcat_gets_a_host_per_java_app() {
+        let settings = Settings::default();
+        let layout = Layout::new(PathBuf::from("/lr"));
+        let xml = crate::configs::render_tomcat(&settings, &layout, &[("shop.test".into(), PathBuf::from("/lr/www/shop & co/target/shop.war"))]);
+        assert!(xml.contains(r#"<Server port="8105" address="127.0.0.1""#));
+        assert!(xml.contains(r#"<Connector port="8180" address="127.0.0.1""#));
+        assert!(xml.contains(r#"<Host name="shop.test""#));
+        assert!(xml.contains(r#"docBase="/lr/www/shop &amp; co/target/shop.war""#), "paths are XML-escaped");
     }
 
     #[test]

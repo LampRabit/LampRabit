@@ -20,6 +20,7 @@ use crate::{
     sites,
     layout::{Layout, exe},
     procgroup::{self, ProcGroup},
+    runtimes,
 };
 
 /// How long a graceful stop may take before the process tree is killed.
@@ -39,19 +40,75 @@ pub enum ServiceKind {
     Memcached,
     /// Oracle MySQL, next to MariaDB on its own port.
     Mysql,
+    /// Caddy, a web server with a short config file of its own (Caddyfile).
+    Caddy,
+    /// Caddy with PHP built in.
+    Frankenphp,
+    /// Apache Tomcat for Java web apps, behind the web servers.
+    Tomcat,
+    Postgres,
+    /// pgAdmin 4's web server, behind the web servers at pgadmin.test.
+    Pgadmin,
+    Mongodb,
+    Clickhouse,
+    /// Neo4j, with Neo4j Browser behind the web servers at neo4j.test.
+    Neo4j,
+}
+
+/// What every service has; the rest (launch, config, probes) is per service below.
+struct Def {
+    id: &'static str,
+    label: &'static str,
+    /// The service's own log in logs/, next to `<id>-output.log`.
+    log: &'static str,
 }
 
 impl ServiceKind {
     pub fn all() -> Vec<Self> {
-        vec![Self::Apache, Self::Nginx, Self::Mariadb, Self::Mysql, Self::Mailpit, Self::Redis, Self::Memcached]
+        vec![Self::Apache, Self::Nginx, Self::Caddy, Self::Frankenphp, Self::Tomcat, Self::Mariadb, Self::Mysql, Self::Postgres, Self::Mongodb, Self::Clickhouse, Self::Neo4j, Self::Mailpit, Self::Redis, Self::Memcached, Self::Pgadmin]
     }
+
+    /// The web servers' services, in `Server::ALL` order.
+    pub const WEB: [ServiceKind; 4] = [ServiceKind::Apache, ServiceKind::Nginx, ServiceKind::Caddy, ServiceKind::Frankenphp];
 
     pub fn web_server(self) -> Option<Server> {
         match self {
             Self::Apache => Some(Server::Apache),
             Self::Nginx => Some(Server::Nginx),
+            Self::Caddy => Some(Server::Caddy),
+            Self::Frankenphp => Some(Server::Frankenphp),
             _ => None,
         }
+    }
+
+    pub fn for_server(server: Server) -> Self {
+        match server {
+            Server::Apache => Self::Apache,
+            Server::Nginx => Self::Nginx,
+            Server::Caddy => Self::Caddy,
+            Server::Frankenphp => Self::Frankenphp,
+        }
+    }
+
+    fn def(self) -> Def {
+        let (id, label, log) = match self {
+            Self::Apache => ("apache", "Apache", "apache-error.log"),
+            Self::Nginx => ("nginx", "Nginx", "nginx-error.log"),
+            Self::Caddy => ("caddy", "Caddy", "caddy-error.log"),
+            Self::Frankenphp => ("frankenphp", "FrankenPHP", "frankenphp-error.log"),
+            Self::Tomcat => ("tomcat", "Tomcat", "tomcat-output.log"),
+            Self::Postgres => ("postgres", "PostgreSQL", "postgres-output.log"),
+            Self::Pgadmin => ("pgadmin", "pgAdmin", "pgadmin.log"),
+            Self::Mongodb => ("mongodb", "MongoDB", "mongodb-output.log"),
+            Self::Clickhouse => ("clickhouse", "ClickHouse", "clickhouse-output.log"),
+            Self::Neo4j => ("neo4j", "Neo4j", "neo4j-output.log"),
+            Self::Mariadb => ("mariadb", "MariaDB", "mariadb-error.log"),
+            Self::Mysql => ("mysql", "MySQL", "mysql-error.log"),
+            Self::Mailpit => ("mailpit", "Mailpit", "mailpit-output.log"),
+            Self::Redis => ("redis", "Redis", "redis-output.log"),
+            Self::Memcached => ("memcached", "Memcached", "memcached-output.log"),
+        };
+        Def { id, label, log }
     }
 
     /// Web servers only run when Settings → Web server includes them.
@@ -60,57 +117,35 @@ impl ServiceKind {
     }
 
     pub fn id(self) -> &'static str {
-        match self {
-            Self::Apache => "apache",
-            Self::Nginx => "nginx",
-            Self::Mariadb => "mariadb",
-            Self::Mysql => "mysql",
-            Self::Mailpit => "mailpit",
-            Self::Redis => "redis",
-            Self::Memcached => "memcached",
-        }
+        self.def().id
     }
 
     pub fn label(self) -> &'static str {
-        match self {
-            Self::Apache => "Apache",
-            Self::Nginx => "Nginx",
-            Self::Mariadb => "MariaDB",
-            Self::Mysql => "MySQL",
-            Self::Mailpit => "Mailpit",
-            Self::Redis => "Redis",
-            Self::Memcached => "Memcached",
-        }
+        self.def().label
     }
 
+    /// Each service runs its own runtime, under the same id.
     fn runtime(self) -> &'static str {
-        match self {
-            Self::Apache => "apache",
-            Self::Nginx => "nginx",
-            Self::Mariadb => "mariadb",
-            Self::Mysql => "mysql",
-            Self::Mailpit => "mailpit",
-            Self::Redis => "redis",
-            Self::Memcached => "memcached",
-        }
+        self.def().id
     }
 
     fn version(self, settings: &Settings) -> Option<String> {
-        match self {
-            Self::Apache => settings.versions.apache.clone(),
-            Self::Nginx => settings.versions.nginx.clone(),
-            Self::Mariadb => settings.versions.mariadb.clone(),
-            Self::Mysql => settings.versions.mysql.clone(),
-            Self::Mailpit => settings.versions.mailpit.clone(),
-            Self::Redis => settings.versions.redis.clone(),
-            Self::Memcached => settings.versions.memcached.clone(),
-        }
+        settings.versions.get(self.runtime()).cloned()
     }
 
-    pub fn config_path(self, layout: &Layout) -> PathBuf {
+    pub fn config_path(self, settings: &Settings, layout: &Layout) -> PathBuf {
         match self {
             Self::Apache => layout.etc("apache").join("httpd.conf"),
             Self::Nginx => layout.etc("nginx").join("nginx.conf"),
+            Self::Caddy => layout.etc("caddy").join("Caddyfile"),
+            Self::Frankenphp => layout.etc("frankenphp").join("Caddyfile"),
+            Self::Tomcat => configs::tomcat_base(layout).join("conf").join("server.xml"),
+            // Configured on the command line; its data folder.
+            Self::Postgres => configs::postgres_data(settings, layout),
+            Self::Pgadmin => layout.data("pgadmin"),
+            Self::Mongodb => configs::mongodb_data(settings, layout),
+            Self::Clickhouse => layout.etc("clickhouse").join("config.xml"),
+            Self::Neo4j => layout.etc("neo4j").join("neo4j.conf"),
             Self::Mariadb => layout.etc("mariadb").join("my.ini"),
             Self::Mysql => layout.etc("mysql").join("my.ini"),
             // Configured on the command line; their data folders.
@@ -122,22 +157,21 @@ impl ServiceKind {
 
     /// The service's own error log (stdout/stderr go to `<id>-output.log`).
     pub fn log_path(self, layout: &Layout) -> PathBuf {
-        let file = match self {
-            Self::Apache => "apache-error.log",
-            Self::Nginx => "nginx-error.log",
-            Self::Mariadb => "mariadb-error.log",
-            Self::Mysql => "mysql-error.log",
-            Self::Mailpit => "mailpit-output.log",
-            Self::Redis => "redis-output.log",
-            Self::Memcached => "memcached-output.log",
-        };
-        layout.logs().join(file)
+        layout.logs().join(self.def().log)
     }
 
     fn port(self, settings: &Settings) -> u16 {
         match self {
             Self::Apache => settings.server_ports(Server::Apache).0,
             Self::Nginx => settings.server_ports(Server::Nginx).0,
+            Self::Caddy => settings.server_ports(Server::Caddy).0,
+            Self::Frankenphp => settings.server_ports(Server::Frankenphp).0,
+            Self::Tomcat => settings.ports.tomcat_http,
+            Self::Postgres => settings.ports.postgres,
+            Self::Pgadmin => settings.ports.pgadmin,
+            Self::Mongodb => settings.ports.mongodb,
+            Self::Clickhouse => settings.ports.clickhouse_http,
+            Self::Neo4j => settings.ports.neo4j_http,
             Self::Mariadb => settings.ports.mysql,
             Self::Mysql => settings.ports.mysql_server,
             Self::Mailpit => settings.ports.mail_smtp,
@@ -204,6 +238,25 @@ struct LaunchSpec {
     /// Command that asks the service to shut down cleanly.
     stop_cmd: Option<(PathBuf, Vec<String>)>,
     env: Vec<(&'static str, String)>,
+    /// Arguments that check the config without starting (web servers): `httpd -t`,
+    /// `nginx -t`, `caddy validate`.
+    test: Option<Vec<String>>,
+}
+
+/// Caddy keeps state (autosave.json, certificates it would otherwise issue) in the user's
+/// config and data folders; LampRabit's stays under tmp/<id>, removed on uninstall.
+fn caddy_env(layout: &Layout, id: &str) -> Vec<(&'static str, String)> {
+    let dir = layout.tmp().join(id).to_string_lossy().into_owned();
+    vec![("XDG_CONFIG_HOME", dir.clone()), ("XDG_DATA_HOME", dir)]
+}
+
+/// The admin API port of Caddy and FrankenPHP, which reload and stop go through.
+fn admin_port(kind: ServiceKind, settings: &Settings) -> Option<u16> {
+    match kind {
+        ServiceKind::Caddy => Some(settings.ports.caddy_admin),
+        ServiceKind::Frankenphp => Some(settings.ports.frankenphp_admin),
+        _ => None,
+    }
 }
 
 fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
@@ -225,6 +278,7 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 }
                 args
             },
+            test: Some(vec!["-d".into(), path(home.clone()), "-f".into(), path(layout.etc("apache").join("httpd.conf")), "-t".into()]),
             cwd: home,
             path_prepend: vec![],
             stop_cmd: None,
@@ -243,10 +297,143 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                     }
                     args
                 },
+                test: Some(vec!["-p".into(), prefix.clone(), "-c".into(), conf.clone(), "-t".into()]),
                 stop_cmd: Some((home.join(exe("nginx")), vec!["-p".into(), prefix, "-c".into(), conf, "-s".into(), "quit".into()])),
                 cwd: home,
                 path_prepend: vec![],
                 env: vec![],
+            }
+        }
+        // FrankenPHP is Caddy with PHP built in: the same commands, under its own name.
+        ServiceKind::Caddy | ServiceKind::Frankenphp => {
+            let id = kind.id();
+            let conf = path(kind.config_path(settings, layout));
+            let config = |cmd: &str| vec![cmd.into(), "--config".into(), conf.clone(), "--adapter".into(), "caddyfile".into()];
+            let admin = format!("127.0.0.1:{}", admin_port(kind, settings).unwrap_or_default());
+            let mut env = caddy_env(layout, id);
+            if kind == ServiceKind::Frankenphp {
+                env.push(("PHP_INI_SCAN_DIR", path(layout.etc("frankenphp").join("conf.d"))));
+            }
+            LaunchSpec {
+                program: home.join(exe(id)),
+                args: config("run"),
+                test: Some(config("validate")),
+                // Through the admin API: a clean shutdown on Windows too, where there's no SIGTERM.
+                stop_cmd: Some((home.join(exe(id)), vec!["stop".into(), "--address".into(), admin])),
+                cwd: home,
+                path_prepend: vec![],
+                env,
+            }
+        }
+        // Tomcat's own scripts (catalina.bat/.sh) only assemble this command; running Java
+        // directly keeps the supervisor on the real process and works the same everywhere.
+        ServiceKind::Tomcat => {
+            let java = configs::tomcat_java(settings, layout, &version)?;
+            let java_home = java.parent().and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default();
+            let base = configs::tomcat_base(layout);
+            let sep = if cfg!(windows) { ";" } else { ":" };
+            let classpath = format!("{}{sep}{}", path(home.join("bin").join("bootstrap.jar")), path(home.join("bin").join("tomcat-juli.jar")));
+            let args = |command: &str| -> Vec<String> {
+                vec![
+                    format!("-Dcatalina.home={}", path(home.clone())),
+                    format!("-Dcatalina.base={}", path(base.clone())),
+                    format!("-Djava.io.tmpdir={}", path(layout.tmp().join("tomcat").join("temp"))),
+                    "-Djava.util.logging.manager=org.apache.juli.ClassLoaderLogManager".into(),
+                    format!("-Djava.util.logging.config.file={}", path(base.join("conf").join("logging.properties"))),
+                    "-cp".into(),
+                    classpath.clone(),
+                    "org.apache.catalina.startup.Bootstrap".into(),
+                    command.into(),
+                ]
+            };
+            LaunchSpec {
+                program: java.clone(),
+                args: args("start"),
+                test: None,
+                // Bootstrap stop sends SHUTDOWN to the shutdown port: Tomcat undeploys its apps cleanly.
+                stop_cmd: Some((java, args("stop"))),
+                cwd: home.clone(),
+                path_prepend: vec![],
+                env: vec![("JAVA_HOME", path(java_home)), ("CATALINA_HOME", path(home.clone())), ("CATALINA_BASE", path(base.clone()))],
+            }
+        }
+        ServiceKind::Postgres => {
+            let data = path(configs::postgres_data(settings, layout));
+            LaunchSpec {
+                program: home.join("bin").join(exe("postgres")),
+                // Only on 127.0.0.1, and no Unix socket: its default folder (/var/run/postgresql)
+                // usually doesn't exist or isn't writable, and clients get PGHOST from the shims.
+                args: vec![
+                    "-D".into(),
+                    data.clone(),
+                    "-p".into(),
+                    settings.ports.postgres.to_string(),
+                    "-c".into(),
+                    "listen_addresses=127.0.0.1".into(),
+                    "-c".into(),
+                    "unix_socket_directories=".into(),
+                ],
+                test: None,
+                // A fast shutdown: open connections are closed, nothing is lost.
+                stop_cmd: Some((home.join("bin").join(exe("pg_ctl")), vec!["stop".into(), "-D".into(), data, "-m".into(), "fast".into(), "-s".into()])),
+                env: if cfg!(target_os = "linux") { vec![("LD_LIBRARY_PATH", path(home.join("lib")))] } else { vec![] },
+                cwd: home,
+                path_prepend: vec![],
+            }
+        }
+        ServiceKind::Mongodb => {
+            let port = settings.ports.mongodb.to_string();
+            // A clean shutdown through mongosh when it's installed; otherwise the process is
+            // ended and MongoDB recovers from its journal on the next start.
+            let stop_cmd = settings.versions.get("mongosh").map(|v| layout.bin("mongosh", v).join("bin").join(exe("mongosh"))).filter(|p| p.exists()).map(|mongosh| {
+                (mongosh, vec!["--quiet".into(), "--port".into(), port.clone(), "--eval".into(), "try { db.getSiblingDB('admin').shutdownServer() } catch (e) {}".into()])
+            });
+            LaunchSpec {
+                program: home.join("bin").join(exe("mongod")),
+                args: vec!["--dbpath".into(), path(configs::mongodb_data(settings, layout)), "--port".into(), port, "--bind_ip".into(), "127.0.0.1".into()],
+                test: None,
+                stop_cmd,
+                cwd: home,
+                path_prepend: vec![],
+                env: vec![],
+            }
+        }
+        ServiceKind::Clickhouse => LaunchSpec {
+            program: home.join("usr").join("bin").join("clickhouse"),
+            args: vec!["server".into(), format!("--config-file={}", path(layout.etc("clickhouse").join("config.xml")))],
+            test: None,
+            stop_cmd: None,
+            cwd: layout.data("clickhouse"),
+            path_prepend: vec![],
+            env: vec![],
+        },
+        // Neo4j's own launcher in console mode (in the foreground), on the active Java.
+        ServiceKind::Neo4j => {
+            let java_home = configs::neo4j_java(settings, layout)?;
+            LaunchSpec {
+                program: home.join("bin").join(if cfg!(windows) { "neo4j.bat" } else { "neo4j" }),
+                args: vec!["console".into()],
+                test: None,
+                stop_cmd: None,
+                cwd: home.clone(),
+                path_prepend: vec![],
+                env: vec![("JAVA_HOME", path(java_home)), ("NEO4J_HOME", path(home.clone())), ("NEO4J_CONF", path(layout.etc("neo4j")))],
+            }
+        }
+        // pgAdmin's own entry point, on the Python of its virtual environment.
+        ServiceKind::Pgadmin => {
+            let package = runtimes::pgadmin_package(&home)
+                .ok_or_else(|| Error::msg("pgAdmin's install is incomplete. Remove it on the Services page and install it again."))?;
+            LaunchSpec {
+                program: runtimes::venv_python(&home.join("venv")),
+                args: vec![path(package.join("pgAdmin4.py"))],
+                test: None,
+                stop_cmd: None,
+                cwd: package,
+                path_prepend: vec![],
+                // Its output in our log right away rather than when Python's buffer fills.
+                // Desktop mode (no pgAdmin login), as its desktop app starts it.
+                env: vec![("PYTHONUNBUFFERED", "1".into()), ("PGADMIN_SERVER_MODE", "OFF".into())],
             }
         }
         ServiceKind::Mariadb => {
@@ -262,6 +449,7 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 cwd: home,
                 path_prepend: vec![],
                 env: vec![],
+                test: None,
             }
         }
         ServiceKind::Mysql => {
@@ -277,6 +465,7 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 path_prepend: vec![],
                 // Where the libaio link goes when needed (see configs::mysql_libraries).
                 env: if cfg!(target_os = "linux") { vec![("LD_LIBRARY_PATH", path(compat))] } else { vec![] },
+                test: None,
             }
         }
         ServiceKind::Mailpit => LaunchSpec {
@@ -296,6 +485,7 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
             path_prepend: vec![],
             stop_cmd: None,
             env: vec![],
+            test: None,
         },
         // In the foreground, data kept in data/redis. The Windows build is compiled with
         // MSYS2, which reads C:/… paths; forward slashes avoid escaping trouble there.
@@ -315,6 +505,7 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
             path_prepend: vec![],
             stop_cmd: None,
             env: vec![],
+            test: None,
         },
         // Memory only: nothing to keep in data/memcached, which exists for consistency.
         ServiceKind::Memcached => LaunchSpec {
@@ -324,6 +515,7 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
             path_prepend: vec![],
             stop_cmd: None,
             env: vec![],
+            test: None,
         },
     };
     Ok(spec)
@@ -334,7 +526,7 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
 async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<Vec<PoolPlan>> {
     layout.ensure()?;
     match kind {
-        ServiceKind::Apache | ServiceKind::Nginx => {
+        ServiceKind::Apache | ServiceKind::Nginx | ServiceKind::Caddy | ServiceKind::Frankenphp => {
             let server = kind.web_server().unwrap();
             configs::write_tools(settings, layout)?;
             let sites = sites::served(settings, layout);
@@ -342,11 +534,19 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             if sites::write_config(settings, layout, &sites, &plan, server)? {
                 logs::system(app, Level::Info, "Created the local certificate authority for HTTPS sites");
             }
-            if kind == ServiceKind::Apache {
-                configs::write_apache(settings, layout, &plan)?;
-                let _ = std::fs::remove_file(configs::apache_pid_file(layout));
-            } else {
-                configs::nginx_prefix(layout)?;
+            match kind {
+                ServiceKind::Apache => {
+                    configs::write_apache(settings, layout, &plan)?;
+                    let _ = std::fs::remove_file(configs::apache_pid_file(layout));
+                }
+                ServiceKind::Nginx => {
+                    configs::nginx_prefix(layout)?;
+                }
+                ServiceKind::Frankenphp => {
+                    configs::write_frankenphp_ini(settings, layout)?;
+                    std::fs::create_dir_all(layout.tmp().join("frankenphp"))?;
+                }
+                _ => std::fs::create_dir_all(layout.tmp().join("caddy"))?,
             }
             // In the background: the admin prompt can sit unanswered for minutes.
             let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
@@ -364,8 +564,39 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             configs::init_mysql_data(settings, layout).await?;
             Ok(vec![])
         }
+        ServiceKind::Tomcat => {
+            configs::write_tomcat(settings, layout, &sites::tomcat_apps(settings, layout))?;
+            Ok(vec![])
+        }
+        ServiceKind::Postgres => {
+            configs::init_postgres_data(settings, layout).await?;
+            Ok(vec![])
+        }
+        ServiceKind::Mongodb => {
+            std::fs::create_dir_all(configs::mongodb_data(settings, layout))?;
+            Ok(vec![])
+        }
+        ServiceKind::Clickhouse => {
+            configs::write_clickhouse(settings, layout)?;
+            std::fs::create_dir_all(layout.tmp().join("clickhouse"))?;
+            Ok(vec![])
+        }
+        ServiceKind::Neo4j => {
+            configs::write_neo4j(settings, layout)?;
+            Ok(vec![])
+        }
+        ServiceKind::Pgadmin => {
+            let version = kind.version(settings).unwrap_or_default();
+            let package = runtimes::pgadmin_package(&layout.bin("pgadmin", &version)).ok_or_else(|| Error::msg("pgAdmin's install is incomplete"))?;
+            configs::write_pgadmin(settings, layout, &package)?;
+            let python = runtimes::venv_python(&layout.bin("pgadmin", &version).join("venv"));
+            if let Err(e) = configs::register_pgadmin_server(settings, layout, &python, &package).await {
+                logs::system(app, Level::Warn, format!("Couldn't add LampRabit's PostgreSQL to pgAdmin; add it yourself (127.0.0.1, user root): {e}"));
+            }
+            Ok(vec![])
+        }
         ServiceKind::Mailpit | ServiceKind::Redis | ServiceKind::Memcached => {
-            std::fs::create_dir_all(kind.config_path(layout))?;
+            std::fs::create_dir_all(kind.config_path(settings, layout))?;
             Ok(vec![])
         }
     }
@@ -375,12 +606,16 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
 pub fn required_ports(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Vec<u16> {
     let mut ports = vec![kind.port(settings)];
     match kind {
-        ServiceKind::Apache | ServiceKind::Nginx => {
+        ServiceKind::Apache | ServiceKind::Nginx | ServiceKind::Caddy | ServiceKind::Frankenphp => {
             let server = kind.web_server().unwrap();
             if sites::served(settings, layout).iter().any(|s| s.ssl && s.server == server) {
                 ports.push(settings.server_ports(server).1);
             }
+            ports.extend(admin_port(kind, settings));
         }
+        ServiceKind::Tomcat => ports.push(settings.ports.tomcat_shutdown),
+        ServiceKind::Clickhouse => ports.push(settings.ports.clickhouse_tcp),
+        ServiceKind::Neo4j => ports.push(settings.ports.neo4j_bolt),
         ServiceKind::Mailpit => ports.push(settings.ports.mail_ui),
         _ => {}
     }
@@ -393,7 +628,7 @@ pub fn required_ports(kind: ServiceKind, settings: &Settings, layout: &Layout) -
 /// has never been started (no generated config yet).
 pub async fn config_test(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Option<std::result::Result<(), String>> {
     let spec = launch_spec(kind, settings, layout).ok()?;
-    if !spec.program.exists() || !kind.config_path(layout).exists() {
+    if !spec.program.exists() || !kind.config_path(settings, layout).exists() {
         return None;
     }
     Some(match server_config_test(&spec).await {
@@ -402,10 +637,11 @@ pub async fn config_test(kind: ServiceKind, settings: &Settings, layout: &Layout
     })
 }
 
-/// `httpd -t` / `nginx -t`. None when the config is valid, otherwise the error output.
+/// `httpd -t` / `nginx -t` / `caddy validate`. None when the config is valid, otherwise
+/// the error output.
 async fn server_config_test(spec: &LaunchSpec) -> Option<String> {
     let mut cmd = Command::new(&spec.program);
-    cmd.args(&spec.args).arg("-t").current_dir(&spec.cwd);
+    cmd.args(spec.test.as_ref()?).current_dir(&spec.cwd).envs(spec.env.iter().map(|(k, v)| (*k, v)));
     if !spec.path_prepend.is_empty() {
         let existing = std::env::var_os("PATH").unwrap_or_default();
         let paths = spec.path_prepend.iter().cloned().chain(std::env::split_paths(&existing));
@@ -443,12 +679,12 @@ pub async fn sync_hosts(app: &AppHandle, settings: &Settings, layout: &Layout, s
 /// may be running from a terminal are left alone. Returns what was stopped.
 pub fn reap_orphans(layout: &Layout) -> Vec<String> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-    const SERVERS: &[&str] = &["httpd", "nginx", "mariadbd", "mysqld", "php-fpm", "php-cgi", "mailpit", "redis-server", "memcached",
+    const SERVERS: &[&str] = &["httpd", "nginx", "caddy", "frankenphp", "postgres", "mongod", "clickhouse", "mariadbd", "mysqld", "php-fpm", "php-cgi", "mailpit", "redis-server", "memcached",
         // Redis before 0.2, so one left running is stopped before its folder is removed.
         "GarnetServer"];
     let bin = layout.root().join("bin");
     let mut system = System::new();
-    system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_exe(UpdateKind::Always));
+    system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_exe(UpdateKind::Always).with_cmd(UpdateKind::Always));
     let mut stopped = Vec::new();
     // Threads are listed as processes on Linux; only whole processes are stopped.
     for (pid, process) in system.processes().iter().filter(|(_, p)| p.thread_kind().is_none()) {
@@ -457,7 +693,17 @@ pub fn reap_orphans(layout: &Layout) -> Vec<String> {
         let exe_text = exe.to_string_lossy();
         let exe = Path::new(exe_text.strip_suffix(" (deleted)").unwrap_or(&exe_text));
         let name = exe.file_stem().and_then(|n| n.to_str()).unwrap_or_default();
-        if exe.starts_with(&bin) && SERVERS.contains(&name) && process.kill() {
+        // Tomcat runs as LampRabit's java; Java programs started from the terminal don't
+        // run Tomcat's Bootstrap class, so they're left alone.
+        // Tomcat and Neo4j run on LampRabit's java, recognised by their main classes.
+        let tomcat = name == "java"
+            && process.cmd().iter().any(|a| {
+                let a = a.to_string_lossy();
+                a == "org.apache.catalina.startup.Bootstrap" || a.starts_with("org.neo4j.server.")
+            });
+        // pgAdmin's virtual environment only ever runs pgAdmin.
+        let pgadmin = exe.starts_with(bin.join("pgadmin"));
+        if exe.starts_with(&bin) && (SERVERS.contains(&name) || tomcat || pgadmin) && process.kill() {
             stopped.push(format!("{name} (PID {pid})"));
         }
     }
@@ -551,7 +797,7 @@ impl Supervisor {
                     version: kind.version(settings),
                     installed,
                     started_at: handle.and_then(|h| h.started_at),
-                    config_path: kind.config_path(layout),
+                    config_path: kind.config_path(settings, layout),
                     log_path: kind.log_path(layout),
                     health: handle.filter(|h| h.state == ServiceState::Running).and_then(|_| health.get(&kind).cloned()),
                     problem: problems.get(&kind).cloned(),
@@ -592,14 +838,22 @@ impl Supervisor {
                 }
                 ServiceKind::Mariadb => diagnose::probe_mysql(settings.ports.mysql).await,
                 ServiceKind::Mysql => diagnose::probe_mysql(settings.ports.mysql_server).await,
-                ServiceKind::Nginx => {
-                    diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.server_ports(Server::Nginx).0)).await
+                ServiceKind::Nginx | ServiceKind::Caddy | ServiceKind::Frankenphp => {
+                    let port = settings.server_ports(kind.web_server().unwrap()).0;
+                    diagnose::probe_http(client, &format!("http://127.0.0.1:{port}/")).await
                 }
                 ServiceKind::Mailpit => {
                     diagnose::probe_http(client, &format!("http://127.0.0.1:{}/livez", settings.ports.mail_ui)).await
                 }
                 ServiceKind::Redis => diagnose::probe_line(settings.ports.redis, b"PING\r\n", "+PONG").await,
                 ServiceKind::Memcached => diagnose::probe_line(settings.ports.memcached, b"version\r\n", "VERSION").await,
+                // A 404 for / is fine: only apps under their own Host are deployed.
+                ServiceKind::Postgres => diagnose::probe_postgres(settings.ports.postgres).await,
+                ServiceKind::Mongodb => diagnose::probe_tcp(settings.ports.mongodb).await,
+                ServiceKind::Clickhouse => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/ping", settings.ports.clickhouse_http)).await,
+                ServiceKind::Neo4j => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.neo4j_http)).await,
+                ServiceKind::Pgadmin => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/misc/ping", settings.ports.pgadmin)).await,
+                ServiceKind::Tomcat => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.tomcat_http)).await,
             };
             let young = now_ms().saturating_sub(started_at) < 8_000;
             let changed = {
@@ -740,7 +994,9 @@ impl Supervisor {
                 );
                 return Err(Error::msg(format!("{} configuration test failed: {line}", kind.label())));
             }
-            // PHP has to be listening before the web server takes requests.
+            // PHP has to be listening before the web server takes requests. FrankenPHP
+            // runs PHP itself.
+            let plan = if kind == ServiceKind::Frankenphp { Vec::new() } else { plan };
             if let Err(e) = self.php.ensure(app, settings, layout, &plan).await {
                 self.set_problem(kind, Problem::new("PHP couldn't start", e.to_string(), &[]));
                 return Err(e);
@@ -795,6 +1051,14 @@ impl Supervisor {
             },
         );
         emit_status(app, kind, ServiceState::Running, None);
+        if kind == ServiceKind::Postgres {
+            let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = configs::postgres_root_role(&settings, &layout).await {
+                    logs::system(&app, Level::Warn, format!("Couldn't add the root role to PostgreSQL: {e}"));
+                }
+            });
+        }
         if let Some(previous) = upgrade_from {
             let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
             let port = settings.ports.mysql;
@@ -907,7 +1171,9 @@ impl Supervisor {
         }
         let sites = sites::served(settings, layout);
         let plan = php::plan(settings, layout, &sites);
-        self.php.ensure(app, settings, layout, &plan).await?;
+        if kind != ServiceKind::Frankenphp {
+            self.php.ensure(app, settings, layout, &plan).await?;
+        }
         sites::write_config(settings, layout, &sites, &plan, server)?;
         if kind == ServiceKind::Apache {
             configs::write_apache(settings, layout, &plan)?;
@@ -916,7 +1182,19 @@ impl Supervisor {
         if let Some(output) = server_config_test(&spec).await {
             return Err(Error::msg(format!("{} kept its current sites because the new config has an error:\n{output}", kind.label())));
         }
-        if kind == ServiceKind::Nginx {
+        if let Some(admin) = admin_port(kind, settings) {
+            // Through the admin API: Caddy swaps configs without dropping connections.
+            let mut args = spec.test.clone().unwrap_or_default();
+            args[0] = "reload".into();
+            args.extend(["--address".into(), format!("127.0.0.1:{admin}")]);
+            let mut cmd = Command::new(&spec.program);
+            cmd.args(args).current_dir(&spec.cwd).envs(spec.env.iter().map(|(k, v)| (*k, v)));
+            procgroup::prepare(&mut cmd);
+            let out = cmd.output().await?;
+            if !out.status.success() {
+                return Err(Error::msg(format!("{} didn't reload: {}", kind.label(), String::from_utf8_lossy(&out.stderr).trim())));
+            }
+        } else if kind == ServiceKind::Nginx {
             let (program, mut args) = spec.stop_cmd.ok_or_else(|| Error::msg("Nginx has no control command"))?;
             if let Some(last) = args.last_mut() {
                 *last = "reload".into();

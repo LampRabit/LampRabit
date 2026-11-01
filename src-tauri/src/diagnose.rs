@@ -249,7 +249,12 @@ pub enum Probe {
 pub async fn probe_http(client: &reqwest::Client, url: &str) -> Probe {
     match client.get(url).timeout(Duration::from_secs(3)).send().await {
         Ok(r) if r.status().is_server_error() => Probe::Bad(format!("Answers with HTTP {}", r.status().as_u16())),
-        Ok(_) => Probe::Ok,
+        // Read the page before hanging up: Caddy logs a warning for every response the
+        // client abandons halfway, which would fill its log every few seconds.
+        Ok(r) => {
+            let _ = tokio::time::timeout(Duration::from_secs(2), r.bytes()).await;
+            Probe::Ok
+        }
         Err(e) if e.is_timeout() => Probe::Bad(format!("No answer from {url} within 3 seconds")),
         Err(_) => Probe::Bad(format!("Not answering at {url}")),
     }
@@ -275,6 +280,33 @@ pub async fn probe_line(port: u16, command: &[u8], expect: &str) -> Probe {
 
 /// MySQL/MariaDB greet every new connection; a greeting means the server is ready,
 /// an error packet carries the reason it isn't (e.g. "Too many connections").
+/// Whether something accepts connections on the port (MongoDB, whose wire protocol needs
+/// a full message to say more).
+pub async fn probe_tcp(port: u16) -> Probe {
+    match tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(("127.0.0.1", port))).await {
+        Ok(Ok(_)) => Probe::Ok,
+        _ => Probe::Bad(format!("Not accepting connections on port {port}")),
+    }
+}
+
+/// Asks PostgreSQL whether it would speak TLS (an SSLRequest): any server answers with a
+/// single `S` or `N` before authentication, so this needs no user or password.
+pub async fn probe_postgres(port: u16) -> Probe {
+    use tokio::io::AsyncWriteExt;
+    let attempt = async {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.ok()?;
+        stream.write_all(&[0, 0, 0, 8, 4, 210, 22, 47]).await.ok()?;
+        let mut reply = [0u8; 1];
+        stream.read_exact(&mut reply).await.ok()?;
+        Some(reply[0])
+    };
+    match tokio::time::timeout(Duration::from_secs(3), attempt).await {
+        Ok(Some(b'S' | b'N')) => Probe::Ok,
+        Ok(Some(_)) => Probe::Bad("Unexpected reply to a new connection".into()),
+        _ => Probe::Bad(format!("Not accepting connections on port {port}")),
+    }
+}
+
 pub async fn probe_mysql(port: u16) -> Probe {
     let attempt = async {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).await.ok()?;

@@ -18,7 +18,6 @@ import {
   Plug,
   Power,
   RefreshCw,
-  Save,
   ServerCog,
   Settings2,
   Share2,
@@ -30,7 +29,7 @@ import {
   Wind,
 } from "lucide-react";
 import clsx from "clsx";
-import { api, runtimeLabels, type EnvPaths, type PortStatus, type Runtime, type Settings as SettingsT } from "../lib/api";
+import { allServers, api, runtimeLabels, type EnvPaths, type PortStatus, type Runtime, type Server, type Settings as SettingsT } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { useTheme } from "../lib/theme";
 import { useMotion } from "../lib/motion";
@@ -39,22 +38,11 @@ import { getVersion } from "@tauri-apps/api/app";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { runtimeTiles } from "../components/runtimes";
 import UninstallDialog from "../components/UninstallDialog";
+import ApplyBar from "../components/ApplyBar";
+import { portFields, portShown, serverNotes } from "../lib/settingsFields";
 import { Button, Card, PageHeader, Segmented, Switch, inputClass } from "../components/ui";
 
 type Os = EnvPaths["os"];
-
-/** `only` limits a field to the platforms where it does anything; `both` to when both web servers run. */
-const portFields: { key: keyof SettingsT["ports"]; label: string; hint: string; only?: Os[]; both?: boolean }[] = [
-  { key: "http", label: "HTTP", hint: "Main web server" },
-  { key: "https", label: "HTTPS", hint: "Main web server, SSL" },
-  { key: "nginxHttp", label: "Nginx HTTP", hint: "Nginx next to Apache", both: true },
-  { key: "nginxHttps", label: "Nginx HTTPS", hint: "Nginx next to Apache", both: true },
-  { key: "mysql", label: "MariaDB", hint: "Database" },
-  { key: "mysqlServer", label: "MySQL", hint: "Database, next to MariaDB" },
-  { key: "phpFpm", label: "PHP FastCGI", hint: "First of 10 ports per PHP version" },
-  { key: "redis", label: "Redis", hint: "Cache and queues" },
-  { key: "memcached", label: "Memcached", hint: "Memory cache" },
-];
 
 /** Settings → section index; ids are the anchors. */
 const sections = [
@@ -150,7 +138,7 @@ export default function Settings() {
       for (const key of ["settings", "installed", "services", "paths", "sites"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
-      notify("info", "Settings saved. Restart running services to apply port changes.");
+      notify("info", "Settings applied. Running services that use them were restarted.");
     },
     onError: (e) => notify("error", String(e)),
   });
@@ -181,9 +169,6 @@ export default function Settings() {
                 <CheckCircle2 size={17} className="text-accent-text" /> All changes saved
               </span>
             )}
-            <Button variant="primary" onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
-              <Save size={16} /> Save changes
-            </Button>
           </div>
         }
       />
@@ -296,27 +281,33 @@ export default function Settings() {
             </Row>
           </Section>
 
-          <Section id="web" title="Web server" subtitle="Which server runs your sites.">
-            <Row
-              label="Server"
-              hint={
-                draft.webServer === "both"
-                  ? `Apache keeps ports ${draft.ports.http}/${draft.ports.https}; Nginx uses ${draft.ports.nginxHttp}/${draft.ports.nginxHttps}. Pick a server per site on the Sites page.`
-                  : draft.webServer === "nginx"
-                    ? "Nginx serves every site. It ignores .htaccess; unknown URLs go to index.php, which suits Laravel, Symfony and WordPress."
-                    : "Apache serves every site and honours .htaccess files, like XAMPP and Laragon."
-              }
-            >
-              <Segmented
-                value={draft.webServer}
-                onChange={(webServer) => set({ webServer })}
-                options={[
-                  { value: "apache", label: "Apache" },
-                  { value: "nginx", label: "Nginx" },
-                  { value: "both", label: "Both" },
-                ]}
-              />
-            </Row>
+          <Section id="web" title="Web servers" subtitle="Which servers run your sites. Several can run side by side, each site on one of them.">
+            {allServers.map((server) => {
+              const on = draft.webServers.includes(server);
+              const only = on && draft.webServers.length === 1;
+              return (
+                <Row key={server} label={runtimeLabels[server]} hint={only ? `${serverNotes[server]} At least one server stays on.` : serverNotes[server]}>
+                  <Switch
+                    checked={on}
+                    disabled={only}
+                    onChange={(v) => set({ webServers: v ? [...draft.webServers, server] : draft.webServers.filter((s) => s !== server) })}
+                    label={`Run ${runtimeLabels[server]}`}
+                  />
+                </Row>
+              );
+            })}
+            {draft.webServers.length > 1 && (
+              <Row
+                label="Primary server"
+                hint={`It has ports ${draft.ports.http}/${draft.ports.https}, localhost and the developer tools; the others use their own ports (below). Pick each site's server on the Sites page.`}
+              >
+                <Segmented
+                  value={draft.webServers[0]}
+                  onChange={(primary: Server) => set({ webServers: [primary, ...draft.webServers.filter((s) => s !== primary)] })}
+                  options={draft.webServers.map((s) => ({ value: s, label: runtimeLabels[s] }))}
+                />
+              </Row>
+            )}
             {os === "windows" && (
               <Row label="PHP workers per version" hint="Each handles one request at a time. 4 suits most projects; raise it for parallel requests.">
                 <input
@@ -354,8 +345,8 @@ export default function Settings() {
           </Section>
 
           <Section id="versions" title="Active versions" subtitle="Which installed version each service runs. Sites can pick their own PHP.">
-            {(["apache", "nginx", "php", "mariadb", "mysql", "composer"] as Runtime[])
-              .filter((r) => (r === "apache" ? draft.webServer !== "nginx" : r === "nginx" ? draft.webServer !== "apache" : true))
+            {(["apache", "nginx", "caddy", "frankenphp", "php", "mariadb", "mysql", "composer", "java", "tomcat"] as Runtime[])
+              .filter((r) => !(allServers as Runtime[]).includes(r) || draft.webServers.includes(r as Server))
               .map((runtime) => {
                 const options = installed.data?.find((i) => i.runtime === runtime)?.versions ?? [];
                 return (
@@ -394,10 +385,10 @@ export default function Settings() {
               })}
           </Section>
 
-          <Section id="ports" title="Ports" subtitle="Network ports used by local services. Restart a service to apply a change.">
+          <Section id="ports" title="Ports" subtitle="Network ports used by local services. Running services restart when you apply a change.">
             <div className="grid sm:grid-cols-2">
               {portFields
-                .filter((f) => (!f.only || (os && f.only.includes(os))) && (!f.both || draft.webServer === "both"))
+                .filter((f) => portShown(f, draft, os))
                 .map(({ key, label, hint }) => (
                   <div key={key} className="flex items-center gap-4 border-b border-line px-5 py-3 sm:odd:border-r">
                     <div className="min-w-0 flex-1">
@@ -525,6 +516,15 @@ export default function Settings() {
           {uninstalling && <UninstallDialog onClose={() => setUninstalling(false)} />}
         </div>
       </div>
+      <ApplyBar
+        dirty={dirty}
+        busy={save.isPending}
+        onApply={() => save.mutate()}
+        onDiscard={() => {
+          setDraft(settings.data ?? null);
+          setVersions(activeVersions);
+        }}
+      />
     </>
   );
 }

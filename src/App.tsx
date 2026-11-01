@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import PageBoundary from "./components/PageBoundary";
 import clsx from "clsx";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
@@ -126,11 +127,13 @@ export default function App() {
             page === "overview" ? "max-w-[90rem]" : page === "logs" ? "h-full min-h-0 max-w-7xl overflow-hidden pt-4 pb-20" : "max-w-7xl",
           )}
         >
-          {page === "overview" && <Overview />}
-          {page === "sites" && <Sites />}
-          {page === "services" && <Services />}
-          {page === "logs" && <Logs />}
-          {page === "settings" && <Settings />}
+          <PageBoundary key={page}>
+            {page === "overview" && <Overview />}
+            {page === "sites" && <Sites />}
+            {page === "services" && <Services />}
+            {page === "logs" && <Logs />}
+            {page === "settings" && <Settings />}
+          </PageBoundary>
         </main>
       </div>
       <BottomNav />

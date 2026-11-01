@@ -5,11 +5,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   Box,
   Boxes,
   Cake,
   Check,
   Code2,
+  Coffee,
   Droplet,
   ExternalLink,
   FileText,
@@ -19,19 +21,24 @@ import {
   FolderOpen,
   FolderPlus,
   Layers,
+  Leaf,
   Loader2,
   Newspaper,
+  SquareTerminal,
   X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
-import { api, type PackageManager, type ProjectProgress, type ProjectTemplate, type Server } from "../lib/api";
+import { api, runtimeLabels, type DbEngine, type PackageManager, type ProjectProgress, type ProjectTemplate, type Server } from "../lib/api";
 import { useAppStore } from "../lib/store";
-import { Button, Switch, inputClass } from "./ui";
+import { Button, Segmented, Switch, inputClass } from "./ui";
 
 /** Icons a template can name (`icon:`); anything else gets a box. */
 const icons: Record<string, LucideIcon> = {
+  coffee: Coffee,
+  leaf: Leaf,
+  terminal: SquareTerminal,
   code: Code2,
   file: FileText,
   flame: Flame,
@@ -56,6 +63,7 @@ const tiles: Record<string, string> = {
   pink: "bg-pink-500/10 text-pink-600",
   rose: "bg-rose-500/10 text-rose-600",
   teal: "bg-teal-500/10 text-teal-600",
+  green: "bg-green-600/10 text-green-700 dark:text-green-400",
   zinc: "bg-zinc-500/15 text-fg",
 };
 
@@ -114,12 +122,14 @@ export default function NewProject() {
   const [withDb, setWithDb] = useState(false);
   const [db, setDb] = useState("");
   const [dbEdited, setDbEdited] = useState(false);
+  const [engine, setEngine] = useState<DbEngine | null>(null);
   const [variables, setVariables] = useState<Record<string, string>>({});
   const [optional, setOptional] = useState<Record<string, boolean>>({});
   const [approved, setApproved] = useState(false);
   const [nodeVersion, setNodeVersion] = useState<string | null>(null);
   const [packageManager, setPackageManager] = useState<PackageManager>("npm");
   const [phase, setPhase] = useState<Phase>({ kind: "form" });
+  const [stepAt, setStepAt] = useState(0);
   const [steps, setSteps] = useState<string[]>([]);
   const [output, setOutput] = useState<string[]>([]);
   const outputEnd = useRef<HTMLDivElement>(null);
@@ -127,13 +137,22 @@ export default function NewProject() {
   const templates = catalog.data?.templates ?? [];
   const template: ProjectTemplate | undefined = templates.find((t) => t.id === templateId) ?? templates[0];
   const phpVersions = installed.data?.find((i) => i.runtime === "php")?.versions ?? [];
-  const hasDatabase = !!installed.data?.some((i) => (i.runtime === "mariadb" || i.runtime === "mysql") && i.active);
-  const dbLabel = settings.data?.defaultDatabase === "mysql" ? "MySQL" : "MariaDB";
+  // The installed servers this template can use, the default database first.
+  const engines = (template?.engines ?? ["mariadb", "mysql"])
+    // SQLite is a file: PHP reads it without anything installed.
+    .filter((e) => e === "sqlite" || installed.data?.some((i) => i.runtime === e && i.active))
+    .sort((a, b) => Number(b === settings.data?.defaultDatabase) - Number(a === settings.data?.defaultDatabase));
+  const chosenEngine = engine && engines.includes(engine) ? engine : (engines[0] ?? null);
+  const hasDatabase = engines.length > 0;
+  const dbLabel = chosenEngine ? runtimeLabels[chosenEngine] : "MariaDB";
+  const engineNames = (template?.engines ?? ["mariadb", "mysql"]).map((e) => runtimeLabels[e]).join(", ").replace(/, ([^,]*)$/, " or $1");
   const taken = sites.data?.sites.some((s) => s.name.toLowerCase() === name.toLowerCase());
   const nameError = name && !validName(name) ? "Letters, numbers, dashes and underscores; start with a letter or number." : taken ? "A folder with this name already exists in www." : null;
   const needsPhp = !!template?.usesPhp && phpVersions.length === 0;
   const nodeVersions = nodeStatus.data?.installed ?? [];
   const needsNode = !!template?.usesNode && !nodeStatus.isLoading && nodeVersions.length === 0;
+  // Python and Java templates run on LampRabit's own versions.
+  const languageMissing = (["python", "java"] as const).find((l) => template?.[l] && !settings.data?.versions[l]);
   const phpInUse = php ?? settings.data?.versions.php ?? null;
   const phpTooOld = !!template?.minPhp && !!phpInUse && !atLeast(phpInUse, template.minPhp);
   const dbUse = template?.database ?? "none";
@@ -176,6 +195,7 @@ export default function NewProject() {
     setDb("");
     setDbEdited(false);
     setPhase({ kind: "form" });
+    setStepAt(0);
     setSteps([]);
     setOutput([]);
   }, [open, settings.data?.httpsByDefault]);
@@ -216,13 +236,48 @@ export default function NewProject() {
       !taken &&
       !needsPhp &&
       !needsNode &&
+      !languageMissing &&
       !phpTooOld &&
       !dbMissing &&
       !missingRequired &&
       (!usesDb || /^[A-Za-z0-9_]{1,64}$/.test(db)) &&
       (risks.length === 0 || approved),
-    [template, name, taken, needsPhp, needsNode, phpTooOld, dbMissing, missingRequired, usesDb, db, risks.length, approved],
+    [template, name, taken, needsPhp, needsNode, languageMissing, phpTooOld, dbMissing, missingRequired, usesDb, db, risks.length, approved],
   );
+
+  // The wizard's steps; Options and Database only when the template has any.
+  const wizardSteps = [
+    { id: "template", label: "Template" },
+    { id: "project", label: "Project" },
+    ...(shownVariables.length > 0 || shownOptional.length > 0 ? [{ id: "options", label: "Options" }] : []),
+    ...(dbUse !== "none" ? [{ id: "database", label: "Database" }] : []),
+    { id: "review", label: "Review" },
+  ] as const;
+  const stepIndex = Math.min(stepAt, wizardSteps.length - 1);
+  const stepId = wizardSteps[stepIndex].id;
+  // What each step needs before Next.
+  const stepReady: Record<(typeof wizardSteps)[number]["id"], boolean> = {
+    template: !!template,
+    project: validName(name) && !taken && !needsPhp && !needsNode && !languageMissing && !phpTooOld,
+    options: !missingRequired,
+    database: !dbMissing && (!usesDb || chosenEngine === "sqlite" || /^[A-Za-z0-9_]{1,64}$/.test(db)),
+    review: canCreate,
+  };
+  const review: [string, string][] = template
+    ? [
+        ["Template", template.name],
+        ["Folder", `www/${name}`],
+        ["Address", `${ssl ? "https" : "http"}://${domain}`],
+        ...(template.usesPhp ? [["PHP", php ?? `Default (${settings.data?.versions.php ?? "none"})`] as [string, string]] : []),
+        ...(template.usesNode ? [["Node.js", `${nodeVersion ?? "NVM's default"} · ${packageManager}`] as [string, string]] : []),
+        ...(template.python ? [["Python", settings.data?.versions.python ?? "not installed"] as [string, string]] : []),
+        ...(template.java ? [["Java", settings.data?.versions.java ?? "not installed"] as [string, string]] : []),
+        ...(settings.data && settings.data.webServers.length > 1 ? [["Web server", runtimeLabels[server ?? settings.data.webServers[0]]] as [string, string]] : []),
+        ...(dbUse !== "none" ? [["Database", usesDb && chosenEngine ? (chosenEngine === "sqlite" ? "SQLite file" : `${db} on ${runtimeLabels[chosenEngine]}`) : "None"] as [string, string]] : []),
+        ...shownVariables.map((v) => [v.label, v.type === "bool" ? (variables[v.id] === "true" ? "Yes" : "No") : (variables[v.id] || "—")] as [string, string]),
+        ...shownOptional.filter((o) => optional[o.id] ?? o.default).map((o) => ["Also", o.label] as [string, string]),
+      ]
+    : [];
 
   if (!open) return null;
   const running = phase.kind === "running";
@@ -240,6 +295,7 @@ export default function NewProject() {
         server,
         ssl,
         database: usesDb ? db : null,
+        engine: usesDb ? chosenEngine : null,
         variables,
         optional,
         approveRisky: approved,
@@ -273,180 +329,246 @@ export default function NewProject() {
             </button>
           )}
         </div>
-
-        {phase.kind === "form" ? (
-          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-semibold">Project name</span>
-              <input autoFocus className={inputClass} placeholder="my-project" value={name} onChange={(e) => setName(e.target.value.trim())} />
-              {nameError ? (
-                <span className="mt-1.5 block text-xs text-danger-text">{nameError}</span>
-              ) : (
-                <span className="mt-1.5 block font-mono text-xs text-muted">
-                  www/{name || "my-project"} → {ssl ? "https" : "http"}://{domain}
-                </span>
-              )}
-            </label>
-
-            <div>
-              <span className="mb-2 block text-sm font-semibold">Start from</span>
-              {catalog.isLoading && <p className="text-sm text-muted">Loading templates…</p>}
-              {catalog.error && <p className="text-sm text-danger-text">{String(catalog.error)}</p>}
-              <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                {templates.map((t) => {
-                  const Icon = icons[t.icon ?? ""] ?? Box;
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => setTemplateId(t.id)}
-                      aria-pressed={template?.id === t.id}
+        {phase.kind === "form" && (
+          <ol className="flex flex-wrap items-center gap-1 border-b border-line px-6 py-3" aria-label="Steps">
+            {wizardSteps.map((st, i) => {
+              const done = i < stepIndex;
+              const current = i === stepIndex;
+              // Earlier steps can be revisited; later ones open once the steps before are ready.
+              const reachable = i <= stepIndex || wizardSteps.slice(0, i).every((p) => stepReady[p.id]);
+              return (
+                <li key={st.id} className="flex items-center gap-1">
+                  {i > 0 && <span className="mx-1 h-px w-5 bg-line" aria-hidden />}
+                  <button
+                    type="button"
+                    disabled={!reachable}
+                    onClick={() => setStepAt(i)}
+                    aria-current={current ? "step" : undefined}
+                    className={clsx(
+                      "flex items-center gap-2 rounded-full px-2.5 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                      current ? "bg-accent-soft font-semibold text-accent-text" : "text-muted hover:text-fg",
+                    )}
+                  >
+                    <span
                       className={clsx(
-                        "flex items-start gap-3 rounded-xl border p-3 text-left transition-colors",
-                        template?.id === t.id ? "border-accent bg-accent-soft" : "border-line hover:border-accent/40",
+                        "flex size-5 items-center justify-center rounded-full text-[11px] font-bold",
+                        current ? "bg-accent text-accent-fg" : done ? "bg-accent-soft text-accent-text" : "bg-surface-2 text-muted",
                       )}
                     >
-                      <div className={clsx("flex size-9 shrink-0 items-center justify-center rounded-lg", tiles[t.color ?? ""] ?? "bg-surface-2 text-fg")}>
-                        <Icon size={18} />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 font-semibold">
-                          <span className="truncate">{t.name}</span>
-                          {t.source === "user" && <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-muted uppercase">Yours</span>}
-                        </div>
-                        <div className="text-xs text-muted">{t.description}</div>
-                        {t.duration && <div className="mt-1 text-[11px] text-muted/80">{t.duration}</div>}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-              {(catalog.data?.broken.length ?? 0) > 0 && (
-                <div className="mt-3 rounded-xl border border-warn/40 bg-warn/10 p-3 text-xs">
-                  <p className="font-semibold text-fg">Some of your templates couldn't be read</p>
-                  <ul className="mt-1 space-y-0.5 text-muted">
-                    {catalog.data!.broken.map((b) => (
-                      <li key={b.file}>
-                        <span className="font-mono">{b.file.split(/[\\/]/).pop()}</span>: {b.error}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              {template?.usesPhp && (
-                <label className="block">
-                  <span className="mb-1.5 block text-sm font-semibold">PHP version</span>
-                  <select className={inputClass} value={php ?? ""} onChange={(e) => setPhp(e.target.value || null)}>
-                    <option value="">Default ({settings.data?.versions.php ?? "not installed"})</option>
-                    {phpVersions.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
-                  {needsPhp ? (
-                    <span className="mt-1.5 block text-xs text-danger-text">Install PHP on the Services page first.</span>
-                  ) : phpTooOld ? (
-                    <span className="mt-1.5 block text-xs text-danger-text">
-                      {template.name} needs PHP {template.minPhp} or newer. Pick another version, or install one from Services → PHP.
+                      {done ? <Check size={11} /> : i + 1}
                     </span>
+                    {st.label}
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+
+        {phase.kind === "form" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            {stepId === "template" && (
+              <div className="space-y-4">
+                <div>
+                  <span className="mb-2 block text-sm font-semibold">Start from</span>
+                  {catalog.isLoading && <p className="text-sm text-muted">Loading templates…</p>}
+                  {catalog.error && <p className="text-sm text-danger-text">{String(catalog.error)}</p>}
+                  <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                    {templates.map((t) => {
+                      const Icon = icons[t.icon ?? ""] ?? Box;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => setTemplateId(t.id)}
+                          aria-pressed={template?.id === t.id}
+                          className={clsx(
+                            "flex items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                            template?.id === t.id ? "border-accent bg-accent-soft" : "border-line hover:border-accent/40",
+                          )}
+                        >
+                          <div className={clsx("flex size-9 shrink-0 items-center justify-center rounded-lg", tiles[t.color ?? ""] ?? "bg-surface-2 text-fg")}>
+                            <Icon size={18} />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 font-semibold">
+                              <span className="truncate">{t.name}</span>
+                              {t.source === "user" && <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-muted uppercase">Yours</span>}
+                            </div>
+                            <div className="text-xs text-muted">{t.description}</div>
+                            {t.duration && <div className="mt-1 text-[11px] text-muted/80">{t.duration}</div>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                </div>
+                  {(catalog.data?.broken.length ?? 0) > 0 && (
+                    <div className="mt-3 rounded-xl border border-warn/40 bg-warn/10 p-3 text-xs">
+                      <p className="font-semibold text-fg">Some of your templates couldn't be read</p>
+                      <ul className="mt-1 space-y-0.5 text-muted">
+                        {catalog.data!.broken.map((b) => (
+                          <li key={b.file}>
+                            <span className="font-mono">{b.file.split(/[\\/]/).pop()}</span>: {b.error}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {stepId === "project" && (
+              <div className="space-y-6">
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-semibold">Project name</span>
+                  <input autoFocus className={inputClass} placeholder="my-project" value={name} onChange={(e) => setName(e.target.value.trim())} />
+                  {nameError ? (
+                    <span className="mt-1.5 block text-xs text-danger-text">{nameError}</span>
                   ) : (
-                    template.minPhp && <span className="mt-1.5 block text-xs text-muted">Needs PHP {template.minPhp} or newer.</span>
+                    <span className="mt-1.5 block font-mono text-xs text-muted">
+                      www/{name || "my-project"} → {ssl ? "https" : "http"}://{domain}
+                    </span>
                   )}
                 </label>
-              )}
-              {template?.usesNode && (
-                <>
-                  <label className="block">
-                    <span className="mb-1.5 block text-sm font-semibold">Node.js version</span>
-                    <select className={inputClass} value={nodeVersion ?? ""} onChange={(e) => setNodeVersion(e.target.value || null)}>
-                      <option value="">NVM's default ({nodeStatus.data?.current ?? "none"})</option>
-                      {nodeVersions.map((v) => (
-                        <option key={v} value={v}>
-                          {v}
-                        </option>
-                      ))}
-                    </select>
-                    {needsNode ? (
-                      <span className="mt-1.5 block text-xs text-danger-text">Install Node.js on the Services page first (Node.js, through NVM).</span>
-                    ) : (
-                      <span className="mt-1.5 block text-xs text-muted">The project runs on this version; NVM's own default doesn't change.</span>
-                    )}
-                  </label>
-                  <label className="block">
-                    <span className="mb-1.5 block text-sm font-semibold">Package manager</span>
-                    <select className={inputClass} value={packageManager} onChange={(e) => setPackageManager(e.target.value as PackageManager)}>
-                      <option value="npm">npm</option>
-                      <option value="pnpm">pnpm</option>
-                      <option value="yarn">Yarn</option>
-                      <option value="bun">Bun</option>
-                    </select>
-                    <span className="mt-1.5 block text-xs text-muted">pnpm and Yarn run through npx when they aren't installed; Bun has to be.</span>
-                  </label>
-                </>
-              )}
-              {settings.data?.webServer === "both" && (
-                <label className="block">
-                  <span className="mb-1.5 block text-sm font-semibold">Web server</span>
-                  <select className={inputClass} value={server ?? ""} onChange={(e) => setServer((e.target.value || null) as Server | null)}>
-                    <option value="">Default (Apache)</option>
-                    <option value="apache">Apache</option>
-                    <option value="nginx">Nginx</option>
-                  </select>
-                </label>
-              )}
-              {shownVariables.map((v) => {
-                // A label would forward clicks on its text to the first chip of a multi field.
-                const Field = v.type === "multi" ? "div" : "label";
-                return (
-                <Field key={v.id} className={clsx("block", (v.type === "bool" || v.type === "multi") && "sm:col-span-2")}>
-                  {v.type === "bool" ? (
-                    <span className="flex items-center justify-between gap-4">
-                      <span>
-                        <span className="block text-sm font-semibold">{v.label}</span>
-                        {v.help && <span className="block text-xs text-muted">{v.help}</span>}
-                      </span>
-                      <Switch checked={variables[v.id] === "true"} onChange={(on) => setVariables((cur) => ({ ...cur, [v.id]: String(on) }))} label={v.label} />
-                    </span>
-                  ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {template && languageMissing && (
+                    <p className="flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger-text">
+                      <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden />
+                      {template.name} runs on {runtimeLabels[languageMissing]} {template[languageMissing]} or newer. Install it on the Services page (Languages → {runtimeLabels[languageMissing]}) first.
+                    </p>
+                  )}
+                  {template?.usesPhp && (
+                    <label className="block">
+                      <span className="mb-1.5 block text-sm font-semibold">PHP version</span>
+                      <select className={inputClass} value={php ?? ""} onChange={(e) => setPhp(e.target.value || null)}>
+                        <option value="">Default ({settings.data?.versions.php ?? "not installed"})</option>
+                        {phpVersions.map((v) => (
+                          <option key={v} value={v}>
+                            {v}
+                          </option>
+                        ))}
+                      </select>
+                      {needsPhp ? (
+                        <span className="mt-1.5 block text-xs text-danger-text">Install PHP on the Services page first.</span>
+                      ) : phpTooOld ? (
+                        <span className="mt-1.5 block text-xs text-danger-text">
+                          {template.name} needs PHP {template.minPhp} or newer. Pick another version, or install one from Services → PHP.
+                        </span>
+                      ) : (
+                        template.minPhp && <span className="mt-1.5 block text-xs text-muted">Needs PHP {template.minPhp} or newer.</span>
+                      )}
+                    </label>
+                  )}
+                  {template?.usesNode && (
                     <>
-                      <span className="mb-1.5 block text-sm font-semibold">
-                        {v.label}
-                        {v.required && <span className="text-danger-text"> *</span>}
-                      </span>
-                      {v.type === "choice" ? (
-                        <select className={inputClass} value={variables[v.id] ?? ""} onChange={(e) => setVariables((cur) => ({ ...cur, [v.id]: e.target.value }))}>
-                          {shownOptions(v).map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
+                      <label className="block">
+                        <span className="mb-1.5 block text-sm font-semibold">Node.js version</span>
+                        <select className={inputClass} value={nodeVersion ?? ""} onChange={(e) => setNodeVersion(e.target.value || null)}>
+                          <option value="">NVM's default ({nodeStatus.data?.current ?? "none"})</option>
+                          {nodeVersions.map((v) => (
+                            <option key={v} value={v}>
+                              {v}
                             </option>
                           ))}
                         </select>
-                      ) : v.type === "multi" ? (
-                        <span className="flex flex-wrap gap-1.5" role="group" aria-label={v.label}>
-                          {shownOptions(v).map((o) => {
-                            const picked = (variables[v.id] ?? "").split(",").filter(Boolean);
-                            const on = picked.includes(o.value);
-                            return (
-                              <button
-                                key={o.value}
-                                type="button"
-                                aria-pressed={on}
-                                onClick={() =>
-                                  setVariables((cur) => ({ ...cur, [v.id]: (on ? picked.filter((x) => x !== o.value) : [...picked, o.value]).join(",") }))
-                                }
-                                className={clsx(
-                                  "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
-                                  on ? "border-accent bg-accent-soft text-accent-text" : "border-line text-muted hover:border-accent/40 hover:text-fg",
-                                )}
-                              >
-                                {on && <Check size={12} />}
-                                {o.label}
-                              </button>
-                            );
-                          })}
+                        {needsNode ? (
+                          <span className="mt-1.5 block text-xs text-danger-text">Install Node.js on the Services page first (Node.js, through NVM).</span>
+                        ) : (
+                          <span className="mt-1.5 block text-xs text-muted">The project runs on this version; NVM's own default doesn't change.</span>
+                        )}
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-sm font-semibold">Package manager</span>
+                        <select className={inputClass} value={packageManager} onChange={(e) => setPackageManager(e.target.value as PackageManager)}>
+                          <option value="npm">npm</option>
+                          <option value="pnpm">pnpm</option>
+                          <option value="yarn">Yarn</option>
+                          <option value="bun">Bun</option>
+                        </select>
+                        <span className="mt-1.5 block text-xs text-muted">pnpm and Yarn run through npx when they aren't installed; Bun has to be.</span>
+                      </label>
+                    </>
+                  )}
+                  {settings.data && settings.data.webServers.length > 1 && (
+                    <label className="block">
+                      <span className="mb-1.5 block text-sm font-semibold">Web server</span>
+                      <select className={inputClass} value={server ?? ""} onChange={(e) => setServer((e.target.value || null) as Server | null)}>
+                        <option value="">Default ({runtimeLabels[settings.data.webServers[0]]})</option>
+                        {settings.data.webServers.map((s) => (
+                          <option key={s} value={s}>
+                            {runtimeLabels[s]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </div>
+                <div className="divide-y divide-line rounded-xl bg-surface-2">
+                  <div className="flex items-center justify-between gap-4 px-4 py-3">
+                    <div>
+                      <div className="text-sm font-semibold">HTTPS</div>
+                      <div className="text-xs text-muted">A trusted local certificate for {domain}.</div>
+                    </div>
+                    <Switch checked={ssl} onChange={setSsl} label="HTTPS" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {stepId === "options" && (
+              <div className="space-y-6">
+                {shownVariables.length > 0 && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                  {shownVariables.map((v) => {
+                    // A label would forward clicks on its text to the first chip of a multi field.
+                    const Field = v.type === "multi" ? "div" : "label";
+                    return (
+                    <Field key={v.id} className={clsx("block", (v.type === "bool" || v.type === "multi") && "sm:col-span-2")}>
+                      {v.type === "bool" ? (
+                        <span className="flex items-center justify-between gap-4">
+                          <span>
+                            <span className="block text-sm font-semibold">{v.label}</span>
+                            {v.help && <span className="block text-xs text-muted">{v.help}</span>}
+                          </span>
+                          <Switch checked={variables[v.id] === "true"} onChange={(on) => setVariables((cur) => ({ ...cur, [v.id]: String(on) }))} label={v.label} />
+                        </span>
+                      ) : (
+                        <>
+                          <span className="mb-1.5 block text-sm font-semibold">
+                            {v.label}
+                            {v.required && <span className="text-danger-text"> *</span>}
+                          </span>
+                          {v.type === "choice" ? (
+                            <select className={inputClass} value={variables[v.id] ?? ""} onChange={(e) => setVariables((cur) => ({ ...cur, [v.id]: e.target.value }))}>
+                              {shownOptions(v).map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : v.type === "multi" ? (
+                            <span className="flex flex-wrap gap-1.5" role="group" aria-label={v.label}>
+                              {shownOptions(v).map((o) => {
+                                const picked = (variables[v.id] ?? "").split(",").filter(Boolean);
+                                const on = picked.includes(o.value);
+                                return (
+                                  <button
+                                    key={o.value}
+                                    type="button"
+                                    aria-pressed={on}
+                                    onClick={() =>
+                                      setVariables((cur) => ({ ...cur, [v.id]: (on ? picked.filter((x) => x !== o.value) : [...picked, o.value]).join(",") }))
+                                    }
+                                    className={clsx(
+                                      "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
+                                      on ? "border-accent bg-accent-soft text-accent-text" : "border-line text-muted hover:border-accent/40 hover:text-fg",
+                                    )}
+                                  >
+                                    {on && <Check size={12} />}
+                                    {o.label}
+                                  </button>
+                                );
+                              })}
                         </span>
                       ) : (
                         <input className={inputClass} value={variables[v.id] ?? ""} onChange={(e) => setVariables((cur) => ({ ...cur, [v.id]: e.target.value }))} />
@@ -457,17 +579,28 @@ export default function NewProject() {
                 </Field>
                 );
               })}
-            </div>
-
-            <div className="divide-y divide-line rounded-xl bg-surface-2">
-              <div className="flex items-center justify-between gap-4 px-4 py-3">
-                <div>
-                  <div className="text-sm font-semibold">HTTPS</div>
-                  <div className="text-xs text-muted">A trusted local certificate for {domain}.</div>
-                </div>
-                <Switch checked={ssl} onChange={setSsl} label="HTTPS" />
+                  </div>
+                )}
+                {shownOptional.length > 0 && (
+                  <div className="divide-y divide-line rounded-xl bg-surface-2">
+                  {shownOptional.map((o) => (
+                    <label key={o.id} className="flex cursor-pointer items-center gap-3 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-(--accent)"
+                        checked={optional[o.id] ?? o.default}
+                        onChange={(e) => setOptional((cur) => ({ ...cur, [o.id]: e.target.checked }))}
+                      />
+                      <span className="text-sm">{o.label}</span>
+                    </label>
+                  ))}
+                  </div>
+                )}
               </div>
-              {dbUse !== "none" && (
+            )}
+
+            {stepId === "database" && (
+              <div className="divide-y divide-line rounded-xl bg-surface-2">
                 <div className="px-4 py-3">
                   <div className="flex items-center justify-between gap-4">
                     <div>
@@ -476,13 +609,24 @@ export default function NewProject() {
                         {hasDatabase
                           ? `${dbLabel}, user root without a password. It starts if it isn't running.`
                           : dbUse === "required"
-                            ? `${template?.name} needs a database: install MariaDB or MySQL on the Services page first.`
-                            : "Install MariaDB or MySQL on the Services page to create one."}
+                            ? `${template?.name} needs a database: install ${engineNames} on the Services page first.`
+                            : `Install ${engineNames} on the Services page to create one.`}
                       </div>
                     </div>
                     {dbUse === "optional" && <Switch checked={withDb} onChange={(v) => hasDatabase && setWithDb(v)} label="Create a database" />}
                   </div>
-                  {usesDb && hasDatabase && (
+                  {usesDb && engines.length > 1 && (
+                    <Segmented
+                      className="mt-3"
+                      value={chosenEngine ?? engines[0]}
+                      onChange={(e: DbEngine) => setEngine(e)}
+                      options={engines.map((e) => ({ value: e, label: runtimeLabels[e] }))}
+                    />
+                  )}
+                  {usesDb && hasDatabase && chosenEngine === "sqlite" && (
+                    <p className="mt-3 text-xs text-muted">A file at database/database.sqlite in the project; nothing to install or start.</p>
+                  )}
+                  {usesDb && hasDatabase && chosenEngine !== "sqlite" && (
                     <input
                       className={clsx(inputClass, "mt-3 font-mono")}
                       value={db}
@@ -494,39 +638,40 @@ export default function NewProject() {
                     />
                   )}
                 </div>
-              )}
-              {shownOptional.map((o) => (
-                <label key={o.id} className="flex cursor-pointer items-center gap-3 px-4 py-3">
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-(--accent)"
-                    checked={optional[o.id] ?? o.default}
-                    onChange={(e) => setOptional((cur) => ({ ...cur, [o.id]: e.target.checked }))}
-                  />
-                  <span className="text-sm">{o.label}</span>
-                </label>
-              ))}
-            </div>
+              </div>
+            )}
 
-            {risks.length > 0 && (
-              <div className="rounded-xl border border-danger/30 bg-danger-soft p-4 text-sm">
-                <p className="flex items-center gap-2 font-semibold text-danger-text">
-                  <AlertTriangle size={16} /> This template runs steps that need your OK
-                </p>
-                <p className="mt-1 text-danger-text/90">It didn't come with LampRabit, so check what these steps do before running them.</p>
-                <ul className="mt-2 space-y-2">
-                  {risks.map((r) => (
-                    <li key={r.step} className="text-danger-text">
-                      <span className="block text-xs font-semibold">{r.heading}</span>
-                      <code className="selectable mt-0.5 block rounded-md bg-surface/70 px-2 py-1 font-mono text-xs break-all">{r.command}</code>
-                      <span className="mt-0.5 block text-xs opacity-80">{r.reasons.join(" · ")}</span>
-                    </li>
+            {stepId === "review" && (
+              <div className="space-y-4">
+                <dl className="divide-y divide-line rounded-xl bg-surface-2 text-sm">
+                  {review.map(([label, value]) => (
+                    <div key={label} className="flex gap-4 px-4 py-2.5">
+                      <dt className="w-32 shrink-0 text-muted">{label}</dt>
+                      <dd className="min-w-0 flex-1 font-medium wrap-break-word">{value}</dd>
+                    </div>
                   ))}
-                </ul>
-                <label className="mt-3 flex cursor-pointer items-center gap-2 font-medium text-danger-text">
-                  <input type="checkbox" className="size-4 accent-(--danger)" checked={approved} onChange={(e) => setApproved(e.target.checked)} />
-                  I've checked these steps; run them
-                </label>
+                </dl>
+              {risks.length > 0 && (
+                <div className="rounded-xl border border-danger/30 bg-danger-soft p-4 text-sm">
+                  <p className="flex items-center gap-2 font-semibold text-danger-text">
+                    <AlertTriangle size={16} /> This template runs steps that need your OK
+                  </p>
+                  <p className="mt-1 text-danger-text/90">It didn't come with LampRabit, so check what these steps do before running them.</p>
+                  <ul className="mt-2 space-y-2">
+                    {risks.map((r) => (
+                      <li key={r.step} className="text-danger-text">
+                        <span className="block text-xs font-semibold">{r.heading}</span>
+                        <code className="selectable mt-0.5 block rounded-md bg-surface/70 px-2 py-1 font-mono text-xs break-all">{r.command}</code>
+                        <span className="mt-0.5 block text-xs opacity-80">{r.reasons.join(" · ")}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <label className="mt-3 flex cursor-pointer items-center gap-2 font-medium text-danger-text">
+                    <input type="checkbox" className="size-4 accent-(--danger)" checked={approved} onChange={(e) => setApproved(e.target.checked)} />
+                    I've checked these steps; run them
+                  </label>
+                </div>
+              )}
               </div>
             )}
           </div>
@@ -584,10 +729,22 @@ export default function NewProject() {
               >
                 <FolderCog size={15} /> Your templates
               </Button>
-              <Button onClick={() => setOpen(false)}>Cancel</Button>
-              <Button variant="primary" onClick={create} disabled={!canCreate}>
-                <FolderPlus size={16} /> Create project
-              </Button>
+              {stepIndex === 0 ? (
+                <Button onClick={() => setOpen(false)}>Cancel</Button>
+              ) : (
+                <Button onClick={() => setStepAt(stepIndex - 1)}>
+                  <ArrowLeft size={16} /> Back
+                </Button>
+              )}
+              {stepId === "review" ? (
+                <Button variant="primary" onClick={create} disabled={!canCreate}>
+                  <FolderPlus size={16} /> Create project
+                </Button>
+              ) : (
+                <Button variant="primary" onClick={() => setStepAt(stepIndex + 1)} disabled={!stepReady[stepId]}>
+                  Next <ArrowRight size={16} />
+                </Button>
+              )}
             </>
           )}
           {running && <span className="text-sm text-muted">Working… you can keep this open.</span>}

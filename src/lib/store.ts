@@ -61,7 +61,7 @@ interface AppStore {
 
 // View preferences remembered between launches. Storage can be unavailable; a choice
 // then lasts for this session only.
-function readPref(key: string): string | null {
+export function readPref(key: string): string | null {
   try {
     return localStorage.getItem(key);
   } catch {
@@ -69,7 +69,7 @@ function readPref(key: string): string | null {
   }
 }
 
-function writePref(key: string, value: string | null) {
+export function writePref(key: string, value: string | null) {
   try {
     if (value === null) localStorage.removeItem(key);
     else localStorage.setItem(key, value);

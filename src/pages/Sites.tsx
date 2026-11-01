@@ -24,7 +24,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
-import { api, serviceLabels, type AppStatus, type Language, type ProjectFacts, type Server, type Settings, type Site, type SitesInfo } from "../lib/api";
+import { api, runtimeLabels, serviceLabels, type AppStatus, type Language, type ProjectFacts, type Server, type Settings, type Site, type SitesInfo } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { toolUrl } from "../lib/tools";
 import { formatAgo, useNow } from "../lib/time";
@@ -57,7 +57,7 @@ const frameworkStyle: Record<string, string> = {
   Static: "bg-surface-2 text-muted",
 };
 
-const languageLabel: Record<Language, string> = { php: "PHP", node: "Node.js", static: "Static" };
+const languageLabel: Record<Language, string> = { php: "PHP", node: "Node.js", java: "Java", python: "Python", static: "Static" };
 
 type Sort = "recent" | "name";
 type Tab = "overview" | "commands" | "settings";
@@ -367,31 +367,23 @@ function ProjectDetail({ site, info, status, tab, setTab }: { site: Site; info?:
   return (
     <div className="space-y-4">
       <Card className="p-5">
-        <div className="flex flex-wrap items-start gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <Avatar site={site} status={status} size="lg" />
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="truncate text-xl leading-tight font-bold">{site.name}</h2>
-              {external ? <LivePill site={site} /> : (dynamic || devServer) && <AppState status={status} />}
-            </div>
-            <button onClick={() => openUrl(site.url).catch(onError)} className="mt-1 flex max-w-full items-center gap-1.5 font-mono text-sm text-muted hover:text-accent-text" title={`Open ${site.url}`}>
-              {site.ssl ? <Lock size={12} className="shrink-0" aria-hidden /> : <LockOpen size={12} className="shrink-0" aria-hidden />}
-              <span className="truncate">{site.url.replace(/\/$/, "")}</span>
-            </button>
-            <div className="mt-3 flex flex-wrap gap-1.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+              <h2 className="truncate text-2xl leading-tight font-bold tracking-tight">{site.name}</h2>
               {site.framework && site.framework !== "Static" && site.framework !== "PHP" && (
                 <Chip className={frameworkStyle[site.framework]}>
                   {site.framework}
                   {facts.data?.frameworkVersion && <span className="font-mono opacity-80"> {facts.data.frameworkVersion}</span>}
                 </Chip>
               )}
-              {site.language === "php" && <Chip>PHP {php ?? ""}</Chip>}
-              {(site.language === "node" || devServer) && <Chip>Node.js {status?.node ?? app.data?.config.node ?? site.node ?? nodeStatus.data?.current ?? ""}</Chip>}
-              {site.language === "static" && <Chip>Static HTML</Chip>}
-              {site.nodeProject && app.data && <Chip>{app.data.config.packageManager ?? app.data.detectedPackageManager}</Chip>}
-              <Chip>{serviceLabels[site.server]}</Chip>
-              {facts.data?.template && <Chip>From the {facts.data.template} template</Chip>}
+              {external ? <LivePill site={site} /> : (dynamic || devServer) && <AppState status={status} />}
             </div>
+            <button onClick={() => openUrl(site.url).catch(onError)} className="mt-1 flex max-w-full items-center gap-1.5 font-mono text-sm text-muted hover:text-accent-text" title={`Open ${site.url}`}>
+              {site.ssl ? <Lock size={12} className="shrink-0" aria-hidden /> : <LockOpen size={12} className="shrink-0" aria-hidden />}
+              <span className="truncate">{site.url.replace(/\/$/, "")}</span>
+            </button>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {dynamic && !external && <AppControls name={site.name} status={status} />}
@@ -400,6 +392,22 @@ function ProjectDetail({ site, info, status, tab, setTab }: { site: Site; info?:
             </Button>
           </div>
         </div>
+
+        {/* What it runs on, as one quiet line: the details are on the Overview tab. */}
+        <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+          {stackParts(site, {
+            php: site.server === "frankenphp" ? "FrankenPHP's built-in PHP" : php ? `PHP ${php}` : "PHP (none installed)",
+            java: settings.data?.versions.java ? `Java ${settings.data.versions.java}` : "Java",
+            python: settings.data?.versions.python ? `Python ${settings.data.versions.python}` : "Python",
+            node: site.language === "node" || devServer ? `Node.js ${status?.node ?? app.data?.config.node ?? site.node ?? nodeStatus.data?.current ?? ""}`.trim() : null,
+            pm: site.nodeProject && app.data ? (app.data.config.packageManager ?? app.data.detectedPackageManager) : null,
+          }).map((part, i) => (
+            <span key={part} className="flex items-center gap-2">
+              {i > 0 && <span aria-hidden className="text-line">•</span>}
+              {part}
+            </span>
+          ))}
+        </p>
 
         <ServingLine site={site} status={status} command={app.data ? appCommand(app.data.config) : null} php={php} />
 
@@ -456,6 +464,18 @@ function ProjectDetail({ site, info, status, tab, setTab }: { site: Site; info?:
   );
 }
 
+/** The project's language, runtime versions and package manager, for the header line. */
+function stackParts(site: Site, v: { php: string; java: string; python: string; node: string | null; pm: string | null }): string[] {
+  const parts: string[] = [];
+  if (site.language === "php") parts.push(v.php);
+  if (site.language === "java") parts.push(v.java);
+  if (site.language === "python") parts.push(v.python);
+  if (site.language === "static") parts.push("Static HTML");
+  if (v.node) parts.push(v.node);
+  if (v.pm) parts.push(v.pm);
+  return parts;
+}
+
 function Chip({ className, children }: { className?: string; children: ReactNode }) {
   return <span className={clsx("inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium", className ?? "bg-surface-2 text-muted")}>{children}</span>;
 }
@@ -502,10 +522,13 @@ function ServingLine({ site, status, command, php }: { site: Site; status?: AppS
         {LampRabits && command && <code className="ml-2 rounded bg-surface px-1.5 py-0.5 font-mono text-xs">{command.split("{port}").join(String(site.route.port))}</code>}
       </>
     );
+  } else if (site.proxy && site.language === "java") {
+    target = <>Tomcat, which serves the project's web app</>;
   } else if (site.language === "php") {
     target = (
       <>
-        <span className="font-mono">{folder}</span> with PHP {php ?? ""} (FastCGI)
+        <span className="font-mono">{folder}</span>{" "}
+        {site.server === "frankenphp" ? "with FrankenPHP's built-in PHP" : php ? `with PHP ${php}` : "(no PHP installed)"}
       </>
     );
   } else {
@@ -522,6 +545,7 @@ function ServingLine({ site, status, command, php }: { site: Site; status?: AppS
         <span className="shrink-0 font-mono text-muted">{site.domain}</span>
         <ArrowRight size={13} className="shrink-0 text-muted" aria-hidden />
         <span className="min-w-0 flex-1 truncate">{target}</span>
+        <span className="shrink-0 text-xs text-muted">by {serviceLabels[site.server]}</span>
         {site.route && site.ports.length > 1 && (
           <select
             value={site.routePort ?? ""}
@@ -643,9 +667,15 @@ function Overview({
             </button>
           </Fact>
           <Fact label="Served">
-            {site.route ? `By the dev server on port ${site.route.port}, behind ` : site.language === "php" ? "With PHP by " : "As files by "}
+            {site.route
+              ? `By the dev server on port ${site.route.port}, behind `
+              : site.language === "java" && site.proxy
+                ? "By Tomcat, behind "
+                : site.language === "php"
+                  ? site.server === "frankenphp" ? "With its built-in PHP by " : "With PHP by "
+                  : "As files by "}
             {serviceLabels[site.server]}
-            {!site.route && <span className="text-muted"> from {relative(site.path, site.docroot)}</span>}
+            {!site.route && !site.proxy && <span className="text-muted"> from {relative(site.path, site.docroot)}</span>}
           </Fact>
           {site.ports.length > 0 && (
             <Fact label="Listening">
@@ -663,7 +693,13 @@ function Overview({
             <Fact label="Port">{site.app?.port ? `${site.app.port} when started here` : <span className="text-muted">picked when it starts</span>}</Fact>
           )}
           <Fact label="HTTPS">{site.ssl ? "On, with a local certificate" : "Off"}</Fact>
-          {site.language === "php" && (
+          {site.language === "php" && site.server === "frankenphp" && (
+            <Fact label="PHP">
+              FrankenPHP's built-in PHP
+              {facts?.phpRequirement && <span className="text-muted"> · needs {facts.phpRequirement}</span>}
+            </Fact>
+          )}
+          {site.language === "php" && site.server !== "frankenphp" && (
             <Fact label="PHP">
               {php ?? "none installed"}
               {!site.php && <span className="text-muted"> (default)</span>}
@@ -846,7 +882,12 @@ function SettingsTab({ site, settings, status }: { site: Site; settings?: Settin
     <div className="space-y-4">
       <Section title="Web server">
         <div className={clsx("space-y-4 text-sm", busy && "opacity-60")}>
-          {site.language === "php" && (
+          {site.language === "php" && site.server === "frankenphp" && (
+            <Row title="PHP version" hint="FrankenPHP runs its own built-in PHP, so the PHP versions and extensions installed in LampRabit don't apply here.">
+              <span className="text-muted">FrankenPHP's PHP</span>
+            </Row>
+          )}
+          {site.language === "php" && site.server !== "frankenphp" && (
             <Row title="PHP version" hint="Each site can use its own; the others keep theirs.">
               <select value={site.php ?? ""} disabled={busy} onChange={(e) => setPhp.mutate(e.target.value || null)} className={select}>
                 <option value="">Default · {settings?.versions.php ?? "none"}</option>
@@ -858,14 +899,17 @@ function SettingsTab({ site, settings, status }: { site: Site; settings?: Settin
               </select>
             </Row>
           )}
-          {settings?.webServer === "both" && (
+          {settings && settings.webServers.length > 1 && (
             <Row
               title="Web server"
-              hint={`Apache uses ports ${settings.ports.http}/${settings.ports.https} and Nginx ${settings.ports.nginxHttp}/${settings.ports.nginxHttps}; the other server redirects this domain to the one you pick.`}
+              hint={`${runtimeLabels[settings.webServers[0]]}, the primary server, uses ports ${settings.ports.http}/${settings.ports.https}; the others their own. The other servers redirect this domain to the one you pick.`}
             >
               <select value={site.server} disabled={busy} onChange={(e) => setServer.mutate(e.target.value as Server)} className={select}>
-                <option value="apache">Apache</option>
-                <option value="nginx">Nginx</option>
+                {settings.webServers.map((s) => (
+                  <option key={s} value={s}>
+                    {runtimeLabels[s]}
+                  </option>
+                ))}
               </select>
             </Row>
           )}

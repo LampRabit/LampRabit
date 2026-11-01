@@ -27,6 +27,13 @@ import {
   RotateCw,
   ScrollText,
   Server as ServerIcon,
+  ShieldCheck,
+  Gauge,
+  Leaf,
+  BarChart3,
+  Network,
+  Flame,
+  Cpu,
   Square,
   Sun,
   SunMedium,
@@ -47,15 +54,16 @@ import {
   type Settings,
   type Site,
   type SitesInfo,
+  type Runtime,
 } from "../lib/api";
-import { useAppStore, type Activity } from "../lib/store";
+import { readPref, useAppStore, writePref, type Activity } from "../lib/store";
 import { toolUrl } from "../lib/tools";
 import { runtimeTiles } from "../components/runtimes";
 import { formatClock, formatUptime, useNow } from "../lib/time";
 import { randomQuote } from "../lib/quotes";
 import { connection, copyText, envText } from "../lib/connections";
 import { formatBytes, formatCpu, useUsage, useUsageSampler } from "../lib/usage";
-import { serverEnabled, useStack } from "../lib/stack";
+import { isServer, primaryServer, serverEnabled, useStack } from "../lib/stack";
 import { useHotkeys } from "../lib/shortcuts";
 import { Button, Card, Pill, Segmented } from "../components/ui";
 import Menu from "../components/Menu";
@@ -74,7 +82,15 @@ const greetings = [
 const serviceMeta: Record<ServiceKind, { icon: typeof Feather; tile: string; blurb: string }> = {
   apache: { icon: Feather, tile: "bg-rose-500/10 text-rose-500", blurb: "Web server for your local sites" },
   nginx: { icon: ServerIcon, tile: "bg-emerald-600/10 text-emerald-600", blurb: "Fast web server for your local sites" },
+  caddy: { icon: ShieldCheck, tile: runtimeTiles.caddy.className, blurb: "Web server with a short config file" },
+  frankenphp: { icon: Flame, tile: runtimeTiles.frankenphp.className, blurb: "Web server with PHP built in" },
+  tomcat: { icon: Cpu, tile: runtimeTiles.tomcat.className, blurb: "Runs your Java web apps" },
   mariadb: { icon: Database, tile: "bg-amber-600/12 text-amber-600", blurb: "Database server for your local sites" },
+  postgres: { icon: Database, tile: runtimeTiles.postgres.className, blurb: "PostgreSQL database server" },
+  pgadmin: { icon: Gauge, tile: runtimeTiles.pgadmin.className, blurb: "PostgreSQL admin in the browser" },
+  mongodb: { icon: Leaf, tile: runtimeTiles.mongodb.className, blurb: "Document database" },
+  clickhouse: { icon: BarChart3, tile: runtimeTiles.clickhouse.className, blurb: "Analytics database" },
+  neo4j: { icon: Network, tile: runtimeTiles.neo4j.className, blurb: "Graph database" },
   mysql: { icon: DatabaseZap, tile: runtimeTiles.mysql.className, blurb: "Oracle MySQL, next to MariaDB" },
   mailpit: { icon: Mail, tile: "bg-sky-500/10 text-sky-500", blurb: "Catches mail sent by your apps" },
   redis: { icon: Zap, tile: "bg-red-500/10 text-red-500", blurb: "Cache, sessions and queues" },
@@ -82,10 +98,14 @@ const serviceMeta: Record<ServiceKind, { icon: typeof Feather; tile: string; blu
 };
 
 /** Services listed only once installed; the core stack is always listed, with an Install button. */
-const optional: ServiceKind[] = ["mysql", "mailpit", "redis", "memcached"];
+const optional: ServiceKind[] = ["tomcat", "postgres", "pgadmin", "mongodb", "clickhouse", "neo4j", "mysql", "mailpit", "redis", "memcached"];
 
-const visible = (s: ServiceInfo, settings?: Settings) =>
-  (!optional.includes(s.kind) || s.installed) && serverEnabled(s.kind, settings?.webServer);
+/**
+ * Installed services, once there are any; before that, the core stack with Install buttons,
+ * so a fresh setup has somewhere to start. Web servers only while enabled in Settings.
+ */
+const visible = (s: ServiceInfo, settings: Settings | undefined, anyInstalled: boolean) =>
+  (s.installed || (!anyInstalled && !optional.includes(s.kind))) && serverEnabled(s.kind, settings?.webServers);
 
 export default function Overview() {
   const now = useNow();
@@ -101,7 +121,8 @@ export default function Overview() {
   const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: 5000 });
   const stack = useStack();
 
-  const list = (services.data ?? []).filter((s) => visible(s, settings.data));
+  const anyInstalled = (services.data ?? []).some((s) => s.installed);
+  const list = (services.data ?? []).filter((s) => visible(s, settings.data, anyInstalled));
   const [selected, setSelected] = useState<Set<ServiceKind>>(new Set());
   const [focus, setFocus] = useState(0);
   const [profilesDialog, setProfilesDialog] = useState<{ initial?: ServiceKind[]; profile?: Settings["profiles"][number] } | null>(null);
@@ -429,6 +450,38 @@ function ProfileTiles({
 }
 
 /** What "Open" does for a service: its site, inbox or database tool. */
+/**
+ * The installed web tools that open a database server, each with the URL that lands on
+ * that server: phpMyAdmin numbers its servers (default database first, as configs.rs
+ * writes them), Adminer takes the address, phpPgAdmin and pgAdmin have LampRabit's
+ * PostgreSQL in their own lists.
+ */
+function dbTools(service: ServiceInfo, sites: SitesInfo | undefined, settings: Settings | undefined): { tool: Runtime; url: string }[] {
+  const mailUi = settings?.ports.mailUi;
+  const at = (tool: Runtime, url: string | undefined, query = "") => (url ? [{ tool, url: `${url}${query}` }] : []);
+  if (service.kind === "mariadb" || service.kind === "mysql") {
+    const order = (["mariadb", "mysql"] as const)
+      .filter((d) => settings?.versions[d])
+      .sort((a, b) => Number(b === settings?.defaultDatabase) - Number(a === settings?.defaultDatabase));
+    return [
+      ...at("phpmyadmin", toolUrl("phpmyadmin", sites, mailUi), `?server=${Math.max(1, order.indexOf(service.kind) + 1)}`),
+      ...at("adminer", toolUrl("adminer", sites, mailUi), `?server=127.0.0.1:${service.port}&username=root`),
+    ];
+  }
+  if (service.kind === "postgres") {
+    return [
+      ...at("adminer", toolUrl("adminer", sites, mailUi), `?pgsql=127.0.0.1:${service.port}&username=root&db=postgres`),
+      ...at("phppgadmin", toolUrl("phppgadmin", sites, mailUi)),
+      ...at("pgadmin", toolUrl("pgadmin", sites, mailUi, settings?.ports.pgadmin)),
+    ];
+  }
+  return [];
+}
+
+/** The tool a database's Open button uses: the one picked last on this device, else the first installed. */
+const preferredTool = (kind: ServiceKind, tools: { tool: Runtime; url: string }[]) =>
+  tools.find((t) => t.tool === readPref(`dbTool.${kind}`)) ?? tools[0];
+
 function openAction(
   service: ServiceInfo,
   sites: SitesInfo | undefined,
@@ -438,23 +491,33 @@ function openAction(
 ): { label: string; icon: typeof ExternalLink; run: () => void; always?: boolean } | null {
   const onError = (e: unknown) => notify("error", String(e));
   const mailUi = settings?.ports.mailUi;
-  if (service.kind === "apache" || service.kind === "nginx") {
+  if (isServer(service.kind)) {
     return { label: "Open in browser", icon: ExternalLink, run: () => openUrl(connection(service.kind, service.port).url + "/").catch(onError) };
   }
-  if (service.kind === "mariadb" || service.kind === "mysql") {
-    // phpMyAdmin, else Adminer; both are served by the web server and reach either database.
-    const tool = (["phpmyadmin", "adminer"] as const).find((t) => toolUrl(t, sites, mailUi));
-    if (!tool) return { label: "Install phpMyAdmin", icon: Table2, run: () => navigate("services"), always: true };
-    // Open on this database's server: phpMyAdmin numbers its servers (default database
-    // first, as configs.rs writes them); Adminer takes the address.
-    const order = (["mariadb", "mysql"] as const)
-      .filter((d) => settings?.versions[d])
-      .sort((a, b) => Number(b === settings?.defaultDatabase) - Number(a === settings?.defaultDatabase));
-    const url =
-      tool === "phpmyadmin"
-        ? `${toolUrl(tool, sites, mailUi)}?server=${Math.max(1, order.indexOf(service.kind) + 1)}`
-        : `${toolUrl(tool, sites, mailUi)}?server=127.0.0.1:${service.port}&username=root`;
-    return { label: `Open ${runtimeLabels[tool]}`, icon: Table2, run: () => openUrl(url).catch(onError) };
+  if (service.kind === "mariadb" || service.kind === "mysql" || service.kind === "postgres") {
+    // The tool picked last for this database (the ⋯ menu lists the others).
+    const tool = preferredTool(service.kind, dbTools(service, sites, settings));
+    if (!tool) {
+      const suggest = service.kind === "postgres" ? "adminer" : "phpmyadmin";
+      return { label: `Install ${runtimeLabels[suggest]}`, icon: Table2, run: () => navigate("services"), always: true };
+    }
+    return { label: `Open ${runtimeLabels[tool.tool]}`, icon: Table2, run: () => openUrl(tool.url).catch(onError) };
+  }
+  if (service.kind === "mongodb") {
+    return settings?.versions.compass
+      ? { label: "Open Compass", icon: Table2, run: () => api.openCompass().catch(onError) }
+      : { label: "Install Compass", icon: Table2, run: () => navigate("services"), always: true };
+  }
+  if (service.kind === "clickhouse") {
+    return { label: "Open console", icon: Table2, run: () => openUrl(`http://localhost:${service.port}/play`).catch(onError) };
+  }
+  if (service.kind === "neo4j") {
+    const url = toolUrl("neo4j", sites, mailUi, service.port);
+    return url ? { label: "Open Neo4j Browser", icon: ExternalLink, run: () => openUrl(url).catch(onError) } : null;
+  }
+  if (service.kind === "pgadmin") {
+    const url = toolUrl("pgadmin", sites, mailUi, settings?.ports.pgadmin);
+    return url ? { label: "Open pgAdmin", icon: ExternalLink, run: () => openUrl(url).catch(onError) } : null;
   }
   if (service.kind === "redis") {
     const url = toolUrl("phpredisadmin", sites, mailUi);
@@ -511,7 +574,7 @@ function ServiceRow({
   const usage = useUsage((s) => s.series[service.kind]);
   // PHP's workers belong to no one service; the web servers show them, since that's
   // where a slow page's time goes.
-  const php = useUsage((s) => (service.kind === "apache" || service.kind === "nginx" ? s.latest.php : undefined));
+  const php = useUsage((s) => (isServer(service.kind) ? s.latest.php : undefined));
   const onError = (e: unknown) => notify("error", String(e));
   // A failed start shows on the row itself (ProblemPanel), so no toast for it.
   const start = useMutation({ mutationFn: () => api.startService(service.kind), onError: () => { } });
@@ -522,6 +585,9 @@ function ServiceRow({
   const busy = service.state === "starting" || service.state === "stopping" || restart.isPending || start.isPending || stop.isPending;
   const degraded = running && service.health?.status === "degraded";
   const conflict = conflictFor(service, ports);
+  // Re-renders the row when a different tool is picked from the menu (the choice itself
+  // lives in the device's preferences).
+  const [, setToolPick] = useState<string | null>(null);
   const action = openAction(service, sites, settings, navigate, notify);
   const conn = connection(service.kind, service.port);
   const connValue = copyText(conn, connMode);
@@ -538,10 +604,26 @@ function ServiceRow({
             ? { tone: "warn" as const, text: service.state === "starting" ? "Starting" : "Stopping" }
             : { tone: "muted" as const, text: "Stopped" };
 
-  const dbMenu =
-    service.kind === "mariadb" || service.kind === "mysql"
-      ? [{ label: "Open command-line client", icon: <TerminalSquare size={15} />, onSelect: () => api.openDbClient(service.kind as DatabaseKind).catch(onError) }]
+  // Every installed web tool for this database; the one picked becomes its Open button's.
+  const tools = dbTools(service, sites, settings);
+  const toolMenu =
+    tools.length > 1
+      ? tools.map((t) => ({
+          label: `Open in ${runtimeLabels[t.tool]}${preferredTool(service.kind, tools)?.tool === t.tool ? " (default)" : ""}`,
+          icon: <Table2 size={15} />,
+          onSelect: () => {
+            writePref(`dbTool.${service.kind}`, t.tool);
+            setToolPick(t.tool);
+            openUrl(t.url).catch(onError);
+          },
+        }))
       : [];
+  const dbMenu = [
+    ...toolMenu,
+    ...(service.kind === "mariadb" || service.kind === "mysql"
+      ? [{ label: "Open command-line client", icon: <TerminalSquare size={15} />, onSelect: () => api.openDbClient(service.kind as DatabaseKind).catch(onError) }]
+      : []),
+  ];
 
   return (
     <article
@@ -651,7 +733,8 @@ function ServiceRow({
             aria-label={`Copy ${service.label} connection ${connMode === "env" ? "as .env lines" : conn.url}`}
           >
             <span className="truncate">
-              {connMode === "url" ? conn.url : conn.env.length === 1 ? envText(conn.env) : `${conn.env[0][0]}=… +${conn.env.length - 1} more`}
+              {/* Tools like pgAdmin have no .env lines; their URL is what there is to copy. */}
+              {connMode === "url" || conn.env.length === 0 ? conn.url : conn.env.length === 1 ? envText(conn.env) : `${conn.env[0][0]}=… +${conn.env.length - 1} more`}
             </span>
             <Copy size={13} className="shrink-0 text-muted group-hover:text-accent-text" />
           </button>
@@ -738,7 +821,7 @@ function QuickShortcuts({ sites, services, settings }: { sites?: SitesInfo; serv
   const notify = useAppStore((s) => s.notify);
   const mailUi = settings?.ports.mailUi;
   const up = (kind: ServiceKind) => services.some((s) => s.kind === kind && s.state === "running");
-  const web = settings?.webServer === "nginx" ? "nginx" : "apache";
+  const web = primaryServer(settings);
   const db = up("mariadb") || up("mysql");
 
   const installed = (kind: ServiceKind) => services.some((s) => s.kind === kind && s.installed);
@@ -790,7 +873,9 @@ function ConnectPanel({ services, onCopy }: { services: ServiceInfo[]; onCopy: (
   const mode = useAppStore((s) => s.connMode);
   const setMode = useAppStore((s) => s.setConnMode);
   const [copied, setCopied] = useState<string | null>(null);
-  const shown = services.filter((s) => s.kind !== "nginx" || !services.some((x) => x.kind === "apache"));
+  // One web server's APP_URL is enough: the first one listed.
+  const web = services.find((s) => isServer(s.kind));
+  const shown = services.filter((s) => !isServer(s.kind) || s === web);
   if (shown.length === 0) return null;
 
   const copy = (key: string, text: string, what: string) => {

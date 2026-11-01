@@ -41,6 +41,7 @@ requires:
   extensions: [mbstring, openssl, pdo_mysql]
 
 database: optional
+engines: [mariadb, mysql, postgres]
 
 variables:
   - id: stack
@@ -94,8 +95,11 @@ done: "Ready at {{url}}. Register an account to try Breeze."
 | `duration` | | A hint such as `Composer · about a minute`. |
 | `requires.php` | | Lowest PHP version (`"8.2"`) or `any`. Leave it out for projects without PHP; the wizard then hides the PHP choice. |
 | `requires.extensions` | | PHP extensions that must be loaded. Checked with `php -m` before anything is created; the error says to turn them on in Services → PHP → Extensions. |
+| `requires.python` | | Lowest Python version (`"3.10"`) for Python projects. LampRabit's Python must be installed (checked before anything is created); `python` and `pip` are on PATH in steps, and `{{venv.python}}` is a virtual environment's Python. |
+| `requires.java` | | Lowest Java version (`"17"`) for Java projects. LampRabit's Java must be installed; steps and the dev server get `JAVA_HOME`. |
 | `requires.node` | | `true` for JavaScript projects: the wizard asks for a Node.js version (from NVM) and a package manager, and the `{{pm.*}}` placeholders work. |
 | `database` | | `none` (default), `optional` (a switch, on when a database server is installed) or `required`. |
+| `engines` | | The database servers the project can be set up for: `mariadb`, `mysql`, `postgres`, `sqlite` (a file: `{{database}}` is then the path `database/database.sqlite`, and nothing is created up front). Default `[mariadb, mysql]`. With more than one installed, the wizard lets the user pick; write the config with the `db.*` placeholders so it works for each. |
 | `variables` | | Extra fields in the wizard (below). |
 | `steps` | yes | What to do, in order (below). |
 | `serve` | | How the project's domain is served (below). Without it, the web server serves the files, with PHP. |
@@ -224,10 +228,14 @@ Write `{{name}}` anywhere a step takes text. Unknown names are reported when the
 | `{{www}}`, `{{dir}}` | The www folder, the project folder |
 | `{{php_version}}` | The PHP version the project uses |
 | `{{database}}` | The database name from the wizard (empty when none) |
-| `{{db.engine}}` | `mariadb` or `mysql` (the default database server) |
+| `{{db.engine}}` | `mariadb`, `mysql` or `pgsql` (Laravel's connection names) for the server chosen in the wizard |
 | `{{db.host}}`, `{{db.port}}` | `127.0.0.1` and the server's port |
 | `{{db.user}}`, `{{db.password}}` | `root` and an empty password |
-| `{{db.server_version}}` | `11.8.9-MariaDB` or `8.4.13` (Doctrine's `serverVersion`) |
+| `{{db.server_version}}` | `11.8.9-MariaDB`, `8.4.13` or `18` (Doctrine's `serverVersion`) |
+| `{{venv.python}}` | `.venv\Scripts\python.exe` on Windows, `.venv/bin/python` elsewhere |
+| `{{mvnw}}` | Maven's wrapper: `mvnw.cmd` on Windows, `sh mvnw` elsewhere (zips drop the executable bit) |
+| `{{java_major}}` | The active Java's major version (`21`) |
+| `{{db.scheme}}`, `{{db.charset}}` | `mysql` and `utf8mb4`, or `postgresql` and `utf8` (database URLs) |
 | `{{mail.host}}`, `{{mail.port}}` | Mailpit's SMTP server |
 | `{{vars.<id>}}` | A variable's value |
 | `{{random:N}}` | N random characters (1–256), safe inside quoted PHP and `.env` strings |

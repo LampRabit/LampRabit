@@ -36,6 +36,9 @@ pub struct NewProject {
     pub ssl: bool,
     /// Database to create; None for no database.
     pub database: Option<String>,
+    /// The server to create it on; the default database when absent.
+    #[serde(default)]
+    pub engine: Option<crate::templates::DbEngine>,
     /// Values for the template's variables, by id.
     #[serde(default)]
     pub variables: HashMap<String, String>,
@@ -150,7 +153,8 @@ async fn run(ctx: &Ctx<'_>, program: &Path, args: &[String], cwd: &Path, extra_p
         // Large dependency trees (Magento) need more than PHP's default memory limit.
         .env("COMPOSER_MEMORY_LIMIT", "-1")
         // npx and `npm create` otherwise ask before downloading a package.
-        .env("npm_config_yes", "true");
+        .env("npm_config_yes", "true")
+        .envs(crate::shims::tool_env(ctx.settings, ctx.layout));
     // PHP that a step starts by itself (Composer scripts, `php artisan serve`) gets no -c;
     // PHPRC points it at LampRabit's php.ini for the step's PHP version.
     let php_bins = ctx.layout.bin("php", "_");
@@ -257,9 +261,48 @@ pub fn random_string(len: usize) -> String {
     out
 }
 
-/// Creates the database in the default database server (which must be running).
-pub async fn create_database(ctx: &Ctx<'_>, database: &str) -> Result<()> {
-    let db = ctx.settings.database().ok_or_else(|| Error::msg("Install MariaDB or MySQL first (Services)."))?;
+/// The server a project's database goes on: the one asked for, else the default database.
+pub fn engine(settings: &crate::config::Settings, req: &NewProject) -> Option<crate::templates::DbEngine> {
+    use crate::templates::DbEngine;
+    req.engine.or(match settings.database()? {
+        Database::Mariadb => Some(DbEngine::Mariadb),
+        Database::Mysql => Some(DbEngine::Mysql),
+    })
+}
+
+/// PostgreSQL's psql, connected to LampRabit's server as its superuser.
+fn psql(ctx: &Ctx<'_>) -> Result<(PathBuf, PathBuf, Vec<String>)> {
+    let version = ctx.settings.versions.get("postgres").ok_or_else(|| Error::msg("Install PostgreSQL first (Services)."))?;
+    let home = ctx.layout.bin("postgres", version);
+    let args = vec!["-h".into(), "127.0.0.1".into(), "-p".into(), ctx.settings.ports.postgres.to_string(), "-U".into(), "postgres".into(), "-d".into(), "postgres".into()];
+    Ok((home.join("bin").join(crate::layout::exe("psql")), home, args))
+}
+
+/// Creates the database on the project's server (which must be running).
+pub async fn create_database(ctx: &Ctx<'_>, req: &NewProject, database: &str) -> Result<()> {
+    use crate::templates::DbEngine;
+    // SQLite's database is a file the framework creates itself (Laravel does on install).
+    if engine(ctx.settings, req) == Some(DbEngine::Sqlite) {
+        return Ok(());
+    }
+    if engine(ctx.settings, req) == Some(DbEngine::Postgres) {
+        ctx.step(format!("Creating database {database} in PostgreSQL"));
+        let (client, home, mut args) = psql(ctx)?;
+        // template0 so the encoding can be set whatever template1 has.
+        args.extend(["-v".into(), "ON_ERROR_STOP=1".into(), "-c".into(), format!("CREATE DATABASE \"{database}\" ENCODING 'UTF8' TEMPLATE template0")]);
+        return run(ctx, &client, &args, &home, &[]).await.map_err(|e| {
+            if e.to_string().contains("already exists") {
+                Error::msg(format!("A database called {database} already exists. Choose another name, or leave the database option off and use the existing one yourself."))
+            } else {
+                e
+            }
+        });
+    }
+    let db = match req.engine {
+        Some(DbEngine::Mysql) => Database::Mysql,
+        Some(DbEngine::Mariadb) => Database::Mariadb,
+        _ => ctx.settings.database().ok_or_else(|| Error::msg("Install MariaDB or MySQL first (Services)."))?,
+    };
     ctx.step(format!("Creating database {database} in {}", db.label()));
     let home = configs::database_home(ctx.settings, ctx.layout, db)?;
     let client = configs::database_client(ctx.settings, ctx.layout, db)?;
@@ -306,10 +349,19 @@ fn set_env(path: &Path, values: &[(String, String)]) -> Result<()> {
 
 /// Values for a template's placeholders: the project, its database and Mailpit.
 fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: Option<&str>, node: Option<(&str, &crate::apps::PmCommands)>) -> Values {
-    let server = ctx.settings.database().unwrap_or_default();
+    use crate::templates::DbEngine;
+    let engine = engine(ctx.settings, req).unwrap_or(DbEngine::Mariadb);
+    let server = if engine == DbEngine::Mysql { Database::Mysql } else { Database::Mariadb };
     // Doctrine tells the two apart by serverVersion: "11.8.9-MariaDB" or "8.4.13".
     let version = ctx.settings.database_version(server).cloned().unwrap_or_else(|| "8.0".into());
     let server_version = if server == Database::Mariadb { format!("{version}-MariaDB") } else { version };
+    let postgres_major = ctx.settings.versions.get("postgres").and_then(|v| v.split('.').next().map(str::to_string)).unwrap_or_else(|| "18".into());
+    // Laravel's connection names; Doctrine's URL schemes and charsets.
+    let (connection, port, server_version, scheme, charset, user) = match engine {
+        DbEngine::Postgres => ("pgsql".to_string(), ctx.settings.ports.postgres, postgres_major, "postgresql", "utf8", "root"),
+        DbEngine::Sqlite => ("sqlite".to_string(), 0, String::new(), "sqlite", "utf8", ""),
+        _ => (server.id().to_string(), ctx.settings.database_port(server), server_version, "mysql", "utf8mb4", "root"),
+    };
     let url = url.trim_end_matches('/').to_string();
     let domain = url.split("://").nth(1).unwrap_or(&url).to_string();
     let mut map = BTreeMap::from([
@@ -319,13 +371,26 @@ fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: 
         ("www".into(), ctx.layout.www().to_string_lossy().into()),
         ("dir".into(), ctx.dir().to_string_lossy().into()),
         ("php_version".into(), php.unwrap_or_default().into()),
-        ("database".into(), req.database.clone().unwrap_or_default()),
-        ("db.engine".into(), server.id().into()),
+        // SQLite: the file's path, where Laravel looks by default.
+        ("database".into(), if engine == DbEngine::Sqlite && req.database.is_some() {
+            ctx.dir().join("database").join("database.sqlite").to_string_lossy().replace('\\', "/")
+        } else {
+            req.database.clone().unwrap_or_default()
+        }),
+        ("db.engine".into(), connection),
         ("db.host".into(), "127.0.0.1".into()),
-        ("db.port".into(), ctx.settings.database_port(server).to_string()),
-        ("db.user".into(), "root".into()),
+        ("db.port".into(), port.to_string()),
+        ("db.user".into(), user.into()),
         ("db.password".into(), String::new()),
         ("db.server_version".into(), server_version),
+        ("db.scheme".into(), scheme.into()),
+        ("db.charset".into(), charset.into()),
+        // A project's virtual environment's Python, as each OS lays it out.
+        ("venv.python".into(), if cfg!(windows) { r".venv\Scripts\python.exe".into() } else { ".venv/bin/python".into() }),
+        // Maven's wrapper: a .cmd on Windows; elsewhere through sh, since zips drop the
+        // executable bit.
+        ("mvnw".into(), if cfg!(windows) { "mvnw.cmd".into() } else { "sh mvnw".into() }),
+        ("java_major".into(), ctx.settings.versions.get("java").and_then(|v| v.split('.').next().map(str::to_string)).unwrap_or_else(|| "21".into())),
         ("mail.host".into(), "127.0.0.1".into()),
         ("mail.port".into(), ctx.settings.ports.mail_smtp.to_string()),
     ]);
@@ -413,6 +478,17 @@ async fn check_requirements(ctx: &Ctx<'_>, template: &Template, php: Option<&str
                 template.name,
                 missing.join(", ")
             )));
+        }
+    }
+    // Python and Java projects run on LampRabit's own versions (they're on PATH as shims).
+    for (id, label, minimum) in [("python", "Python", &template.requires.python), ("java", "Java", &template.requires.java)] {
+        let Some(minimum) = minimum else { continue };
+        match ctx.settings.versions.get(id) {
+            Some(have) if at_least(have, minimum) => {}
+            Some(have) => {
+                return Err(Error::msg(format!("{} needs {label} {minimum} or newer, and the active {label} is {have}. Switch to a newer one on the Services page.", template.name)));
+            }
+            None => return Err(Error::msg(format!("{} needs {label} {minimum} or newer. Install it on the Services page (Languages → {label}) first.", template.name))),
         }
     }
     let needs: std::collections::BTreeSet<&str> = steps.iter().flat_map(|&i| template.steps[i].needs.iter().map(String::as_str)).collect();
@@ -620,7 +696,8 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source:
                 let bytes = download_checked(ctx, d, &values).await?;
                 let url = values.render(&d.url);
                 if d.extract {
-                    extract(ctx, bytes, &url, d.strip.as_deref(), &dir)?;
+                    let strip = d.strip.as_deref().map(|s| values.render(s));
+                    extract(ctx, bytes, &url, strip.as_deref(), &dir)?;
                 } else {
                     let target = file(d.to.as_deref().unwrap_or_else(|| url.rsplit('/').next().unwrap_or("download")))?;
                     parent_of(&target)?;
@@ -664,7 +741,7 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source:
                 }
                 std::fs::write(&target, text)?;
             }
-            Action::CreateDatabase(_) => create_database(ctx, req.database.as_deref().unwrap_or_default()).await?,
+            Action::CreateDatabase(_) => create_database(ctx, req, req.database.as_deref().unwrap_or_default()).await?,
             Action::GitInit(g) => {
                 if !has_tool("git").await {
                     ctx.line("Git isn't installed; skipped the repository.");

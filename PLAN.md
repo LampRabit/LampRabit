@@ -33,20 +33,25 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **Polish**: animated logo (ears, eyes, nose every few minutes), page/dialog/list motion, Motion setting (System / Full / Reduced / Off)
 - [x] **9. Linux parity and developer dashboard** (see below)
 - [ ] **10. macOS parity, stability on every OS, safe uninstall**
-- [ ] **11. Caddy and FrankenPHP**
+- [ ] **11. Service foundation and web servers: Caddy, FrankenPHP, Tomcat (with Java)**
 - [ ] **12. Projects: several domains, processes, Node.js serving** (Node.js serving, port discovery, commands done; extra domains and several processes left)
 - [ ] **13. Logs redesign and dump catcher** (filters and project sources done; dump catcher left)
 - [ ] **14. Movable tab bar**
-- [ ] **15. More databases: PostgreSQL, MongoDB, SQLite, backups**
-- [ ] **16. More services: search, storage, queues, n8n, Ollama**
+- [ ] **15. More databases: PostgreSQL, MongoDB, SQLite, ClickHouse, Neo4j, backups**
+- [ ] **16. More services: Meilisearch, Typesense, RustFS, OpenSearch/Elasticsearch, RabbitMQ, Ollama, n8n**
 - [x] **17. Templates and more frameworks** (first part; Node templates and recording wait for phase 12)
 - [ ] **18. Onboarding**
 - [ ] **19. Project doctor**
 - [ ] **20. Headless core and the `lamprabit` CLI**
 - [ ] **21. MCP server**
 - [ ] **22. Git**
-- [ ] **23. Dependency manager**
-- [ ] **Later**: Git workflow builder, deployment checklists, recording setups as templates, other language runtimes
+- [ ] **23. Dependency manager** (part of 25)
+- [ ] **24. Languages: Python, Go, Rust, Java**
+- [ ] **25. Package managers: npm, pnpm, Yarn, Bun, Deno, pip, conda, uv, Maven, Gradle, Cargo**
+- [ ] **26. Movable environment folder**
+- [ ] **Later**: Git workflow builder, deployment checklists, recording setups as templates
+
+**Order (decided 2026-11-01):** services before everything else: 11 → 15 → 16 → 24 → 25 → 22, then the rest. The numbers stay so older references keep working.
 
 ## Product evolution (decided 2026-10-29)
 
@@ -90,13 +95,54 @@ macOS was in preview because only Redis, Mailpit, ngrok, cloudflared and Compose
 - ✅ MSI (2026-10-31): `windows/cleanup.wxs` runs `--uninstall-cleanup` as a deferred, impersonated custom action before RemoveFiles, on a real uninstall only (not for upgrades); linked through `bundle.windows.wix.componentRefs`.
 - The .deb's removal can't reach per-user files, so Linux users use the Settings action.
 
-## Phase 11: Caddy and FrankenPHP
+## Sources for phases 11, 15, 16, 24, 25 (checked 2026-11-01)
 
-Both become web servers next to Apache and Nginx: `WebServer`/`Server` gain variants, each site picks its server when more than one is enabled, and each extra server gets its own ports (existing logic for "both").
+FlyEnv (BSD-3) supports nearly all of these, but it downloads from its own mirror and uses Homebrew/MacPorts on macOS. That conflicts with 9.2 (official sources, pinned checksums), so FlyEnv is a reference for configs and start commands only.
+
+| Runtime | Source | Checksum | Gaps |
+|---|---|---|---|
+| Caddy | GitHub caddyserver/caddy | SHA-512 file | none |
+| FrankenPHP | GitHub php/frankenphp (native Windows since 1.12, 2026-03) | GitHub digest | Intel Mac |
+| Java (Temurin) | api.adoptium.net/v3 | SHA-256 | none |
+| Tomcat 9/10/11 | dlcdn.apache.org (archive.apache.org for older) | `.sha512` | needs Java |
+| PostgreSQL 14–18 | GitHub theseus-rs/postgresql-binaries (all OS/arch, PostgreSQL licence) | check per release | replaces the EDB/own-CI idea |
+| MongoDB | fastdl.mongodb.org, `downloads.mongodb.org/full.json` | SHA-256 | Linux builds are per distro |
+| SQLite | sqlite.org CLI zips | SHA3-256 | none |
+| ClickHouse | GitHub ClickHouse/ClickHouse | SHA-512 | no native Windows: the UI says WSL |
+| Neo4j Community | dist.neo4j.org | SHA-256 | needs Java 21 |
+| Meilisearch | GitHub meilisearch | GitHub digest | none |
+| Typesense | dl.typesense.org | none published | no Windows |
+| RustFS | GitHub rustfs/rustfs | GitHub digest | none |
+| MinIO | dropped: no Community binaries since 2025-10, repo archived 2026-02 | | RustFS replaces it |
+| OpenSearch / Elasticsearch | official tarballs/zips with a bundled JDK | SHA-512 | 1 GB+ RAM |
+| RabbitMQ | GitHub rabbitmq-server (generic-unix, windows zip) | SHA-256 | needs Erlang; no official Linux Erlang binaries |
+| Ollama | GitHub ollama | SHA-256 file | detect an existing install first |
+| n8n | npm, run on LampRabit's Node | npm integrity | needs Node |
+| Python | GitHub astral-sh/python-build-standalone (what uv uses) | SHA-256 | none |
+| Go | go.dev/dl/?mode=json | SHA-256 | none |
+| Rust | rustup (an existing `~/.cargo` is used as is) | rustup's own | none |
+| Bun, Deno, uv | GitHub releases | SHA-256 | none |
+| Maven / Gradle | Apache dist / services.gradle.org | SHA-512 / SHA-256 | need Java |
+| conda | Miniforge | SHA-256 | heavy |
+
+## Phase 11: service foundation and web servers
+
+**Foundation first.** Each service used to be wired by hand in about 20 `match` arms (backend and frontend), which doesn't scale to the services planned here:
+- `Versions` keeps its fields and gains a flattened map for new runtimes, so `settings.toml` loads unchanged. `Settings::version(id)`/`set_version` replace the per-field matches.
+- `ServiceKind::def()` is one table per service (id, label, runtime, ports, log, data folder), so the getters stop being matches.
+- `web_server` (Apache | Nginx | Both) becomes a set of enabled servers (`web_servers`), read from the old field when missing. The first enabled server keeps the main ports; every other server has its own pair in `Ports`.
+- Runtimes declare what they need (Tomcat, Neo4j, Maven → Java; n8n → Node; RabbitMQ → Erlang), and the UI offers to install what's missing.
+- A platform gap is a reason string per runtime, shown in the UI instead of hiding the runtime.
+
+**Done (2026-11-01):** the `Versions` map, `ServiceKind::def()`, `web_servers` (with migration and a Settings UI: a switch per server and a primary picker), and Caddy end to end (catalog, Caddyfile, validate, reload, stop, health, ports, Sites/New project pickers). Then Java (Temurin, shims with JAVA_HOME), FrankenPHP (the Caddy renderer with `php_server`, conf.d ini through `PHP_INI_SCAN_DIR`, no LampRabit PHP pools) and Tomcat 9/10.1/11 (Java checked per line, `CATALINA_BASE` in etc/tomcat, one `<Host>` per Java project found by `sites::java_webapp`, proxied from the site's web server, restarted when the apps change). Still open here: FrankenPHP worker mode per site. Still to do for the foundation: declared dependencies between runtimes, platform-gap reasons, and the frontend reading a backend catalog instead of its own tables.
+
+**Web servers.** Caddy, FrankenPHP and Tomcat run next to Apache and Nginx: each site picks its server when more than one is enabled, and each extra server gets its own ports.
 - **Caddy**: single binary from GitHub releases (all three OSes). LampRabit writes a Caddyfile: one site block per site, `php_fastcgi` to the existing PHP pools (so per-site PHP and the extension manager keep working), `reverse_proxy` for proxied sites/tools, `tls <cert> <key>` with LampRabit's CA and `auto_https off` so Caddy doesn't create a second CA. `caddy validate` before start (like `httpd -t`), `caddy reload` when sites change.
 - **FrankenPHP**: the assessment from 7.3 still applies. It embeds its own PHP, so its version is shown read-only and its built-in extensions are listed; php.ini through `PHP_INI_SCAN_DIR` (Mailpit settings). Worker mode is an opt-in per-site toggle with a "restart workers" action. Intel Macs: no build, so the UI says so.
 - Spike first on Windows (newest FrankenPHP platform): start, our certificates, extensions, `.user.ini`.
-- Health probe, port conflicts, logs and the diagnostics report cover both.
+- **Java** (Temurin LTS lines 8, 11, 17, 21, 25) is a runtime first, because Tomcat needs it; phase 24 adds per-project versions and serving.
+- **Tomcat 9/10/11**: LampRabit's own `CATALINA_BASE` in `etc/tomcat` (conf copied from the install, `server.xml` generated with one `<Host>` per Java site, webapps from the project folder) and `JAVA_HOME` from the active Java. HTTP only on its own port, with Apache/Nginx/Caddy proxying the `.test` domain (TLS stays in one place).
+- Health probe, port conflicts, logs and the diagnostics report cover all three.
 
 ## Phase 12: projects (several domains, processes, Node.js)
 
@@ -152,8 +198,14 @@ The page tab bar (`BottomNav`) can sit at the bottom (default), top, left or rig
 
 ## Phase 15: more databases
 
-- **PostgreSQL**: EnterpriseDB binary zips on Windows and macOS; Linux from LampRabit's CI builds (same reasoning as 9.2). Data folder per major version (`data/postgres-17`), `initdb` on first start, port 5432, `psql`/`pg_dump` shims, `client` config like MariaDB's, Adminer lists it, new projects can choose it (`.env` lines, `pdo_pgsql` enabled).
+**Done (2026-11-01): PostgreSQL 14–18.** Newest build per major from theseus-rs, data per major in `data/postgres-<major>` (`initdb -U postgres -A trust -E UTF8 --no-locale`), only on 127.0.0.1 with no Unix socket, stopped with `pg_ctl stop -m fast`, an SSLRequest health probe, a `root` superuser added after each start (frameworks default to root), shims `psql`/`pg_dump`/`pg_dumpall`/`pg_restore`/`createdb`/`dropdb` with PGHOST/PGPORT/PGUSER, `pgsql`/`pdo_pgsql` in PHP (Windows defaults, and the Linux/macOS builds' extension list), Adminer lists it and the Overview opens it there. Then (same day): templates declare `engines:` (Laravel and Symfony: MariaDB, MySQL or PostgreSQL; the others MySQL-family for now) and the wizard picks the server; backups (`backups.rs`, `<root>/backups/<engine>/`, kept on uninstall) for MariaDB/MySQL (`mariadb-dump`/`mysqldump`) and PostgreSQL (`pg_dump -Fc`/`pg_restore --clean`), with restore into any database name, in each database's details; phpPgAdmin (ReimuHakurei's PHP 8 fork, a tool like phpMyAdmin) and pgAdmin 4 (PyPI wheel in its own venv on LampRabit's Python, desktop mode as a service proxied at pgadmin.test); Python itself (python-build-standalone, `python`/`pip` shims); MongoDB 7–9 (MongoDB's `full.json`, Linux build picked from /etc/os-release, data per major, stopped through mongosh) and mongosh.
+Later the same day: MongoDB Database Tools (mongodump/mongorestore) and MongoDB backups; MongoDB Compass (opened connected to LampRabit's MongoDB); pgAdmin registers LampRabit's PostgreSQL once (`setup.py load-servers`); SQLite (sqlite3 shell, SHA3-checked; Laravel projects can use it with nothing installed); ClickHouse (Linux/macOS, generated config.xml/users.xml, native port 19000 since 9000 is PHP's, console at /play); Neo4j Community (Java 21+, NEO4J_CONF in etc/neo4j, Browser at neo4j.test). The Services page offers related services with one-click installs (`src/lib/related.ts`).
+Left: Drupal/CakePHP/CodeIgniter on PostgreSQL; SQLite backups (copy the file).
+
+- **PostgreSQL**: theseus-rs/postgresql-binaries on every OS (built from source in CI, all six OS/arch targets; replaces the EnterpriseDB-plus-own-CI idea, decided 2026-11-01). Data folder per major version (`data/postgres-17`), `initdb` on first start, port 5432, `psql`/`pg_dump` shims, `client` config like MariaDB's, Adminer lists it, new projects can choose it (`.env` lines, `pdo_pgsql` enabled).
 - **MongoDB**: official tarballs (all three OSes, check arch), `mongosh` downloaded with it, a `mongodb` PHP extension through the extension manager, connection string on the Overview.
+- **ClickHouse**: the single binary (`clickhouse server` with a generated config, data in `data/clickhouse`, HTTP 8123 and native 9000 moved to free ports). No native Windows build, so the Windows UI explains WSL instead.
+- **Neo4j Community**: the official archive on the active Java 21+, data in `data/neo4j`, Browser UI at `neo4j.test`, Bolt port on the Overview.
 - **SQLite**: no server. New projects can choose it (create `database/database.sqlite`, write `.env`); presets offer it where the framework supports it.
 - **Backups**: dump and restore per database (`mysqldump`/`mariadb-dump`, `pg_dump`, `mongodump`, file copy for SQLite) into `backups/`, with a restore picker.
 - No in-app database browser (decided 2026-10-29).
@@ -161,8 +213,8 @@ The page tab bar (`BottomNav`) can sit at the bottom (default), top, left or rig
 ## Phase 16: more services
 
 Same standards as existing runtimes: catalog per OS/arch with checksums, data under `data/`, health probe, logs, ports in Settings, connection details on the Overview, `.test` domain for web UIs, data kept on upgrade/remove. Resource needs (RAM, Java, Erlang) shown before installing. Rough order, cheapest first:
-1. Meilisearch, Typesense (single binaries)
-2. MinIO (single binary, console at `minio.test`)
+1. Meilisearch, Typesense (single binaries; Typesense has no Windows build)
+2. RustFS and MinIO, both S3-compatible (decided 2026-11-01: offer both). RustFS from its GitHub releases, console at `rustfs.test`. MinIO stopped publishing binaries in 2025 and was archived in 2026, so it comes from LampRabit's CI build of its last release (a Go build in `binaries.yml`, AGPL source linked), labelled "no longer maintained upstream, no security fixes" in the UI. Each keeps its objects in `data/<name>` by default; a separate storage-folder setting per service can put them anywhere (another drive, a NAS), independent of the LampRabit folder. Moving it offers to move the existing objects, and an outside folder is never deleted on uninstall.
 3. n8n (an npm package run on LampRabit's Node; data in `data/n8n`; needs Node installed first)
 4. OpenSearch / Elasticsearch (bundled JDK, 1 GB+ RAM)
 5. RabbitMQ (needs Erlang; Windows support to be checked)
@@ -197,11 +249,36 @@ Built on `diagnose.rs`. Per project: PHP version vs `composer.json`, missing ext
 
 ## Phase 22: Git
 
+Decided 2026-11-01: Git installed by LampRabit plus a Git panel per project; no local Git server (Forgejo). Windows: MinGit/portable Git for Windows from GitHub (SHA-256) under `bin/git`. Linux/macOS: the system git. When it's missing, LampRabit installs it the easiest way the OS offers: `xcode-select --install` on macOS (Apple's own install dialog), and on Linux the distro's package (`apt`/`dnf`/`pacman`/`zypper`, detected) through pkexec, showing the command first. If neither works, it links the official download page. A `git` shim like the others.
+
 Through the `git` CLI, so the user's credential helpers and SSH keys work: status, stage/unstage, commit, branches (create, switch, rename, delete), history with diffs, fetch/pull/push, merge conflicts listed, clone into `www/`, remotes. Per-repository identity editor (`git config --local user.name/email`), never changing global config unless asked.
 
 ## Phase 23: dependency manager
 
 Composer and npm/pnpm/yarn/bun panels per project: installed and outdated packages, install/update/require/remove with live output, run with the project's PHP and Node versions. No upgrades without consent; lockfile kept consistent.
+
+## Phase 24: languages
+
+**Done (2026-11-01):** Python as a runtime; Python projects (`sites::Language::Python`, Django/Flask/FastAPI detected) and Java projects serve through their template's dev server like Node; templates Django, Flask, FastAPI, Spring Boot (Spring Initializr + Maven wrapper) and a plain Java web app for Tomcat; `requires.python`/`requires.java`; JAVA_HOME for steps and dev servers.
+
+Python, Go, Rust and Java, each as a runtime with versions side by side, like PHP. Decided 2026-11-01: LampRabit installs its own copies under `bin/` (pyenv, sdkman and the like aren't used):
+- Sources in the table above. Rust goes through rustup with `RUSTUP_HOME`/`CARGO_HOME` under `bin/rust`, so it stays inside LampRabit too.
+- Per-project version from the usual file (`.python-version`, `go.mod`'s `toolchain`, `rust-toolchain.toml`, `.java-version`), shown and changeable in the project's Settings. Shims (`python`, `go`, `java`) pick it like the PHP shim.
+- `sites::Language` gains `Python`, `Go`, `Rust` and `Java`. Serving needs nothing new, since port discovery routes any process by its working folder. `apps::suggest` learns `manage.py runserver`, `uvicorn`/`flask run`, `go run .`, `cargo run`, `mvn spring-boot:run`/`gradle bootRun`. WAR projects can deploy to Tomcat instead.
+- Templates: Django, Flask, FastAPI, Go (net/http, Gin), Rust (Axum), Spring Boot (start.spring.io), Quarkus.
+
+## Phase 25: package managers
+
+Absorbs phase 23. npm comes with Node, pip with Python and Cargo with Rust; pnpm and Yarn come through corepack; Bun, Deno, uv, Maven, Gradle and conda (Miniforge) are runtimes. Command discovery learns `pyproject.toml`, `requirements.txt`, `pom.xml`, `build.gradle(.kts)`, `Cargo.toml` and `deno.json`. Then the dependency panels: installed and outdated packages, add/update/remove with live output, the project's own language versions, nothing upgraded without consent.
+
+## Phase 26: movable environment folder
+
+Decided 2026-11-01: the LampRabit folder (bin, etc, www, data, logs…) can live anywhere the OS allows, and changing it moves everything.
+- Chosen on first run (onboarding) and changeable in Settings → Environment folder → Move.
+- Move: stop services and project processes, check the target, move the folders LampRabit owns plus `www/`, `data/`, `templates/` (a rename on the same drive, copy-then-verify-then-delete across drives, with progress and resume after a failure), then regenerate configs, rewrite shims, update PATH, the terminal profile and anything else that stores the path (MariaDB/MySQL data paths, Caddy storage, the CA trust stays valid since the certificate is unchanged).
+- A file in use: list which program holds it (Windows Restart Manager, `lsof`/`/proc` elsewhere) with "Stop it" (ends that process) and "Retry"; nothing is half-moved, so a cancelled move leaves the old folder working.
+- Refuses targets that can't work, saying why: no write access, system folders, a drive mounted `noexec` (Linux/macOS external drives often are), FAT/exFAT (no permissions or symlinks; databases fail), network drives, not enough free space.
+- Folders outside the root (MinIO/RustFS storage, see phase 16) aren't moved.
 
 ## Phase 9: Linux parity and developer dashboard
 

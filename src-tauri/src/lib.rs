@@ -1,4 +1,5 @@
 mod apps;
+mod backups;
 mod comfort;
 mod commands;
 mod config;
@@ -70,48 +71,39 @@ impl AppState {
     }
 }
 
-fn active_version(settings: &mut Settings, runtime: Runtime) -> &mut Option<String> {
-    match runtime {
-        Runtime::Apache => &mut settings.versions.apache,
-        Runtime::Php => &mut settings.versions.php,
-        Runtime::Mariadb => &mut settings.versions.mariadb,
-        Runtime::Nginx => &mut settings.versions.nginx,
-        Runtime::Mailpit => &mut settings.versions.mailpit,
-        Runtime::Adminer => &mut settings.versions.adminer,
-        Runtime::Phpmyadmin => &mut settings.versions.phpmyadmin,
-        Runtime::Ngrok => &mut settings.versions.ngrok,
-        Runtime::Cloudflared => &mut settings.versions.cloudflared,
-        Runtime::Redis => &mut settings.versions.redis,
-        Runtime::Composer => &mut settings.versions.composer,
-        Runtime::Mysql => &mut settings.versions.mysql,
-        Runtime::Phpredisadmin => &mut settings.versions.phpredisadmin,
-        Runtime::Memcached => &mut settings.versions.memcached,
-    }
-}
-
 /// Services that load the given runtime and must restart when it changes.
 fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
     match runtime {
         Runtime::Apache => &[ServiceKind::Apache],
         Runtime::Nginx => &[ServiceKind::Nginx],
+        Runtime::Caddy => &[ServiceKind::Caddy],
+        Runtime::Frankenphp => &[ServiceKind::Frankenphp],
+        Runtime::Tomcat => &[ServiceKind::Tomcat],
+        Runtime::Postgres => &[ServiceKind::Postgres],
+        Runtime::Pgadmin => &[ServiceKind::Pgadmin],
+        Runtime::Mongodb => &[ServiceKind::Mongodb],
+        // The shell runs from the terminal; MongoDB uses it only to shut down.
+        Runtime::Mongosh => &[],
+        // Command-line tools and a desktop app: nothing runs them in the background.
+        Runtime::Mongotools | Runtime::Compass | Runtime::Sqlite => &[],
+        Runtime::Clickhouse => &[ServiceKind::Clickhouse],
+        Runtime::Neo4j => &[ServiceKind::Neo4j],
+        // Projects run Python themselves; pgAdmin keeps the Python it was installed with.
+        Runtime::Python => &[],
+        Runtime::Phppgadmin => &ServiceKind::WEB,
         // PHP pools are owned by the web servers; restarting them restarts PHP.
-        Runtime::Php => &[ServiceKind::Apache, ServiceKind::Nginx],
+        Runtime::Php => &ServiceKind::WEB,
         Runtime::Mariadb => &[ServiceKind::Mariadb],
         Runtime::Mysql => &[ServiceKind::Mysql],
         Runtime::Mailpit => &[ServiceKind::Mailpit],
-        // Served by Apache through their own virtual hosts.
-        Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin => &[ServiceKind::Apache],
+        // Served by the primary web server through their own virtual hosts.
+        Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin => &ServiceKind::WEB,
         // Tunnels start on demand; Composer runs from the terminal.
         Runtime::Ngrok | Runtime::Cloudflared | Runtime::Composer => &[],
+        // Tomcat runs on the active Java.
+        Runtime::Java => &[ServiceKind::Tomcat, ServiceKind::Neo4j],
         Runtime::Redis => &[ServiceKind::Redis],
         Runtime::Memcached => &[ServiceKind::Memcached],
-    }
-}
-
-fn database_service(db: config::Database) -> ServiceKind {
-    match db {
-        config::Database::Mariadb => ServiceKind::Mariadb,
-        config::Database::Mysql => ServiceKind::Mysql,
     }
 }
 
@@ -137,9 +129,8 @@ fn reconcile_versions(settings: &mut Settings) {
     let layout = Layout::new(&settings.root_dir);
     for runtime in Runtime::ALL {
         let installed = runtimes::installed(&layout, runtime);
-        let active = active_version(settings, runtime);
-        if active.as_ref().is_none_or(|v| !installed.contains(v)) {
-            *active = installed.into_iter().next();
+        if settings.versions.get(runtime.id()).is_none_or(|v| !installed.contains(v)) {
+            settings.versions.set(runtime.id(), installed.into_iter().next());
         }
     }
 }
@@ -170,6 +161,7 @@ async fn get_settings(state: State<'_, AppState>) -> Result<Settings> {
 
 #[tauri::command]
 async fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Settings) -> Result<Settings> {
+    let old = state.settings.read().await.clone();
     check_values(&mut settings)?;
     check_ports(&settings)?;
     let layout = Layout::new(&settings.root_dir);
@@ -201,13 +193,50 @@ async fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings:
     *state.ca_trusted.lock().await = None;
     logs::set_system_file(&app, layout.logs().join("lampRabit.log"));
     logs::system(&app, logs::Level::Info, "Settings saved");
-    for kind in [ServiceKind::Apache, ServiceKind::Nginx] {
+    for kind in ServiceKind::WEB {
         if !kind.enabled(&settings) && state.supervisor.is_running(kind).await {
             logs::system(&app, logs::Level::Info, format!("{} is switched off in Settings; stopping it", kind.label()));
             state.supervisor.stop(&app, kind).await;
         }
     }
+    // Running services pick up what changed for them (ports, the primary server, the
+    // domain suffix…) straight away; services in the old folder were stopped above.
+    if old.root_dir == settings.root_dir {
+        let old_layout = Layout::new(&old.root_dir);
+        let mut restart = Vec::new();
+        for kind in ServiceKind::all() {
+            if kind.enabled(&settings)
+                && state.supervisor.is_running(kind).await
+                && service_fingerprint(kind, &old, &old_layout) != service_fingerprint(kind, &settings, &layout)
+            {
+                state.supervisor.stop(&app, kind).await;
+                restart.push(kind);
+            }
+        }
+        for &kind in &restart {
+            state.supervisor.wait_stopped(kind).await;
+        }
+        for kind in restart {
+            if let Err(e) = state.supervisor.start(&app, kind, &settings, &layout).await {
+                logs::system(&app, logs::Level::Error, format!("{} didn't restart with the new settings: {e}", kind.label()));
+            }
+        }
+    }
     Ok(settings)
+}
+
+/// What a settings change can alter in a running service: its ports and, for web servers,
+/// everything their configs are built from. A different fingerprint means a restart.
+fn service_fingerprint(kind: ServiceKind, settings: &Settings, layout: &Layout) -> String {
+    let ports = services::required_ports(kind, settings, layout);
+    if kind.web_server().is_some() {
+        format!(
+            "{ports:?} {:?} {:?} {} {} {} {}",
+            settings.web_servers, settings.ports, settings.tld, settings.https_by_default, settings.php_workers, settings.route_mail
+        )
+    } else {
+        format!("{ports:?}")
+    }
 }
 
 /// Domain endings that exist on the internet: using one would send real websites
@@ -232,14 +261,17 @@ fn check_values(settings: &mut Settings) -> Result<()> {
         )));
     }
     settings.tld = tld;
+    settings.normalize();
     if !(1..=32).contains(&settings.php_workers) {
         return Err(Error::msg("PHP workers must be between 1 and 32."));
     }
     let p = &settings.ports;
     for (port, name) in [
-        (p.http, "Apache HTTP"), (p.https, "Apache HTTPS"), (p.nginx_http, "Nginx HTTP"), (p.nginx_https, "Nginx HTTPS"),
-        (p.mysql, "MariaDB"), (p.mail_smtp, "Mailpit SMTP"), (p.mail_ui, "Mailpit inbox"), (p.redis, "Redis"),
-        (p.memcached, "Memcached"), (p.php_fpm, "PHP FastCGI"),
+        (p.http, "HTTP"), (p.https, "HTTPS"), (p.nginx_http, "Nginx HTTP"), (p.nginx_https, "Nginx HTTPS"),
+        (p.apache_http, "Apache HTTP"), (p.apache_https, "Apache HTTPS"), (p.caddy_http, "Caddy HTTP"), (p.caddy_https, "Caddy HTTPS"),
+        (p.caddy_admin, "Caddy admin"), (p.frankenphp_http, "FrankenPHP HTTP"), (p.frankenphp_https, "FrankenPHP HTTPS"),
+        (p.frankenphp_admin, "FrankenPHP admin"), (p.tomcat_http, "Tomcat HTTP"), (p.tomcat_shutdown, "Tomcat shutdown"), (p.mysql, "MariaDB"), (p.mail_smtp, "Mailpit SMTP"), (p.mail_ui, "Mailpit inbox"), (p.redis, "Redis"),
+        (p.memcached, "Memcached"), (p.php_fpm, "PHP FastCGI"), (p.postgres, "PostgreSQL"), (p.pgadmin, "pgAdmin"), (p.mongodb, "MongoDB"), (p.clickhouse_http, "ClickHouse HTTP"), (p.clickhouse_tcp, "ClickHouse native"), (p.neo4j_http, "Neo4j Browser"), (p.neo4j_bolt, "Neo4j Bolt"),
     ] {
         if port == 0 {
             return Err(Error::msg(format!("Choose a port for {name} (1–65535).")));
@@ -290,15 +322,32 @@ fn check_ports(settings: &Settings) -> Result<()> {
         (p.mail_smtp, "Mailpit SMTP".into()),
         (p.mail_ui, "Mailpit inbox".into()),
         (p.redis, "Redis".into()),
+        (p.postgres, "PostgreSQL".into()),
+        (p.pgadmin, "pgAdmin".into()),
+        (p.mongodb, "MongoDB".into()),
+        (p.clickhouse_http, "ClickHouse HTTP".into()),
+        (p.clickhouse_tcp, "ClickHouse native".into()),
+        (p.neo4j_http, "Neo4j Browser".into()),
+        (p.neo4j_bolt, "Neo4j Bolt".into()),
         (p.memcached, "Memcached".into()),
     ];
-    for server in [Server::Apache, Server::Nginx] {
+    for server in Server::ALL {
         if settings.server_enabled(server) {
             let (http, https) = settings.server_ports(server);
-            let name = if server == Server::Apache { "Apache" } else { "Nginx" };
+            let name = server.label();
             used.push((http, format!("{name} HTTP")));
             used.push((https, format!("{name} HTTPS")));
         }
+    }
+    if settings.server_enabled(Server::Caddy) {
+        used.push((p.caddy_admin, "Caddy admin".into()));
+    }
+    if settings.server_enabled(Server::Frankenphp) {
+        used.push((p.frankenphp_admin, "FrankenPHP admin".into()));
+    }
+    if settings.versions.get("tomcat").is_some() {
+        used.push((p.tomcat_http, "Tomcat HTTP".into()));
+        used.push((p.tomcat_shutdown, "Tomcat shutdown".into()));
     }
     let php_block = p.php_fpm..p.php_fpm.saturating_add(100);
     for (i, (port, a)) in used.iter().enumerate() {
@@ -316,14 +365,125 @@ fn check_ports(settings: &Settings) -> Result<()> {
     Ok(())
 }
 
+/// The service of a database engine, which has to be running for its tools to connect.
+async fn running_database(state: &AppState, engine: templates::DbEngine) -> Result<()> {
+    let kind = match engine {
+        templates::DbEngine::Mariadb => ServiceKind::Mariadb,
+        templates::DbEngine::Mysql => ServiceKind::Mysql,
+        templates::DbEngine::Postgres => ServiceKind::Postgres,
+        templates::DbEngine::Mongodb => ServiceKind::Mongodb,
+        templates::DbEngine::Sqlite => return Err(Error::msg("SQLite databases are files in their project; copy the file to back it up.")),
+    };
+    if state.supervisor.is_running(kind).await {
+        Ok(())
+    } else {
+        Err(Error::msg(format!("Start {} first: backups are made and restored through the running server.", engine.label())))
+    }
+}
+
+#[tauri::command]
+async fn list_databases(state: State<'_, AppState>, engine: templates::DbEngine) -> Result<Vec<String>> {
+    running_database(&state, engine).await?;
+    let (settings, layout) = state.snapshot().await;
+    backups::databases(&settings, &layout, engine).await
+}
+
+#[tauri::command]
+async fn list_backups(state: State<'_, AppState>) -> Result<Vec<backups::Backup>> {
+    Ok(backups::list(&state.snapshot().await.1))
+}
+
+#[tauri::command]
+async fn backup_database(app: AppHandle, state: State<'_, AppState>, engine: templates::DbEngine, database: String) -> Result<backups::Backup> {
+    running_database(&state, engine).await?;
+    let (settings, layout) = state.snapshot().await;
+    let backup = backups::create(&settings, &layout, engine, &database).await?;
+    logs::system(&app, logs::Level::Info, format!("Backed up {} database {database} to {}", engine.label(), backup.path.display()));
+    Ok(backup)
+}
+
+#[tauri::command]
+async fn restore_backup(app: AppHandle, state: State<'_, AppState>, engine: templates::DbEngine, path: PathBuf, database: String) -> Result<()> {
+    running_database(&state, engine).await?;
+    let (settings, layout) = state.snapshot().await;
+    logs::system(&app, logs::Level::Info, format!("Restoring {} into {} database {database}", path.display(), engine.label()));
+    backups::restore(&settings, &layout, engine, &path, &database).await?;
+    logs::system(&app, logs::Level::Info, format!("Restored {database}"));
+    Ok(())
+}
+
+/// Opens MongoDB Compass connected to LampRabit's MongoDB.
+#[tauri::command]
+async fn open_compass(state: State<'_, AppState>) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    let version = settings.versions.get("compass").ok_or_else(|| Error::msg("Install MongoDB Compass first (Services)."))?;
+    let home = layout.bin("compass", version);
+    let program = runtimes::compass_program(&home).ok_or_else(|| Error::msg("Compass's install looks incomplete. Remove it on the Services page and install it again."))?;
+    let uri = format!("mongodb://127.0.0.1:{}", settings.ports.mongodb);
+    let mut cmd = if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("open");
+        c.arg("-a").arg(&program).arg("--args").arg(&uri);
+        c
+    } else {
+        let mut c = std::process::Command::new(&program);
+        c.arg(&uri);
+        c
+    };
+    cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    cmd.spawn().map_err(|e| Error::msg(format!("Couldn't open Compass: {e}")))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_backup(state: State<'_, AppState>, path: PathBuf) -> Result<()> {
+    backups::delete(&state.snapshot().await.1, &path)
+}
+
+/// Makes a new project's domain work right away: its certificate is issued, the local CA
+/// trusted and the hosts file updated now, so the admin prompts come while the user is
+/// watching the wizard instead of later, when a web server happens to start. A cancelled
+/// prompt doesn't fail the project; the Sites page offers the same fixes.
+async fn prepare_new_site(app: &AppHandle, state: &AppState, name: &str) {
+    let (settings, layout) = state.snapshot().await;
+    let served = sites::served(&settings, &layout);
+    if let Some(site) = served.iter().find(|s| s.name == name && s.ssl) {
+        match ssl::ensure_ca(&layout).and_then(|(ca, _)| ssl::ensure_site_cert(&layout, &ca, &site.domain)) {
+            Ok(_) if !ssl::ca_trusted(&layout).await => {
+                *state.ca_trusted.lock().await = None;
+                if let Err(e) = ssl::trust_ca(&layout).await {
+                    logs::system(app, logs::Level::Warn, format!("{e} Browsers will warn about {} until LampRabit's certificate authority is trusted (Sites page).", site.domain));
+                }
+            }
+            Ok(_) => {}
+            Err(e) => logs::system(app, logs::Level::Warn, format!("Couldn't create a certificate for {}: {e}", site.domain)),
+        }
+    }
+    if settings.manage_hosts && sites::needs_hosts_file(&settings) && !sites::hosts_in_sync(&served) {
+        match sites::update_hosts(&layout, &served).await {
+            Ok(()) => logs::system(app, logs::Level::Info, "Hosts file updated"),
+            Err(e) => logs::system(app, logs::Level::Warn, format!("{e} The new domain may not resolve until the hosts file is updated (Sites page).")),
+        }
+    }
+}
+
 /// Restarts whichever web servers are running, so they (and their PHP pools) pick up
 /// changed sites or PHP versions together.
 async fn restart_web_servers(app: &AppHandle, state: &AppState) -> Result<()> {
     let mut running = Vec::new();
-    for kind in [ServiceKind::Apache, ServiceKind::Nginx] {
+    for kind in ServiceKind::WEB {
         if state.supervisor.is_running(kind).await {
             state.supervisor.stop(app, kind).await;
             running.push(kind);
+        }
+    }
+    // Tomcat reads its hosts only at start; restart it when the Java apps changed.
+    {
+        let (settings, layout) = state.snapshot().await;
+        if state.supervisor.is_running(ServiceKind::Tomcat).await
+            && configs::tomcat_stale(&settings, &layout, &sites::tomcat_apps(&settings, &layout))
+        {
+            state.supervisor.stop(app, ServiceKind::Tomcat).await;
+            running.push(ServiceKind::Tomcat);
         }
     }
     for &kind in &running {
@@ -563,7 +723,7 @@ async fn list_sites(state: State<'_, AppState>) -> Result<SitesInfo> {
     let served = sites::served(&settings, &layout);
     let plan = php::plan(&settings, &layout, &served);
     let mut needs_apply = false;
-    for kind in [ServiceKind::Apache, ServiceKind::Nginx] {
+    for kind in ServiceKind::WEB {
         if state.supervisor.is_running(kind).await {
             needs_apply |= sites::config_stale(&settings, &layout, &served, &plan, kind.web_server().unwrap());
         }
@@ -602,8 +762,10 @@ async fn apply_sites(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     let _op = state.ops.lock().await;
     let (settings, layout) = state.snapshot().await;
     logs::system(&app, logs::Level::Info, "Applying site changes");
-    let any_running =
-        state.supervisor.is_running(ServiceKind::Apache).await || state.supervisor.is_running(ServiceKind::Nginx).await;
+    let mut any_running = false;
+    for kind in ServiceKind::WEB {
+        any_running |= state.supervisor.is_running(kind).await;
+    }
     if any_running {
         restart_web_servers(&app, &state).await
     } else {
@@ -645,17 +807,16 @@ async fn set_site_php(app: AppHandle, state: State<'_, AppState>, name: String, 
 async fn set_site_server(app: AppHandle, state: State<'_, AppState>, name: String, server: Option<config::Server>) -> Result<()> {
     let _op = state.ops.lock().await;
     state.update_settings(|s| s.sites.entry(name.clone()).or_default().server = server).await?;
-    logs::system(&app, logs::Level::Info, format!("{name} is now served by {}", match server {
-        Some(config::Server::Nginx) => "Nginx",
-        Some(config::Server::Apache) => "Apache",
-        None => "the default server",
-    }));
+    logs::system(&app, logs::Level::Info, format!("{name} is now served by {}", server.map_or("the default server", |s| s.label())));
     restart_web_servers(&app, &state).await?;
     // The site now needs its new server; start it when a web server was serving sites.
     let (settings, layout) = state.snapshot().await;
-    let kind = if sites::site_server(&settings, &name) == config::Server::Nginx { ServiceKind::Nginx } else { ServiceKind::Apache };
-    let other = if kind == ServiceKind::Nginx { ServiceKind::Apache } else { ServiceKind::Nginx };
-    if !state.supervisor.is_running(kind).await && state.supervisor.is_running(other).await {
+    let kind = server_kind(sites::site_server(&settings, &name));
+    let mut others_running = false;
+    for other in ServiceKind::WEB.into_iter().filter(|&k| k != kind) {
+        others_running |= state.supervisor.is_running(other).await;
+    }
+    if !state.supervisor.is_running(kind).await && others_running {
         state.supervisor.start(&app, kind, &settings, &layout).await?;
     }
     Ok(())
@@ -686,15 +847,36 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
     let result = async {
         let creates_database = template.steps.iter().any(|s| matches!(s.action, templates::Action::CreateDatabase(_)));
         if request.database.is_some() && creates_database {
-            let server = settings.database().ok_or_else(|| Error::msg("Install MariaDB or MySQL first (Services)."))?;
-            let kind = database_service(server);
+            use templates::DbEngine;
+            let engine = projects::engine(&settings, &request).ok_or_else(|| Error::msg("Install MariaDB, MySQL or PostgreSQL first (Services)."))?;
+            if !template.engines.contains(&engine) {
+                let supported: Vec<&str> = template.engines.iter().map(|e| e.label()).collect();
+                return Err(Error::msg(format!("{} projects can use {}, not {}.", template.name, supported.join(" or "), engine.label())));
+            }
+            let kind = match engine {
+                DbEngine::Mariadb => ServiceKind::Mariadb,
+                DbEngine::Mysql => ServiceKind::Mysql,
+                DbEngine::Postgres => ServiceKind::Postgres,
+                DbEngine::Mongodb => ServiceKind::Mongodb,
+                // Nothing to start: PHP has SQLite built in.
+                DbEngine::Sqlite => return projects::build(&ctx, &request, &template, source, &url).await,
+            };
+            if settings.versions.get(engine.id()).is_none() {
+                return Err(Error::msg(format!("Install {} first (Services).", engine.label())));
+            }
             if !state.supervisor.is_running(kind).await {
-                ctx.step(format!("Starting {}", server.label()));
+                ctx.step(format!("Starting {}", engine.label()));
                 state.supervisor.start(&app, kind, &settings, &layout).await?;
             }
             // The process is up before it accepts connections.
             for _ in 0..30 {
-                if matches!(diagnose::probe_mysql(settings.database_port(server)).await, diagnose::Probe::Ok) {
+                let probe = match engine {
+                    DbEngine::Postgres => diagnose::probe_postgres(settings.ports.postgres).await,
+                    DbEngine::Mongodb | DbEngine::Sqlite => diagnose::Probe::Ok,
+                    DbEngine::Mysql => diagnose::probe_mysql(settings.ports.mysql_server).await,
+                    DbEngine::Mariadb => diagnose::probe_mysql(settings.ports.mysql).await,
+                };
+                if matches!(probe, diagnose::Probe::Ok) {
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -720,6 +902,8 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
     }
     // Composer may have just been installed; this makes it the active version and adds its shim.
     state.update_settings(reconcile_versions).await?;
+    ctx.step("Setting up HTTPS and the hosts file");
+    prepare_new_site(&app, &state, &name).await;
     ctx.step("Adding the site to the web server");
     restart_web_servers(&app, &state).await?;
     logs::system(&app, logs::Level::Info, format!("Created project {name} at {url}"));
@@ -834,7 +1018,7 @@ async fn prepare_app(app: &AppHandle, state: &AppState, name: &str) -> Result<Op
         let to_save = config.clone();
         state.update_settings(|s| s.sites.entry(name.to_string()).or_default().app = Some(to_save)).await?;
     }
-    if !config.serve || sites::language(&dir) != sites::Language::Node {
+    if !config.serve || !matches!(sites::language(&dir), sites::Language::Node | sites::Language::Python | sites::Language::Java) {
         return Ok(None);
     }
     let kind = server_kind(sites::site_server(&settings, name));
@@ -853,7 +1037,7 @@ async fn prepare_app(app: &AppHandle, state: &AppState, name: &str) -> Result<Op
 }
 
 fn server_kind(server: config::Server) -> ServiceKind {
-    if server == config::Server::Nginx { ServiceKind::Nginx } else { ServiceKind::Apache }
+    ServiceKind::for_server(server)
 }
 
 /// Keeps every project's domain pointed at what it's serving: the port its processes
@@ -894,7 +1078,7 @@ async fn watch_ports(handle: AppHandle) {
         let mut needed: Vec<ServiceKind> = Vec::new();
         for site in &sites {
             let own = settings.sites.get(&site.name);
-            let files_only = site.language == sites::Language::Node && own.and_then(|s| s.app.as_ref()).is_some_and(|a| !a.serve);
+            let files_only = site.language != sites::Language::Php && own.and_then(|s| s.app.as_ref()).is_some_and(|a| !a.serve);
             let status = statuses.iter().find(|s| s.name == site.name);
             let managed = status.filter(|s| matches!(s.state, "starting" | "running")).and_then(|s| s.port);
             let detected = found.get(&site.name).map(Vec::as_slice).unwrap_or_default();
@@ -1170,7 +1354,7 @@ async fn tunnel_start(
         None => None,
     };
     if let Some(s) = &site {
-        let kind = if s.server == config::Server::Nginx { ServiceKind::Nginx } else { ServiceKind::Apache };
+        let kind = server_kind(s.server);
         if !state.supervisor.is_running(kind).await {
             return Err(Error::msg(format!("Start {} first; the tunnel forwards to it.", kind.label())));
         }
@@ -1467,9 +1651,25 @@ struct PortStatus {
 async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortStatus>> {
     let (settings, layout) = state.snapshot().await;
     let p = &settings.ports;
-    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mysqlServer", p.mysql_server), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm), ("redis", p.redis), ("memcached", p.memcached)];
-    if settings.web_server == config::WebServer::Both {
-        ports.extend([("nginxHttp", p.nginx_http), ("nginxHttps", p.nginx_https)]);
+    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mysqlServer", p.mysql_server), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm), ("redis", p.redis), ("memcached", p.memcached), ("postgres", p.postgres), ("pgadmin", p.pgadmin), ("mongodb", p.mongodb), ("clickhouseHttp", p.clickhouse_http), ("clickhouseTcp", p.clickhouse_tcp), ("neo4jHttp", p.neo4j_http), ("neo4jBolt", p.neo4j_bolt)];
+    // Servers that aren't the primary one have their own pair of ports.
+    for &server in settings.web_servers.iter().skip(1) {
+        let (http, https) = settings.server_ports(server);
+        ports.extend(match server {
+            config::Server::Apache => [("apacheHttp", http), ("apacheHttps", https)],
+            config::Server::Nginx => [("nginxHttp", http), ("nginxHttps", https)],
+            config::Server::Caddy => [("caddyHttp", http), ("caddyHttps", https)],
+            config::Server::Frankenphp => [("frankenphpHttp", http), ("frankenphpHttps", https)],
+        });
+    }
+    if settings.server_enabled(config::Server::Caddy) {
+        ports.push(("caddyAdmin", p.caddy_admin));
+    }
+    if settings.server_enabled(config::Server::Frankenphp) {
+        ports.push(("frankenphpAdmin", p.frankenphp_admin));
+    }
+    if settings.versions.get("tomcat").is_some() {
+        ports.extend([("tomcatHttp", p.tomcat_http), ("tomcatShutdown", p.tomcat_shutdown)]);
     }
     let mut out = Vec::new();
     for (key, port) in ports {
@@ -1550,15 +1750,15 @@ async fn diagnostics(state: State<'_, AppState>, redact: bool) -> Result<String>
     let _ = writeln!(r, "\n## Environment\n");
     let _ = writeln!(r, "- Root: {}", layout.root().display());
     let _ = writeln!(r, "- Domain suffix: .{}", settings.tld);
-    let _ = writeln!(r, "- Web server: {:?}", settings.web_server);
+    let servers: Vec<&str> = settings.web_servers.iter().map(|s| s.label()).collect();
+    let _ = writeln!(r, "- Web servers: {}", servers.join(", "));
     let _ = writeln!(r, "- HTTPS by default: {}", settings.https_by_default);
     let _ = writeln!(r, "- Manage hosts file: {}", settings.manage_hosts);
     let _ = writeln!(r, "- PHP mail() to Mailpit: {}", settings.route_mail);
 
     let _ = writeln!(r, "\n## Runtimes\n\n| Runtime | Active | Installed |\n|---|---|---|");
     for runtime in Runtime::ALL {
-        let mut s = settings.clone();
-        let active = active_version(&mut s, runtime).clone().unwrap_or_else(|| "—".into());
+        let active = settings.versions.get(runtime.id()).cloned().unwrap_or_else(|| "—".into());
         let installed = runtimes::installed(&layout, runtime).join(", ");
         let _ = writeln!(r, "| {} | {active} | {} |", runtime.id(), if installed.is_empty() { "—".into() } else { installed });
     }
@@ -1605,7 +1805,7 @@ async fn diagnostics(state: State<'_, AppState>, redact: bool) -> Result<String>
         let _ = writeln!(r, "- PHP {}: {}/{} workers alive, ports {}-{}", p.version, p.alive, p.workers, p.port, p.port + p.workers - 1);
     }
 
-    for kind in [ServiceKind::Apache, ServiceKind::Nginx] {
+    for kind in ServiceKind::WEB {
         let _ = writeln!(r, "\n## {} configuration test\n", kind.label());
         let _ = match services::config_test(kind, &settings, &layout).await {
             None => writeln!(r, "Not run (not installed or never started)."),
@@ -1680,12 +1880,12 @@ async fn runtime_catalog(state: State<'_, AppState>, runtime: Runtime) -> Result
 
 #[tauri::command]
 async fn installed_runtimes(state: State<'_, AppState>) -> Result<Vec<InstalledRuntime>> {
-    let (mut settings, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
     Ok(Runtime::ALL
         .into_iter()
         .map(|runtime| InstalledRuntime {
             runtime,
-            active: active_version(&mut settings, runtime).clone(),
+            active: settings.versions.get(runtime.id()).cloned(),
             versions: runtimes::installed(&layout, runtime),
         })
         .collect())
@@ -1712,27 +1912,37 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
     let mut activated = false;
     state
         .update_settings(|s| {
-            let active = active_version(s, release.runtime);
-            if active.is_none() {
-                *active = Some(release.version.clone());
+            if s.versions.get(release.runtime.id()).is_none() {
+                s.versions.set(release.runtime.id(), Some(release.version.clone()));
                 activated = true;
             }
         })
         .await?;
+    // pgAdmin is a Python app: its packages go into a virtual environment of its own.
+    if release.runtime == Runtime::Pgadmin {
+        logs::system(&app, logs::Level::Info, "Installing pgAdmin's Python packages (a few minutes)");
+        let settings = state.snapshot().await.0;
+        if let Err(e) = runtimes::setup_pgadmin(&app, &settings, &layout, &release.version).await {
+            state.update_settings(reconcile_versions).await?;
+            return Err(e);
+        }
+    }
     // phpRedisAdmin needs its PHP Redis client next to it.
     if release.runtime == Runtime::Phpredisadmin {
         logs::system(&app, logs::Level::Info, "Adding Predis, phpRedisAdmin's Redis client");
         runtimes::add_predis(&state.http, &layout, &release.version).await?;
     }
-    // A new tool brings a domain and, for Mailpit, PHP mail settings: Apache picks both up on restart.
+    // A new tool brings a domain and, for Mailpit, PHP mail settings: the primary web
+    // server picks both up on restart.
     if activated && is_tool(release.runtime) {
-        restart_if_running(&app, &state, ServiceKind::Apache).await?;
+        let primary = server_kind(state.snapshot().await.0.primary_server());
+        restart_if_running(&app, &state, primary).await?;
     }
     Ok(())
 }
 
 fn is_tool(runtime: Runtime) -> bool {
-    matches!(runtime, Runtime::Mailpit | Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin)
+    matches!(runtime, Runtime::Mailpit | Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin | Runtime::Phppgadmin | Runtime::Pgadmin | Runtime::Neo4j)
 }
 
 async fn restart_if_running(app: &AppHandle, state: &AppState, kind: ServiceKind) -> Result<()> {
@@ -1747,10 +1957,10 @@ async fn restart_if_running(app: &AppHandle, state: &AppState, kind: ServiceKind
 
 #[tauri::command]
 async fn remove_runtime(app: AppHandle, state: State<'_, AppState>, runtime: Runtime, version: String) -> Result<()> {
-    let (mut settings, layout) = state.snapshot().await;
-    let was_active = active_version(&mut settings, runtime).as_deref() == Some(version.as_str());
+    let (settings, layout) = state.snapshot().await;
+    let was_active = settings.versions.get(runtime.id()) == Some(&version);
     // Web tools are just files served by Apache, which restarts below instead of blocking.
-    if was_active && !matches!(runtime, Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin) {
+    if was_active && !matches!(runtime, Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin | Runtime::Phppgadmin) {
         for &kind in dependents(runtime) {
             if state.supervisor.is_running(kind).await {
                 return Err(Error::msg(format!("Stop {} before removing the version it is using", kind.label())));
@@ -1781,7 +1991,7 @@ async fn remove_runtime(app: AppHandle, state: State<'_, AppState>, runtime: Run
         })
         .await?;
     if was_active && is_tool(runtime) {
-        restart_if_running(&app, &state, ServiceKind::Apache).await?;
+        restart_if_running(&app, &state, server_kind(settings.primary_server())).await?;
     }
     Ok(())
 }
@@ -1812,7 +2022,7 @@ async fn set_active_version(
     }
 
     logs::system(&app, logs::Level::Info, format!("Switching {} to {version}", runtime.id()));
-    let settings = state.update_settings(|s| *active_version(s, runtime) = Some(version)).await?;
+    let settings = state.update_settings(|s| s.versions.set(runtime.id(), Some(version))).await?;
     let layout = Layout::new(&settings.root_dir);
     for kind in restart {
         state.supervisor.start(&app, kind, &settings, &layout).await?;
@@ -2027,6 +2237,12 @@ pub fn run() {
             ngrok_token_saved,
             set_ngrok_token,
             trust_ca,
+            list_databases,
+            list_backups,
+            backup_database,
+            restore_backup,
+            delete_backup,
+            open_compass,
             open_db_client,
             runtime_catalog,
             installed_runtimes,

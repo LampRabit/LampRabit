@@ -34,6 +34,11 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("astro.yaml", include_str!("../templates/astro.yaml")),
     ("express.yaml", include_str!("../templates/express.yaml")),
     ("nestjs.yaml", include_str!("../templates/nestjs.yaml")),
+    ("django.yaml", include_str!("../templates/django.yaml")),
+    ("flask.yaml", include_str!("../templates/flask.yaml")),
+    ("fastapi.yaml", include_str!("../templates/fastapi.yaml")),
+    ("spring-boot.yaml", include_str!("../templates/spring-boot.yaml")),
+    ("java-webapp.yaml", include_str!("../templates/java-webapp.yaml")),
     ("static.yaml", include_str!("../templates/static.yaml")),
 ];
 
@@ -59,6 +64,10 @@ pub struct Template {
     pub requires: Requires,
     #[serde(default)]
     pub database: DatabaseUse,
+    /// The database servers the template can set the project up for; MariaDB and MySQL
+    /// when absent (most PHP apps' configs are written for them).
+    #[serde(default = "mysql_family")]
+    pub engines: Vec<DbEngine>,
     #[serde(default)]
     pub variables: Vec<Variable>,
     pub steps: Vec<Step>,
@@ -110,6 +119,12 @@ pub struct Requires {
     /// A Node.js project: the wizard asks for the Node version and package manager.
     #[serde(default)]
     pub node: bool,
+    /// Lowest Python version ("3.10"): LampRabit's Python must be installed.
+    #[serde(default)]
+    pub python: Option<String>,
+    /// Lowest Java version ("17"): LampRabit's Java must be installed.
+    #[serde(default)]
+    pub java: Option<String>,
 }
 
 /// How a Node project runs once created; saved as its app setup (Sites → Node app).
@@ -140,6 +155,45 @@ pub enum DatabaseUse {
     Optional,
     /// The project can't work without one.
     Required,
+}
+
+/// A database server a project can be created on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DbEngine {
+    Mariadb,
+    Mysql,
+    Postgres,
+    /// A file in the project; nothing to install or start.
+    Sqlite,
+    /// Only for backups; no template sets a project up on it yet.
+    Mongodb,
+}
+
+impl DbEngine {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Mariadb => "mariadb",
+            Self::Mysql => "mysql",
+            Self::Postgres => "postgres",
+            Self::Sqlite => "sqlite",
+            Self::Mongodb => "mongodb",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Mariadb => "MariaDB",
+            Self::Mysql => "MySQL",
+            Self::Postgres => "PostgreSQL",
+            Self::Sqlite => "SQLite",
+            Self::Mongodb => "MongoDB",
+        }
+    }
+}
+
+fn mysql_family() -> Vec<DbEngine> {
+    vec![DbEngine::Mariadb, DbEngine::Mysql]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -447,6 +501,11 @@ pub const PLACEHOLDERS: &[&str] = &[
     "db.user",
     "db.password",
     "db.server_version",
+    "venv.python",
+    "mvnw",
+    "java_major",
+    "db.scheme",
+    "db.charset",
     "mail.host",
     "mail.port",
     "node_version",
@@ -489,8 +548,12 @@ impl Template {
         }
         if let Some(serve) = &self.serve {
             if serve.mode == crate::config::ServeMode::Dynamic {
-                if !self.requires.node {
-                    return Err(Error::msg("serve: dynamic needs requires: node: true"));
+                // A dev server runs on a language LampRabit provides.
+                if !self.requires.node && self.requires.python.is_none() && self.requires.java.is_none() {
+                    return Err(Error::msg("serve: dynamic needs requires: node: true, python: \"3.x\" or java: \"17\""));
+                }
+                if !serve.file.trim().is_empty() && !self.requires.node {
+                    return Err(Error::msg("serve: file runs with node, so it needs requires: node: true"));
                 }
                 if serve.command.trim().is_empty() && serve.file.trim().is_empty() {
                     return Err(Error::msg("serve: dynamic needs a command or a file"));
@@ -732,9 +795,13 @@ pub struct TemplateInfo {
     pub path: Option<PathBuf>,
     pub uses_php: bool,
     pub uses_node: bool,
+    /// Lowest Python and Java versions the template needs (LampRabit's own).
+    pub python: Option<String>,
+    pub java: Option<String>,
     pub min_php: Option<String>,
     pub extensions: Vec<String>,
     pub database: DatabaseUse,
+    pub engines: Vec<DbEngine>,
     pub variables: Vec<Variable>,
     pub optional_steps: Vec<OptionalStep>,
     /// Steps that need approval before running (user templates only).
@@ -833,9 +900,12 @@ pub fn catalog(layout: &Layout) -> Catalog {
             path,
             uses_php: t.uses_php(),
             uses_node: t.uses_node(),
+            python: t.requires.python.clone(),
+            java: t.requires.java.clone(),
             min_php: t.requires.php.clone().filter(|v| v != "any"),
             extensions: t.requires.extensions.clone(),
             database: t.database,
+            engines: t.engines.clone(),
             variables: t.variables.clone(),
             done: t.done.clone(),
         })

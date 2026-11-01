@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Cloud, Code2, Database, DatabaseZap, Feather, Layers3, Mail, Package, Radio, Server, Table2, TableProperties, Zap } from "lucide-react";
+import { ArchiveRestore, BarChart3, Cloud, Code2, Coffee, Compass, Cpu, Feather as FeatherIcon, Flame, Gauge, Leaf, Network, SquareTerminal, Terminal, Database, DatabaseZap, Feather, Layers3, Mail, Package, Radio, Server, ShieldCheck, Table2, TableProperties, Zap } from "lucide-react";
 import type { Runtime } from "../lib/api";
 
 /** Icon and colour used for each runtime across the app. */
@@ -14,6 +14,26 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     text: "text-emerald-600",
     icon: (size) => <Server size={size} strokeWidth={1.75} />,
   },
+  caddy: {
+    className: "bg-cyan-600/10 text-cyan-600 dark:text-cyan-400",
+    text: "text-cyan-600 dark:text-cyan-400",
+    icon: (size) => <ShieldCheck size={size} strokeWidth={1.75} />,
+  },
+  frankenphp: {
+    className: "bg-violet-600/10 text-violet-600 dark:text-violet-400",
+    text: "text-violet-600 dark:text-violet-400",
+    icon: (size) => <Flame size={size} strokeWidth={1.75} />,
+  },
+  tomcat: {
+    className: "bg-yellow-600/10 text-yellow-700 dark:text-yellow-400",
+    text: "text-yellow-700 dark:text-yellow-400",
+    icon: (size) => <Cpu size={size} strokeWidth={1.75} />,
+  },
+  java: {
+    className: "bg-orange-600/10 text-orange-600 dark:text-orange-400",
+    text: "text-orange-600 dark:text-orange-400",
+    icon: (size) => <Coffee size={size} strokeWidth={1.75} />,
+  },
   php: {
     className: "bg-indigo-500/10 text-indigo-500",
     text: "text-indigo-500",
@@ -22,6 +42,61 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
   mariadb: {
     className: "bg-amber-600/12 text-amber-600",
     text: "text-amber-600",
+    icon: (size) => <Database size={size} strokeWidth={1.75} />,
+  },
+  mongodb: {
+    className: "bg-green-600/10 text-green-700 dark:text-green-400",
+    text: "text-green-700 dark:text-green-400",
+    icon: (size) => <Leaf size={size} strokeWidth={1.75} />,
+  },
+  mongotools: {
+    className: "bg-green-600/10 text-green-700 dark:text-green-400",
+    text: "text-green-700 dark:text-green-400",
+    icon: (size) => <ArchiveRestore size={size} strokeWidth={1.75} />,
+  },
+  compass: {
+    className: "bg-green-600/10 text-green-700 dark:text-green-400",
+    text: "text-green-700 dark:text-green-400",
+    icon: (size) => <Compass size={size} strokeWidth={1.75} />,
+  },
+  sqlite: {
+    className: "bg-sky-600/10 text-sky-700 dark:text-sky-400",
+    text: "text-sky-700 dark:text-sky-400",
+    icon: (size) => <FeatherIcon size={size} strokeWidth={1.75} />,
+  },
+  clickhouse: {
+    className: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-300",
+    text: "text-yellow-700 dark:text-yellow-300",
+    icon: (size) => <BarChart3 size={size} strokeWidth={1.75} />,
+  },
+  neo4j: {
+    className: "bg-cyan-600/10 text-cyan-700 dark:text-cyan-400",
+    text: "text-cyan-700 dark:text-cyan-400",
+    icon: (size) => <Network size={size} strokeWidth={1.75} />,
+  },
+  mongosh: {
+    className: "bg-green-600/10 text-green-700 dark:text-green-400",
+    text: "text-green-700 dark:text-green-400",
+    icon: (size) => <SquareTerminal size={size} strokeWidth={1.75} />,
+  },
+  python: {
+    className: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+    text: "text-blue-600 dark:text-blue-400",
+    icon: (size) => <Terminal size={size} strokeWidth={1.75} />,
+  },
+  phppgadmin: {
+    className: "bg-sky-600/10 text-sky-700 dark:text-sky-400",
+    text: "text-sky-700 dark:text-sky-400",
+    icon: (size) => <TableProperties size={size} strokeWidth={1.75} />,
+  },
+  pgadmin: {
+    className: "bg-indigo-600/10 text-indigo-700 dark:text-indigo-400",
+    text: "text-indigo-700 dark:text-indigo-400",
+    icon: (size) => <Gauge size={size} strokeWidth={1.75} />,
+  },
+  postgres: {
+    className: "bg-sky-700/10 text-sky-700 dark:text-sky-400",
+    text: "text-sky-700 dark:text-sky-400",
     icon: (size) => <Database size={size} strokeWidth={1.75} />,
   },
   mysql: {

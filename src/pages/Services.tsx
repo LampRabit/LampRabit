@@ -17,6 +17,9 @@ import { useRuntimeUpdates } from "../lib/updates";
 import { runtimeTiles } from "../components/runtimes";
 import { Button, Card, IconTile, PageHeader } from "../components/ui";
 import NodeCard from "../components/NodeCard";
+import ServiceSettings from "../components/ServiceSettings";
+import RelatedPanel from "../components/RelatedPanel";
+import BackupsPanel from "../components/BackupsPanel";
 import { ActiveTile, AvailableList, InstalledTile, InstalledTiles, NoActiveTile, VersionsLayout } from "../components/versions";
 import { TunnelsPanel } from "../components/Tunnels";
 
@@ -33,7 +36,67 @@ const roles: Record<Runtime, { blurb: string; source: string; unix?: string }> =
     source: "Thread-safe builds from windows.php.net",
     unix: "LampRabit's static builds with common extensions built in, Redis and Memcached clients included",
   },
+  caddy: {
+    blurb: "Serves your sites",
+    source: "Official Caddy releases from GitHub; uses LampRabit's certificates and PHP, not its own",
+  },
+  frankenphp: {
+    blurb: "Serves your sites",
+    source: "Official FrankenPHP releases: Caddy with its own PHP built in, so LampRabit's PHP versions and extensions don't apply to its sites (no Intel Mac build)",
+  },
+  tomcat: {
+    blurb: "Runs Java web apps",
+    source: "Official Apache Tomcat releases (SHA-512 checked); runs on the active Java and serves Java projects behind your web server",
+  },
+  java: {
+    blurb: "Runs Java apps",
+    source: "Eclipse Temurin JDKs from Adoptium (checksum checked); java, javac and jar work in LampRabit's terminal, with JAVA_HOME set",
+  },
   mariadb: { blurb: "Stores your data", source: "Official MariaDB releases" },
+  mongodb: {
+    blurb: "Stores your documents",
+    source: "Official MongoDB Community Server releases (checksum checked); each major version keeps its own data folder",
+  },
+  mongotools: {
+    blurb: "MongoDB backups",
+    source: "MongoDB's mongodump and mongorestore (checksum checked); LampRabit's MongoDB backups use them",
+  },
+  compass: {
+    blurb: "MongoDB GUI",
+    source: "MongoDB's desktop app from its GitHub releases; opens connected to LampRabit's MongoDB",
+  },
+  sqlite: {
+    blurb: "File databases",
+    source: "The sqlite3 shell from sqlite.org (SHA3 checked). PHP has SQLite built in, so projects don't need this to use it",
+  },
+  clickhouse: {
+    blurb: "Analytics database",
+    source: "Official ClickHouse builds from GitHub (Linux and macOS; no Windows build). Its web console is at /play on its HTTP port",
+  },
+  neo4j: {
+    blurb: "Graph database",
+    source: "Neo4j Community from dist.neo4j.org (checksum checked); runs on Java 21+, Neo4j Browser at neo4j.test",
+  },
+  mongosh: {
+    blurb: "MongoDB shell",
+    source: "MongoDB's shell from its GitHub releases; mongosh works in LampRabit's terminal, and MongoDB uses it to shut down cleanly",
+  },
+  python: {
+    blurb: "Runs Python code",
+    source: "python-build-standalone (the builds uv uses, checksum checked); python and pip work in LampRabit's terminal",
+  },
+  phppgadmin: {
+    blurb: "PostgreSQL admin",
+    source: "The PostgreSQL web interface in PHP (ReimuHakurei's maintained fork for PHP 8); log in as root without a password",
+  },
+  pgadmin: {
+    blurb: "PostgreSQL admin",
+    source: "PostgreSQL's official admin tool from PyPI, in its own Python environment (needs Python 3.10–3.14); add a server for 127.0.0.1 as root",
+  },
+  postgres: {
+    blurb: "Stores your data",
+    source: "PostgreSQL built from source for every OS by theseus-rs (checksum checked); psql and pg_dump work in LampRabit's terminal",
+  },
   mysql: { blurb: "Stores your data", source: "Official MySQL releases; runs next to MariaDB on its own port" },
   mailpit: { blurb: "Catches outgoing mail", source: "Local SMTP server with a web inbox" },
   adminer: { blurb: "Database admin", source: "A single-file database manager" },
@@ -65,14 +128,23 @@ const newestFirst = (a: string, b: string) => {
 
 type ServiceSelection = Runtime | "node" | "tunnels";
 
-/** Services shown in the Settings-style grouped navigation. */
+/** Services by what they do, in the Settings-style grouped navigation. */
 const groups: { id: string; title: string; blurb: string; items: ServiceSelection[] }[] = [
-  { id: "web", title: "Web server and PHP", blurb: "Apache or Nginx serve your sites; PHP runs them.", items: ["apache", "nginx", "php"] },
-  { id: "databases", title: "Databases", blurb: "MariaDB and MySQL can run side by side.", items: ["mariadb", "mysql"] },
-  { id: "tools", title: "Developer tools", blurb: "Package managers, mail, database and cache tools.", items: ["composer", "node", "mailpit", "phpmyadmin", "adminer", "redis", "phpredisadmin", "memcached"] },
+  {
+    id: "web",
+    title: "Web and app servers",
+    blurb: "Apache, Nginx, Caddy or FrankenPHP serve your sites; Tomcat runs Java web apps behind them. Several can run side by side.",
+    items: ["apache", "nginx", "caddy", "frankenphp", "tomcat"],
+  },
+  { id: "languages", title: "Languages", blurb: "Several versions side by side; projects pick theirs.", items: ["php", "java", "python", "node"] },
+  { id: "packages", title: "Package managers", blurb: "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH.", items: ["composer"] },
+  { id: "databases", title: "Databases", blurb: "They can all run side by side, each on its own port.", items: ["mariadb", "mysql", "postgres", "mongodb", "clickhouse", "neo4j", "sqlite"] },
+  { id: "cache", title: "Cache", blurb: "In-memory stores for caches, sessions and queues.", items: ["redis", "memcached"] },
+  { id: "tools", title: "Developer tools", blurb: "Mail catching and web interfaces for your databases and caches.", items: ["mailpit", "phpmyadmin", "adminer", "phppgadmin", "pgadmin", "phpredisadmin", "compass", "mongosh", "mongotools"] },
   { id: "sharing", title: "Sharing", blurb: "Put a project or local port on a public URL.", items: ["cloudflared", "ngrok", "tunnels"] },
 ];
 export default function Services() {
+  const notify = useAppStore((s) => s.notify);
   const [selected, setSelected] = useState<ServiceSelection>("apache");
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
@@ -93,10 +165,17 @@ export default function Services() {
     note = "redis-cli works in LampRabit's terminal. Enable Add LampRabit's commands to PATH in Settings → Terminal to use it anywhere.";
   } else if (runtime === "phpredisadmin" && !find("redis")?.active) {
     note = "Install Redis to browse its keys here.";
+  } else if (runtime === "mongodb" && find("mongodb")?.active && !find("mongosh")?.active) {
+    note = "Install mongosh too: the MongoDB shell, which also lets LampRabit stop MongoDB cleanly.";
+  } else if ((runtime === "phppgadmin" || runtime === "pgadmin") && !find("postgres")?.active) {
+    note = "Install PostgreSQL to manage it here.";
+  } else if (runtime === "pgadmin" && !find("pgadmin")?.active && !find("python")?.active) {
+    note = "pgAdmin runs on Python: install Python 3.13 (Languages) first.";
   }
-  if (runtime === "mailpit" || runtime === "phpmyadmin" || runtime === "adminer" || runtime === "phpredisadmin") {
-    openUrl = toolUrl(runtime, sites.data, settings.data?.ports.mailUi);
+  if (runtime === "mailpit" || runtime === "phpmyadmin" || runtime === "adminer" || runtime === "phpredisadmin" || runtime === "phppgadmin" || runtime === "pgadmin" || runtime === "neo4j") {
+    openUrl = toolUrl(runtime, sites.data, settings.data?.ports.mailUi, runtime === "neo4j" ? settings.data?.ports.neo4jHttp : settings.data?.ports.pgadmin);
   }
+  if (runtime === "clickhouse") openUrl = settings.data ? `http://localhost:${settings.data.ports.clickhouseHttp}/play` : undefined;
 
   const status = (item: ServiceSelection) => {
     if (item === "node") return "NVM managed";
@@ -163,8 +242,18 @@ export default function Services() {
               installed={find(runtime)}
               openUrl={openUrl}
               note={note}
+              action={
+                runtime === "compass" && find("compass")?.active ? (
+                  <Button size="sm" variant="soft" onClick={() => api.openCompass().catch((e) => notify("error", String(e)))}>
+                    <ExternalLink size={14} /> Open Compass
+                  </Button>
+                ) : undefined
+              }
             />
           ) : selected === "node" ? <NodeCard /> : <TunnelsPanel />}
+          {runtime && <RelatedPanel key={`related-${runtime}`} runtime={runtime} installed={installed.data} onSelect={setSelected} />}
+          {runtime && <ServiceSettings key={`settings-${runtime}`} runtime={runtime} />}
+          {(runtime === "mariadb" || runtime === "mysql" || runtime === "postgres" || runtime === "mongodb") && find(runtime)?.active && <BackupsPanel key={`backups-${runtime}`} engine={runtime} />}
           {selected === "tunnels" && <p className="mt-3 text-xs text-muted">Share a project from Sites or use this panel to share any local port.</p>}
         </section>
       </div>

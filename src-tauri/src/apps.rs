@@ -368,15 +368,20 @@ impl Apps {
             return Ok(self.status(name).await);
         }
         let dir = layout.www().join(name);
-        if !dir.join("package.json").exists() && config.mode == AppMode::Command {
-            return Err(Error::msg(format!("www/{name} has no package.json.")));
-        }
+        // Python and Java projects run their command with LampRabit's commands on PATH; Node
+        // ones (and `node <file>`) with the project's Node version first.
+        let node_project = dir.join("package.json").exists() || config.mode == AppMode::File;
         if std::net::TcpListener::bind(("127.0.0.1", config.port)).is_err() {
             let owner = diagnose::port_owner(config.port).await.map(|o| format!(" by {} (PID {})", o.name, o.pid)).unwrap_or_default();
             return Err(Error::msg(format!("Port {} is already in use{owner}. Stop that program, or choose another port for {name}.", config.port)));
         }
-        let (version, bin) = node::for_project(config.node.as_deref(), &dir)?;
-        let path = node_path(&bin, layout);
+        let (version, bin, path) = if node_project {
+            let (version, bin) = node::for_project(config.node.as_deref(), &dir)?;
+            let path = node_path(&bin, layout);
+            (version, bin, path)
+        } else {
+            (Default::default(), PathBuf::new(), Self::command_path(settings, layout, name))
+        };
         let (program, args) = match config.mode {
             AppMode::Command => {
                 let command = config.command.trim();
@@ -407,6 +412,7 @@ impl Apps {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("PATH", &path)
+            .envs(crate::shims::tool_env(settings, layout))
             .env("PORT", config.port.to_string())
             // Dev servers that read HOST bind where the proxy looks.
             .env("HOST", "127.0.0.1")
@@ -563,6 +569,7 @@ impl Apps {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("PATH", &path)
+            .envs(crate::shims::tool_env(settings, layout))
             .env("FORCE_COLOR", "0")
             .env("NO_COLOR", "1")
             .env("npm_config_yes", "true")

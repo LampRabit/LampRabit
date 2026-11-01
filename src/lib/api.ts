@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type ServiceKind = "apache" | "nginx" | "mariadb" | "mailpit" | "redis" | "memcached" | "mysql";
-export type WebServer = "apache" | "nginx" | "both";
-export type Server = "apache" | "nginx";
+export type ServiceKind = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "mariadb" | "mailpit" | "redis" | "memcached" | "mysql";
+export type Server = "apache" | "nginx" | "caddy" | "frankenphp";
+export const allServers: Server[] = ["apache", "nginx", "caddy", "frankenphp"];
 export type ServiceState = "stopped" | "starting" | "running" | "stopping" | "error";
 export type Runtime =
   | "apache"
@@ -18,13 +18,36 @@ export type Runtime =
   | "composer"
   | "mysql"
   | "phpredisadmin"
-  | "memcached";
-export const coreRuntimes: Runtime[] = ["apache", "nginx", "php", "mariadb", "mysql"];
+  | "memcached"
+  | "caddy"
+  | "java"
+  | "tomcat"
+  | "frankenphp"
+  | "postgres"
+  | "python"
+  | "phppgadmin"
+  | "pgadmin"
+  | "mongodb"
+  | "mongosh"
+  | "mongotools"
+  | "compass"
+  | "sqlite"
+  | "clickhouse"
+  | "neo4j";
+export const coreRuntimes: Runtime[] = ["apache", "nginx", "caddy", "frankenphp", "php", "mariadb", "mysql"];
 export const toolRuntimes: Runtime[] = ["composer", "mailpit", "adminer", "phpmyadmin", "redis", "phpredisadmin", "memcached", "ngrok", "cloudflared"];
 
 export const serviceLabels: Record<ServiceKind, string> = {
   apache: "Apache",
   nginx: "Nginx",
+  caddy: "Caddy",
+  frankenphp: "FrankenPHP",
+  tomcat: "Tomcat",
+  postgres: "PostgreSQL",
+  pgadmin: "pgAdmin",
+  mongodb: "MongoDB",
+  clickhouse: "ClickHouse",
+  neo4j: "Neo4j",
   mariadb: "MariaDB",
   mysql: "MySQL",
   mailpit: "Mailpit",
@@ -47,6 +70,21 @@ export const runtimeLabels: Record<Runtime, string> = {
   mysql: "MySQL",
   phpredisadmin: "phpRedisAdmin",
   memcached: "Memcached",
+  caddy: "Caddy",
+  java: "Java",
+  tomcat: "Tomcat",
+  frankenphp: "FrankenPHP",
+  postgres: "PostgreSQL",
+  python: "Python",
+  phppgadmin: "phpPgAdmin",
+  pgadmin: "pgAdmin",
+  mongodb: "MongoDB",
+  mongosh: "mongosh",
+  mongotools: "MongoDB Database Tools",
+  compass: "MongoDB Compass",
+  sqlite: "SQLite",
+  clickhouse: "ClickHouse",
+  neo4j: "Neo4j",
 };
 
 export interface UpdateNotice {
@@ -205,6 +243,8 @@ export interface NewProject {
   server: Server | null;
   ssl: boolean;
   database: string | null;
+  /** The server the database goes on; the default database when null. */
+  engine: DbEngine | null;
   /** Values for the template's variables, by id. */
   variables: Record<string, string>;
   /** Optional steps by id: run or not. */
@@ -231,6 +271,18 @@ export interface TemplateVariable {
   required: boolean;
 }
 
+export type DbEngine = "mariadb" | "mysql" | "postgres" | "sqlite" | "mongodb";
+
+/** A database dump in <root>/backups/<engine>/. */
+export interface Backup {
+  engine: DbEngine;
+  database: string;
+  path: string;
+  size: number;
+  /** Unix time in milliseconds. */
+  created: number;
+}
+
 export interface ProjectTemplate {
   id: string;
   name: string;
@@ -243,9 +295,14 @@ export interface ProjectTemplate {
   path: string | null;
   usesPhp: boolean;
   usesNode: boolean;
+  /** Lowest Python / Java version, for templates that run on LampRabit's own. */
+  python: string | null;
+  java: string | null;
   minPhp: string | null;
   extensions: string[];
   database: "none" | "optional" | "required";
+  /** Database servers the template can set a project up for. */
+  engines: DbEngine[];
   variables: TemplateVariable[];
   optionalSteps: { id: string; label: string; default: boolean; when: string | null }[];
   /** Steps needing approval (templates you added yourself). */
@@ -299,7 +356,7 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export type LogService = "apache" | "nginx" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system" | "project";
+export type LogService = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system" | "project";
 
 /** A raw log line from a service's output or one of its log files. */
 export interface RawLogLine {
@@ -315,7 +372,7 @@ export interface RawLogLine {
 export type LogStream = "output" | "error" | "access" | "command";
 
 /** What a project is written in; decides its runtime and how it's served. */
-export type Language = "php" | "node" | "static";
+export type Language = "php" | "node" | "java" | "python" | "static";
 export type ServeMode = "dynamic" | "static";
 export interface Route {
   port: number;
@@ -424,15 +481,36 @@ export interface Settings {
     /** Oracle MySQL, next to MariaDB. */
     mysqlServer: number;
     phpFpm: number;
+    /** Each web server's own ports, used while another server is the primary one. */
     nginxHttp: number;
     nginxHttps: number;
+    apacheHttp: number;
+    apacheHttps: number;
+    caddyHttp: number;
+    caddyHttps: number;
+    /** Caddy's admin API (reload, stop). */
+    caddyAdmin: number;
+    frankenphpHttp: number;
+    frankenphpHttps: number;
+    frankenphpAdmin: number;
+    /** Tomcat's HTTP connector, behind the web servers. */
+    tomcatHttp: number;
+    tomcatShutdown: number;
+    postgres: number;
+    pgadmin: number;
+    mongodb: number;
+    clickhouseHttp: number;
+    clickhouseTcp: number;
+    neo4jHttp: number;
+    neo4jBolt: number;
     mailSmtp: number;
     mailUi: number;
     redis: number;
     memcached: number;
   };
-  versions: Record<Runtime, string | null>;
-  webServer: WebServer;
+  versions: Partial<Record<Runtime, string | null>>;
+  /** The web servers that run; the first is the primary one (main ports, localhost, tools). */
+  webServers: Server[];
   phpWorkers: number;
   httpsByDefault: boolean;
   manageHosts: boolean;
@@ -540,6 +618,12 @@ export const api = {
   setNgrokToken: (token: string | null) => invoke<void>("set_ngrok_token", { token }),
   /** Resolves to a note when browsers couldn't be covered (Linux without certutil). */
   trustCa: () => invoke<string | null>("trust_ca"),
+  listDatabases: (engine: DbEngine) => invoke<string[]>("list_databases", { engine }),
+  listBackups: () => invoke<Backup[]>("list_backups"),
+  backupDatabase: (engine: DbEngine, database: string) => invoke<Backup>("backup_database", { engine, database }),
+  restoreBackup: (engine: DbEngine, path: string, database: string) => invoke<void>("restore_backup", { engine, path, database }),
+  deleteBackup: (path: string) => invoke<void>("delete_backup", { path }),
+  openCompass: () => invoke<void>("open_compass"),
   openDbClient: (database?: Database) => invoke<void>("open_db_client", { database: database ?? null }),
   startAll: () => invoke<string[]>("start_all"),
   /** Stops `stop`, then starts `start`; resolves to one message per failed start. */
