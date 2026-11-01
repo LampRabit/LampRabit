@@ -32,6 +32,9 @@ import {
   Leaf,
   BarChart3,
   Network,
+  Search,
+  HardDrive,
+  Bot,
   Flame,
   Cpu,
   Square,
@@ -91,6 +94,10 @@ const serviceMeta: Record<ServiceKind, { icon: typeof Feather; tile: string; blu
   mongodb: { icon: Leaf, tile: runtimeTiles.mongodb.className, blurb: "Document database" },
   clickhouse: { icon: BarChart3, tile: runtimeTiles.clickhouse.className, blurb: "Analytics database" },
   neo4j: { icon: Network, tile: runtimeTiles.neo4j.className, blurb: "Graph database" },
+  meilisearch: { icon: Search, tile: runtimeTiles.meilisearch.className, blurb: "Search engine" },
+  typesense: { icon: Search, tile: runtimeTiles.typesense.className, blurb: "Search engine" },
+  rustfs: { icon: HardDrive, tile: runtimeTiles.rustfs.className, blurb: "S3 object storage" },
+  ollama: { icon: Bot, tile: runtimeTiles.ollama.className, blurb: "Local AI models" },
   mysql: { icon: DatabaseZap, tile: runtimeTiles.mysql.className, blurb: "Oracle MySQL, next to MariaDB" },
   mailpit: { icon: Mail, tile: "bg-sky-500/10 text-sky-500", blurb: "Catches mail sent by your apps" },
   redis: { icon: Zap, tile: "bg-red-500/10 text-red-500", blurb: "Cache, sessions and queues" },
@@ -98,7 +105,7 @@ const serviceMeta: Record<ServiceKind, { icon: typeof Feather; tile: string; blu
 };
 
 /** Services listed only once installed; the core stack is always listed, with an Install button. */
-const optional: ServiceKind[] = ["tomcat", "postgres", "pgadmin", "mongodb", "clickhouse", "neo4j", "mysql", "mailpit", "redis", "memcached"];
+const optional: ServiceKind[] = ["tomcat", "postgres", "pgadmin", "mongodb", "clickhouse", "neo4j", "meilisearch", "typesense", "rustfs", "ollama", "mysql", "mailpit", "redis", "memcached"];
 
 /**
  * Installed services, once there are any; before that, the core stack with Install buttons,
@@ -507,6 +514,12 @@ function openAction(
     return settings?.versions.compass
       ? { label: "Open Compass", icon: Table2, run: () => api.openCompass().catch(onError) }
       : { label: "Install Compass", icon: Table2, run: () => navigate("services"), always: true };
+  }
+  if (service.kind === "meilisearch") {
+    return { label: "Open search preview", icon: ExternalLink, run: () => openUrl(`http://localhost:${service.port}/`).catch(onError) };
+  }
+  if (service.kind === "rustfs") {
+    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.rustfsConsole ?? 9101}/`).catch(onError) };
   }
   if (service.kind === "clickhouse") {
     return { label: "Open console", icon: Table2, run: () => openUrl(`http://localhost:${service.port}/play`).catch(onError) };

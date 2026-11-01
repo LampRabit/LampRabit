@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type ServiceKind = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "mariadb" | "mailpit" | "redis" | "memcached" | "mysql";
+export type ServiceKind = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "mariadb" | "mailpit" | "redis" | "memcached" | "mysql";
 export type Server = "apache" | "nginx" | "caddy" | "frankenphp";
 export const allServers: Server[] = ["apache", "nginx", "caddy", "frankenphp"];
 export type ServiceState = "stopped" | "starting" | "running" | "stopping" | "error";
@@ -33,7 +33,11 @@ export type Runtime =
   | "compass"
   | "sqlite"
   | "clickhouse"
-  | "neo4j";
+  | "neo4j"
+  | "meilisearch"
+  | "typesense"
+  | "rustfs"
+  | "ollama";
 export const coreRuntimes: Runtime[] = ["apache", "nginx", "caddy", "frankenphp", "php", "mariadb", "mysql"];
 export const toolRuntimes: Runtime[] = ["composer", "mailpit", "adminer", "phpmyadmin", "redis", "phpredisadmin", "memcached", "ngrok", "cloudflared"];
 
@@ -48,6 +52,10 @@ export const serviceLabels: Record<ServiceKind, string> = {
   mongodb: "MongoDB",
   clickhouse: "ClickHouse",
   neo4j: "Neo4j",
+  meilisearch: "Meilisearch",
+  typesense: "Typesense",
+  rustfs: "RustFS",
+  ollama: "Ollama",
   mariadb: "MariaDB",
   mysql: "MySQL",
   mailpit: "Mailpit",
@@ -85,6 +93,10 @@ export const runtimeLabels: Record<Runtime, string> = {
   sqlite: "SQLite",
   clickhouse: "ClickHouse",
   neo4j: "Neo4j",
+  meilisearch: "Meilisearch",
+  typesense: "Typesense",
+  rustfs: "RustFS",
+  ollama: "Ollama",
 };
 
 export interface UpdateNotice {
@@ -372,7 +384,7 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export type LogService = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system" | "project";
+export type LogService = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system" | "project";
 
 /** A raw log line from a service's output or one of its log files. */
 export interface RawLogLine {
@@ -519,6 +531,11 @@ export interface Settings {
     clickhouseTcp: number;
     neo4jHttp: number;
     neo4jBolt: number;
+    meilisearch: number;
+    typesense: number;
+    rustfs: number;
+    rustfsConsole: number;
+    ollama: number;
     mailSmtp: number;
     mailUi: number;
     redis: number;
@@ -540,6 +557,8 @@ export interface Settings {
   profiles: StackProfile[];
   /** What `mysql`, new projects and the database tools use first. */
   defaultDatabase: Database;
+  /** Object storage folders by service id (RustFS, MinIO); data/<id> when absent. */
+  storage: Record<string, string>;
 }
 
 export type Database = "mariadb" | "mysql";
@@ -640,6 +659,7 @@ export const api = {
   restoreBackup: (engine: DbEngine, path: string, database: string) => invoke<void>("restore_backup", { engine, path, database }),
   deleteBackup: (path: string) => invoke<void>("delete_backup", { path }),
   openCompass: () => invoke<void>("open_compass"),
+  ollamaElsewhere: () => invoke<string | null>("ollama_elsewhere"),
   checkMoveTarget: (target: string) => invoke<MoveCheck>("check_move_target", { target }),
   environmentInUse: () => invoke<Holder[]>("environment_in_use"),
   stopEnvironmentHolder: (pid: number) => invoke<void>("stop_environment_holder", { pid }),

@@ -212,6 +212,8 @@ Left: Drupal/CakePHP/CodeIgniter on PostgreSQL; SQLite backups (copy the file).
 
 ## Phase 16: more services
 
+**Done (2026-11-01), batch 1:** Meilisearch (Community builds, development mode), Typesense (dl.typesense.org, Linux/macOS, fixed local API key), RustFS (S3 on 9100, console 9101; `Settings.storage` puts its buckets anywhere, outside the LampRabit folder too) and Ollama (its own builds incl. Linux .tar.zst through `ruzstd`; models in data/ollama; an Ollama installed elsewhere is pointed out).
+
 Same standards as existing runtimes: catalog per OS/arch with checksums, data under `data/`, health probe, logs, ports in Settings, connection details on the Overview, `.test` domain for web UIs, data kept on upgrade/remove. Resource needs (RAM, Java, Erlang) shown before installing. Rough order, cheapest first:
 1. Meilisearch, Typesense (single binaries; Typesense has no Windows build)
 2. RustFS and MinIO, both S3-compatible (decided 2026-11-01: offer both). RustFS from its GitHub releases, console at `rustfs.test`. MinIO stopped publishing binaries in 2025 and was archived in 2026, so it comes from LampRabit's CI build of its last release (a Go build in `binaries.yml`, AGPL source linked), labelled "no longer maintained upstream, no security fixes" in the UI. Each keeps its objects in `data/<name>` by default; a separate storage-folder setting per service can put them anywhere (another drive, a NAS), independent of the LampRabit folder. Moving it offers to move the existing objects, and an outside folder is never deleted on uninstall.

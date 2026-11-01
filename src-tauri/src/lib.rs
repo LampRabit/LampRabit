@@ -89,6 +89,10 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         Runtime::Mongotools | Runtime::Compass | Runtime::Sqlite => &[],
         Runtime::Clickhouse => &[ServiceKind::Clickhouse],
         Runtime::Neo4j => &[ServiceKind::Neo4j],
+        Runtime::Meilisearch => &[ServiceKind::Meilisearch],
+        Runtime::Typesense => &[ServiceKind::Typesense],
+        Runtime::Rustfs => &[ServiceKind::Rustfs],
+        Runtime::Ollama => &[ServiceKind::Ollama],
         // Projects run Python themselves; pgAdmin keeps the Python it was installed with.
         Runtime::Python => &[],
         Runtime::Phppgadmin => &ServiceKind::WEB,
@@ -235,6 +239,8 @@ fn service_fingerprint(kind: ServiceKind, settings: &Settings, layout: &Layout) 
             "{ports:?} {:?} {:?} {} {} {} {}",
             settings.web_servers, settings.ports, settings.tld, settings.https_by_default, settings.php_workers, settings.route_mail
         )
+    } else if kind == ServiceKind::Rustfs {
+        format!("{ports:?} {:?}", settings.storage_dir(layout, "rustfs"))
     } else {
         format!("{ports:?}")
     }
@@ -272,7 +278,7 @@ fn check_values(settings: &mut Settings) -> Result<()> {
         (p.apache_http, "Apache HTTP"), (p.apache_https, "Apache HTTPS"), (p.caddy_http, "Caddy HTTP"), (p.caddy_https, "Caddy HTTPS"),
         (p.caddy_admin, "Caddy admin"), (p.frankenphp_http, "FrankenPHP HTTP"), (p.frankenphp_https, "FrankenPHP HTTPS"),
         (p.frankenphp_admin, "FrankenPHP admin"), (p.tomcat_http, "Tomcat HTTP"), (p.tomcat_shutdown, "Tomcat shutdown"), (p.mysql, "MariaDB"), (p.mail_smtp, "Mailpit SMTP"), (p.mail_ui, "Mailpit inbox"), (p.redis, "Redis"),
-        (p.memcached, "Memcached"), (p.php_fpm, "PHP FastCGI"), (p.postgres, "PostgreSQL"), (p.pgadmin, "pgAdmin"), (p.mongodb, "MongoDB"), (p.clickhouse_http, "ClickHouse HTTP"), (p.clickhouse_tcp, "ClickHouse native"), (p.neo4j_http, "Neo4j Browser"), (p.neo4j_bolt, "Neo4j Bolt"),
+        (p.memcached, "Memcached"), (p.php_fpm, "PHP FastCGI"), (p.postgres, "PostgreSQL"), (p.pgadmin, "pgAdmin"), (p.mongodb, "MongoDB"), (p.clickhouse_http, "ClickHouse HTTP"), (p.clickhouse_tcp, "ClickHouse native"), (p.neo4j_http, "Neo4j Browser"), (p.neo4j_bolt, "Neo4j Bolt"), (p.meilisearch, "Meilisearch"), (p.typesense, "Typesense"), (p.rustfs, "RustFS"), (p.rustfs_console, "RustFS console"), (p.ollama, "Ollama"),
     ] {
         if port == 0 {
             return Err(Error::msg(format!("Choose a port for {name} (1–65535).")));
@@ -330,6 +336,11 @@ fn check_ports(settings: &Settings) -> Result<()> {
         (p.clickhouse_tcp, "ClickHouse native".into()),
         (p.neo4j_http, "Neo4j Browser".into()),
         (p.neo4j_bolt, "Neo4j Bolt".into()),
+        (p.meilisearch, "Meilisearch".into()),
+        (p.typesense, "Typesense".into()),
+        (p.rustfs, "RustFS".into()),
+        (p.rustfs_console, "RustFS console".into()),
+        (p.ollama, "Ollama".into()),
         (p.memcached, "Memcached".into()),
     ];
     for server in Server::ALL {
@@ -492,6 +503,12 @@ async fn move_environment(app: AppHandle, state: State<'_, AppState>, target: Pa
     logs::set_system_file(&app, layout.logs().join("lampRabit.log"));
     logs::system(&app, logs::Level::Info, format!("The LampRabit folder is now {}", target.display()));
     Ok(settings)
+}
+
+/// Where an Ollama installed outside LampRabit is, if there is one.
+#[tauri::command]
+fn ollama_elsewhere() -> Option<PathBuf> {
+    runtimes::ollama_elsewhere()
 }
 
 /// Opens MongoDB Compass connected to LampRabit's MongoDB.
@@ -1733,7 +1750,7 @@ struct PortStatus {
 async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortStatus>> {
     let (settings, layout) = state.snapshot().await;
     let p = &settings.ports;
-    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mysqlServer", p.mysql_server), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm), ("redis", p.redis), ("memcached", p.memcached), ("postgres", p.postgres), ("pgadmin", p.pgadmin), ("mongodb", p.mongodb), ("clickhouseHttp", p.clickhouse_http), ("clickhouseTcp", p.clickhouse_tcp), ("neo4jHttp", p.neo4j_http), ("neo4jBolt", p.neo4j_bolt)];
+    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mysqlServer", p.mysql_server), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm), ("redis", p.redis), ("memcached", p.memcached), ("postgres", p.postgres), ("pgadmin", p.pgadmin), ("mongodb", p.mongodb), ("clickhouseHttp", p.clickhouse_http), ("clickhouseTcp", p.clickhouse_tcp), ("neo4jHttp", p.neo4j_http), ("neo4jBolt", p.neo4j_bolt), ("meilisearch", p.meilisearch), ("typesense", p.typesense), ("rustfs", p.rustfs), ("rustfsConsole", p.rustfs_console), ("ollama", p.ollama)];
     // Servers that aren't the primary one have their own pair of ports.
     for &server in settings.web_servers.iter().skip(1) {
         let (http, https) = settings.server_ports(server);
@@ -2329,6 +2346,7 @@ pub fn run() {
             environment_in_use,
             stop_environment_holder,
             move_environment,
+            ollama_elsewhere,
             open_db_client,
             runtime_catalog,
             installed_runtimes,

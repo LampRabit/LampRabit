@@ -57,6 +57,22 @@ const roles: Record<Runtime, { blurb: string; source: string; unix?: string }> =
     blurb: "Stores your documents",
     source: "Official MongoDB Community Server releases (checksum checked); each major version keeps its own data folder",
   },
+  meilisearch: {
+    blurb: "Search engine",
+    source: "Official Meilisearch Community builds from GitHub (checksum checked); runs in development mode, with its search preview at its URL",
+  },
+  typesense: {
+    blurb: "Search engine",
+    source: "Official Typesense builds from dl.typesense.org (Linux and macOS; no Windows build; no checksums published). API key: lamprabit",
+  },
+  rustfs: {
+    blurb: "S3 object storage",
+    source: "RustFS from its GitHub releases (checksum checked): S3-compatible, with a web console. Access key lamprabit, secret lamprabit-secret",
+  },
+  ollama: {
+    blurb: "Local AI models",
+    source: "Ollama's own builds from GitHub (a large download). Models go to LampRabit's data folder; the ollama command uses this server",
+  },
   mongotools: {
     blurb: "MongoDB backups",
     source: "MongoDB's mongodump and mongorestore (checksum checked); LampRabit's MongoDB backups use them",
@@ -139,6 +155,9 @@ const groups: { id: string; title: string; blurb: string; items: ServiceSelectio
   { id: "languages", title: "Languages", blurb: "Several versions side by side; projects pick theirs.", items: ["php", "java", "python", "node"] },
   { id: "packages", title: "Package managers", blurb: "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH.", items: ["composer"] },
   { id: "databases", title: "Databases", blurb: "They can all run side by side, each on its own port.", items: ["mariadb", "mysql", "postgres", "mongodb", "clickhouse", "neo4j", "sqlite"] },
+  { id: "search", title: "Search", blurb: "Full-text search engines for your apps.", items: ["meilisearch", "typesense"] },
+  { id: "storage", title: "Storage", blurb: "S3-compatible object storage. Its storage folder can be anywhere, even outside the LampRabit folder.", items: ["rustfs"] },
+  { id: "ai", title: "AI and automation", blurb: "Run language models locally.", items: ["ollama"] },
   { id: "cache", title: "Cache", blurb: "In-memory stores for caches, sessions and queues.", items: ["redis", "memcached"] },
   { id: "tools", title: "Developer tools", blurb: "Mail catching and web interfaces for your databases and caches.", items: ["mailpit", "phpmyadmin", "adminer", "phppgadmin", "pgadmin", "phpredisadmin", "compass", "mongosh", "mongotools"] },
   { id: "sharing", title: "Sharing", blurb: "Put a project or local port on a public URL.", items: ["cloudflared", "ngrok", "tunnels"] },
@@ -149,6 +168,7 @@ export default function Services() {
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const ollamaElsewhere = useQuery({ queryKey: ["ollama-elsewhere"], queryFn: api.ollamaElsewhere, staleTime: 60_000 });
   const find = (r: Runtime) => installed.data?.find((i) => i.runtime === r);
   const defaultDb = settings.data?.defaultDatabase ?? "mariadb";
   const selectedGroup = groups.find((g) => g.items.includes(selected))!;
@@ -176,6 +196,11 @@ export default function Services() {
     openUrl = toolUrl(runtime, sites.data, settings.data?.ports.mailUi, runtime === "neo4j" ? settings.data?.ports.neo4jHttp : settings.data?.ports.pgadmin);
   }
   if (runtime === "clickhouse") openUrl = settings.data ? `http://localhost:${settings.data.ports.clickhouseHttp}/play` : undefined;
+  if (runtime === "meilisearch") openUrl = settings.data ? `http://localhost:${settings.data.ports.meilisearch}/` : undefined;
+  if (runtime === "rustfs") openUrl = settings.data ? `http://localhost:${settings.data.ports.rustfsConsole}/` : undefined;
+  if (runtime === "ollama" && ollamaElsewhere.data && !find("ollama")?.active) {
+    note = `Ollama is already installed on this computer (${ollamaElsewhere.data}). You can keep using it; LampRabit's own keeps its models separately.`;
+  }
 
   const status = (item: ServiceSelection) => {
     if (item === "node") return "NVM managed";

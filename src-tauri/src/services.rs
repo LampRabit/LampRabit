@@ -53,6 +53,10 @@ pub enum ServiceKind {
     Clickhouse,
     /// Neo4j, with Neo4j Browser behind the web servers at neo4j.test.
     Neo4j,
+    Meilisearch,
+    Typesense,
+    Rustfs,
+    Ollama,
 }
 
 /// What every service has; the rest (launch, config, probes) is per service below.
@@ -65,7 +69,7 @@ struct Def {
 
 impl ServiceKind {
     pub fn all() -> Vec<Self> {
-        vec![Self::Apache, Self::Nginx, Self::Caddy, Self::Frankenphp, Self::Tomcat, Self::Mariadb, Self::Mysql, Self::Postgres, Self::Mongodb, Self::Clickhouse, Self::Neo4j, Self::Mailpit, Self::Redis, Self::Memcached, Self::Pgadmin]
+        vec![Self::Apache, Self::Nginx, Self::Caddy, Self::Frankenphp, Self::Tomcat, Self::Mariadb, Self::Mysql, Self::Postgres, Self::Mongodb, Self::Clickhouse, Self::Neo4j, Self::Meilisearch, Self::Typesense, Self::Rustfs, Self::Ollama, Self::Mailpit, Self::Redis, Self::Memcached, Self::Pgadmin]
     }
 
     /// The web servers' services, in `Server::ALL` order.
@@ -102,6 +106,10 @@ impl ServiceKind {
             Self::Mongodb => ("mongodb", "MongoDB", "mongodb-output.log"),
             Self::Clickhouse => ("clickhouse", "ClickHouse", "clickhouse-output.log"),
             Self::Neo4j => ("neo4j", "Neo4j", "neo4j-output.log"),
+            Self::Meilisearch => ("meilisearch", "Meilisearch", "meilisearch-output.log"),
+            Self::Typesense => ("typesense", "Typesense", "typesense-output.log"),
+            Self::Rustfs => ("rustfs", "RustFS", "rustfs-output.log"),
+            Self::Ollama => ("ollama", "Ollama", "ollama-output.log"),
             Self::Mariadb => ("mariadb", "MariaDB", "mariadb-error.log"),
             Self::Mysql => ("mysql", "MySQL", "mysql-error.log"),
             Self::Mailpit => ("mailpit", "Mailpit", "mailpit-output.log"),
@@ -146,6 +154,10 @@ impl ServiceKind {
             Self::Mongodb => configs::mongodb_data(settings, layout),
             Self::Clickhouse => layout.etc("clickhouse").join("config.xml"),
             Self::Neo4j => layout.etc("neo4j").join("neo4j.conf"),
+            // Configured on the command line; their data folders.
+            Self::Meilisearch | Self::Typesense => layout.data(self.def().id),
+            Self::Rustfs => settings.storage_dir(layout, "rustfs"),
+            Self::Ollama => layout.data("ollama"),
             Self::Mariadb => layout.etc("mariadb").join("my.ini"),
             Self::Mysql => layout.etc("mysql").join("my.ini"),
             // Configured on the command line; their data folders.
@@ -172,6 +184,10 @@ impl ServiceKind {
             Self::Mongodb => settings.ports.mongodb,
             Self::Clickhouse => settings.ports.clickhouse_http,
             Self::Neo4j => settings.ports.neo4j_http,
+            Self::Meilisearch => settings.ports.meilisearch,
+            Self::Typesense => settings.ports.typesense,
+            Self::Rustfs => settings.ports.rustfs,
+            Self::Ollama => settings.ports.ollama,
             Self::Mariadb => settings.ports.mysql,
             Self::Mysql => settings.ports.mysql_server,
             Self::Mailpit => settings.ports.mail_smtp,
@@ -242,6 +258,13 @@ struct LaunchSpec {
     /// `nginx -t`, `caddy validate`.
     test: Option<Vec<String>>,
 }
+
+/// Typesense's API key: it requires one, and this only listens on 127.0.0.1.
+pub const TYPESENSE_KEY: &str = "lamprabit";
+/// Object storage's access key and secret (RustFS, MinIO): local only, shown in the
+/// connection details.
+pub const STORAGE_KEY: &str = "lamprabit";
+pub const STORAGE_SECRET: &str = "lamprabit-secret";
 
 /// Caddy keeps state (autosave.json, certificates it would otherwise issue) in the user's
 /// config and data folders; LampRabit's stays under tmp/<id>, removed on uninstall.
@@ -420,6 +443,71 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 env: vec![("JAVA_HOME", path(java_home)), ("NEO4J_HOME", path(home.clone())), ("NEO4J_CONF", path(layout.etc("neo4j")))],
             }
         }
+        // Development mode: no master key, and its search preview at the root URL.
+        ServiceKind::Meilisearch => LaunchSpec {
+            program: home.join(exe("meilisearch")),
+            args: vec![
+                "--db-path".into(),
+                path(layout.data("meilisearch").join("data.ms")),
+                "--dump-dir".into(),
+                path(layout.data("meilisearch").join("dumps")),
+                "--http-addr".into(),
+                format!("127.0.0.1:{}", settings.ports.meilisearch),
+                "--env".into(),
+                "development".into(),
+                "--no-analytics".into(),
+            ],
+            test: None,
+            stop_cmd: None,
+            cwd: layout.data("meilisearch"),
+            path_prepend: vec![],
+            env: vec![],
+        },
+        // Typesense insists on an API key; a fixed local one, shown in the connection details.
+        ServiceKind::Typesense => LaunchSpec {
+            program: home.join("typesense-server"),
+            args: vec![
+                format!("--data-dir={}", path(layout.data("typesense"))),
+                format!("--api-key={}", TYPESENSE_KEY),
+                "--listen-address=127.0.0.1".into(),
+                format!("--api-port={}", settings.ports.typesense),
+                "--enable-cors".into(),
+            ],
+            test: None,
+            stop_cmd: None,
+            cwd: layout.data("typesense"),
+            path_prepend: vec![],
+            env: vec![],
+        },
+        ServiceKind::Rustfs => LaunchSpec {
+            program: home.join(exe("rustfs")),
+            args: vec![],
+            test: None,
+            stop_cmd: None,
+            cwd: home.clone(),
+            path_prepend: vec![],
+            env: vec![
+                ("RUSTFS_VOLUMES", path(settings.storage_dir(layout, "rustfs"))),
+                ("RUSTFS_ADDRESS", format!("127.0.0.1:{}", settings.ports.rustfs)),
+                ("RUSTFS_CONSOLE_ENABLE", "true".into()),
+                ("RUSTFS_CONSOLE_ADDRESS", format!("127.0.0.1:{}", settings.ports.rustfs_console)),
+                ("RUSTFS_ACCESS_KEY", STORAGE_KEY.into()),
+                ("RUSTFS_SECRET_KEY", STORAGE_SECRET.into()),
+            ],
+        },
+        // Its models in data/ollama, not the user's ~/.ollama (a separate Ollama keeps those).
+        ServiceKind::Ollama => LaunchSpec {
+            program: home.join(runtimes::Runtime::Ollama.marker()),
+            args: vec!["serve".into()],
+            test: None,
+            stop_cmd: None,
+            cwd: home.clone(),
+            path_prepend: vec![],
+            env: vec![
+                ("OLLAMA_HOST", format!("127.0.0.1:{}", settings.ports.ollama)),
+                ("OLLAMA_MODELS", path(layout.data("ollama").join("models"))),
+            ],
+        },
         // pgAdmin's own entry point, on the Python of its virtual environment.
         ServiceKind::Pgadmin => {
             let package = runtimes::pgadmin_package(&home)
@@ -576,6 +664,15 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             std::fs::create_dir_all(configs::mongodb_data(settings, layout))?;
             Ok(vec![])
         }
+        ServiceKind::Meilisearch | ServiceKind::Typesense | ServiceKind::Ollama => {
+            std::fs::create_dir_all(layout.data(kind.id()))?;
+            Ok(vec![])
+        }
+        ServiceKind::Rustfs => {
+            let dir = settings.storage_dir(layout, "rustfs");
+            std::fs::create_dir_all(&dir).map_err(|e| Error::msg(format!("Couldn't create RustFS's storage folder {}: {e}", dir.display())))?;
+            Ok(vec![])
+        }
         ServiceKind::Clickhouse => {
             configs::write_clickhouse(settings, layout)?;
             std::fs::create_dir_all(layout.tmp().join("clickhouse"))?;
@@ -616,6 +713,7 @@ pub fn required_ports(kind: ServiceKind, settings: &Settings, layout: &Layout) -
         ServiceKind::Tomcat => ports.push(settings.ports.tomcat_shutdown),
         ServiceKind::Clickhouse => ports.push(settings.ports.clickhouse_tcp),
         ServiceKind::Neo4j => ports.push(settings.ports.neo4j_bolt),
+        ServiceKind::Rustfs => ports.push(settings.ports.rustfs_console),
         ServiceKind::Mailpit => ports.push(settings.ports.mail_ui),
         _ => {}
     }
@@ -679,7 +777,7 @@ pub async fn sync_hosts(app: &AppHandle, settings: &Settings, layout: &Layout, s
 /// may be running from a terminal are left alone. Returns what was stopped.
 pub fn reap_orphans(layout: &Layout) -> Vec<String> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-    const SERVERS: &[&str] = &["httpd", "nginx", "caddy", "frankenphp", "postgres", "mongod", "clickhouse", "mariadbd", "mysqld", "php-fpm", "php-cgi", "mailpit", "redis-server", "memcached",
+    const SERVERS: &[&str] = &["httpd", "nginx", "caddy", "frankenphp", "postgres", "mongod", "clickhouse", "meilisearch", "typesense-server", "rustfs", "ollama", "mariadbd", "mysqld", "php-fpm", "php-cgi", "mailpit", "redis-server", "memcached",
         // Redis before 0.2, so one left running is stopped before its folder is removed.
         "GarnetServer"];
     let bin = layout.root().join("bin");
@@ -852,6 +950,10 @@ impl Supervisor {
                 ServiceKind::Mongodb => diagnose::probe_tcp(settings.ports.mongodb).await,
                 ServiceKind::Clickhouse => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/ping", settings.ports.clickhouse_http)).await,
                 ServiceKind::Neo4j => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.neo4j_http)).await,
+                ServiceKind::Meilisearch => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/health", settings.ports.meilisearch)).await,
+                ServiceKind::Typesense => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/health", settings.ports.typesense)).await,
+                ServiceKind::Rustfs => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/health", settings.ports.rustfs)).await,
+                ServiceKind::Ollama => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/api/version", settings.ports.ollama)).await,
                 ServiceKind::Pgadmin => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/misc/ping", settings.ports.pgadmin)).await,
                 ServiceKind::Tomcat => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.tomcat_http)).await,
             };

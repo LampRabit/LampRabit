@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Star } from "lucide-react";
+import { FolderOpen, Star } from "lucide-react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { allServers, api, runtimeLabels, type Runtime, type Server, type Settings } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { portsFor, serverNotes } from "../lib/settingsFields";
@@ -13,6 +14,7 @@ const numberInput = clsx(inputClass.replace("w-full", ""), "w-24 font-mono tabul
 /** The settings a service's details can change; the rest of Settings stays as it is. */
 const pick = (s: Settings) => ({
   ports: s.ports,
+  storage: s.storage,
   webServers: s.webServers,
   phpWorkers: s.phpWorkers,
   routeMail: s.routeMail,
@@ -65,7 +67,8 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
   const fields = portsFor(runtime, draft, os);
   const workers = runtime === "php" && os === "windows";
   const database = runtime === "mariadb" || runtime === "mysql";
-  if (!server && fields.length === 0 && !workers && runtime !== "mailpit" && !database) return null;
+  const storage = runtime === "rustfs";
+  if (!server && fields.length === 0 && !workers && runtime !== "mailpit" && !database && !storage) return null;
 
   const set = (patch: Partial<Settings>) => setDraft({ ...draft, ...patch });
   const dirty = JSON.stringify(pick(draft)) !== JSON.stringify(pick(settings.data));
@@ -131,6 +134,32 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
             onChange={(e) => set({ phpWorkers: Math.max(1, Math.min(10, Number(e.target.value))) })}
             aria-label="PHP workers per version"
           />
+        </Row>
+      )}
+      {storage && (
+        <Row
+          label="Storage folder"
+          hint="Where buckets and objects are kept. It can be on another drive; it doesn't move with the LampRabit folder and uninstalling never deletes it. Objects already stored stay in the old folder."
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="max-w-64 truncate font-mono text-xs text-muted" title={draft.storage[runtime] ?? "data/" + runtime}>
+              {draft.storage[runtime] ?? `data/${runtime} (default)`}
+            </span>
+            <Button
+              size="sm"
+              onClick={async () => {
+                const dir = await openDialog({ directory: true, title: `Choose where ${runtimeLabels[runtime]} keeps its objects` });
+                if (typeof dir === "string") set({ storage: { ...draft.storage, [runtime]: dir } });
+              }}
+            >
+              <FolderOpen size={14} /> Choose…
+            </Button>
+            {draft.storage[runtime] && (
+              <Button size="sm" variant="ghost" onClick={() => set({ storage: Object.fromEntries(Object.entries(draft.storage).filter(([k]) => k !== runtime)) })}>
+                Default
+              </Button>
+            )}
+          </span>
         </Row>
       )}
       {runtime === "mailpit" && (

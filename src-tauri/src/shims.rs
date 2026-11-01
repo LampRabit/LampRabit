@@ -120,6 +120,14 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
             shim(&dir, "clickhouse-client", &[Case { folder: None, target, args, env: Vec::new() }])?;
         }
     }
+    // ollama's CLI, talking to LampRabit's Ollama (models go where its server keeps them).
+    if let Some(v) = settings.versions.get("ollama") {
+        let target = layout.bin("ollama", v).join(crate::runtimes::Runtime::Ollama.marker());
+        if target.exists() {
+            let env = vec![("OLLAMA_HOST".to_string(), format!("127.0.0.1:{}", settings.ports.ollama))];
+            shim(&dir, "ollama", &[Case { folder: None, target, args: Vec::new(), env }])?;
+        }
+    }
     // Python and its pip.
     if let Some(home) = settings.versions.get("python").map(|v| layout.bin("python", v)) {
         let target = home.join(crate::runtimes::Runtime::Python.marker());

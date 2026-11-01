@@ -49,6 +49,10 @@ pub struct Settings {
     pub profiles: Vec<StackProfile>,
     /// What `mysql`, new projects and the database tools use first.
     pub default_database: Database,
+    /// Where object storage (RustFS, MinIO) keeps its buckets, by service id; data/<id>
+    /// when absent. Can be outside the LampRabit folder (another drive, a NAS): it isn't
+    /// moved with it, and uninstall never deletes it.
+    pub storage: BTreeMap<String, PathBuf>,
 }
 
 /// The two MySQL-compatible servers LampRabit runs.
@@ -230,6 +234,11 @@ impl Settings {
         }
     }
 
+    /// Where an object storage service keeps its buckets.
+    pub fn storage_dir(&self, layout: &crate::layout::Layout, id: &str) -> PathBuf {
+        self.storage.get(id).cloned().unwrap_or_else(|| layout.data(id))
+    }
+
     pub fn database_version(&self, db: Database) -> Option<&String> {
         match db {
             Database::Mariadb => self.versions.mariadb.as_ref(),
@@ -319,6 +328,14 @@ pub struct Ports {
     /// Neo4j Browser (HTTP) and the Bolt protocol drivers use.
     pub neo4j_http: u16,
     pub neo4j_bolt: u16,
+    pub meilisearch: u16,
+    /// Typesense's API.
+    pub typesense: u16,
+    /// RustFS's S3 API and its web console; not the usual 9000/9001, which PHP's FastCGI
+    /// ports use.
+    pub rustfs: u16,
+    pub rustfs_console: u16,
+    pub ollama: u16,
     /// Mailpit's SMTP server, where PHP and frameworks send mail.
     pub mail_smtp: u16,
     pub redis: u16,
@@ -423,6 +440,7 @@ impl Default for Settings {
             php_extensions: BTreeMap::new(),
             profiles: Vec::new(),
             default_database: Database::Mariadb,
+            storage: BTreeMap::new(),
         }
     }
 }
@@ -454,6 +472,11 @@ impl Default for Ports {
             clickhouse_tcp: 19000,
             neo4j_http: 7474,
             neo4j_bolt: 7687,
+            meilisearch: 7700,
+            typesense: 8108,
+            rustfs: 9100,
+            rustfs_console: 9101,
+            ollama: 11434,
             mail_smtp: 1025,
             redis: 6379,
             memcached: 11211,

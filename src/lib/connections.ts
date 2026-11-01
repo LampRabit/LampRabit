@@ -37,6 +37,31 @@ export function connection(kind: ServiceKind, port: number): Connection {
           ["CLICKHOUSE_PASSWORD", ""],
         ],
       };
+    case "meilisearch":
+      return { url: `http://${HOST}:${port}`, env: [["MEILISEARCH_HOST", `http://${HOST}:${port}`], ["MEILISEARCH_KEY", ""]] };
+    case "typesense":
+      return {
+        url: `http://${HOST}:${port}`,
+        env: [
+          ["TYPESENSE_HOST", HOST],
+          ["TYPESENSE_PORT", String(port)],
+          ["TYPESENSE_PROTOCOL", "http"],
+          ["TYPESENSE_API_KEY", "lamprabit"],
+        ],
+      };
+    case "rustfs":
+      return {
+        url: `http://${HOST}:${port}`,
+        env: [
+          ["AWS_ENDPOINT", `http://${HOST}:${port}`],
+          ["AWS_ACCESS_KEY_ID", "lamprabit"],
+          ["AWS_SECRET_ACCESS_KEY", "lamprabit-secret"],
+          ["AWS_DEFAULT_REGION", "us-east-1"],
+          ["AWS_USE_PATH_STYLE_ENDPOINT", "true"],
+        ],
+      };
+    case "ollama":
+      return { url: `http://${HOST}:${port}`, env: [["OLLAMA_HOST", `http://${HOST}:${port}`]] };
     case "neo4j":
       return { url: `http://${HOST}:${port}`, env: [["NEO4J_HTTP_URL", `http://${HOST}:${port}`]] };
     case "pgadmin":

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArchiveRestore, BarChart3, Cloud, Code2, Coffee, Compass, Cpu, Feather as FeatherIcon, Flame, Gauge, Leaf, Network, SquareTerminal, Terminal, Database, DatabaseZap, Feather, Layers3, Mail, Package, Radio, Server, ShieldCheck, Table2, TableProperties, Zap } from "lucide-react";
+import { ArchiveRestore, BarChart3, Bot, HardDrive, Search, Cloud, Code2, Coffee, Compass, Cpu, Feather as FeatherIcon, Flame, Gauge, Leaf, Network, SquareTerminal, Terminal, Database, DatabaseZap, Feather, Layers3, Mail, Package, Radio, Server, ShieldCheck, Table2, TableProperties, Zap } from "lucide-react";
 import type { Runtime } from "../lib/api";
 
 /** Icon and colour used for each runtime across the app. */
@@ -48,6 +48,26 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     className: "bg-green-600/10 text-green-700 dark:text-green-400",
     text: "text-green-700 dark:text-green-400",
     icon: (size) => <Leaf size={size} strokeWidth={1.75} />,
+  },
+  meilisearch: {
+    className: "bg-pink-500/10 text-pink-600 dark:text-pink-400",
+    text: "text-pink-600 dark:text-pink-400",
+    icon: (size) => <Search size={size} strokeWidth={1.75} />,
+  },
+  typesense: {
+    className: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+    text: "text-violet-600 dark:text-violet-400",
+    icon: (size) => <Search size={size} strokeWidth={1.75} />,
+  },
+  rustfs: {
+    className: "bg-orange-600/10 text-orange-700 dark:text-orange-400",
+    text: "text-orange-700 dark:text-orange-400",
+    icon: (size) => <HardDrive size={size} strokeWidth={1.75} />,
+  },
+  ollama: {
+    className: "bg-zinc-500/15 text-fg",
+    text: "text-fg",
+    icon: (size) => <Bot size={size} strokeWidth={1.75} />,
   },
   mongotools: {
     className: "bg-green-600/10 text-green-700 dark:text-green-400",

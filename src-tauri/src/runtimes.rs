@@ -76,10 +76,18 @@ pub enum Runtime {
     Clickhouse,
     /// Neo4j Community, a graph database on the active Java.
     Neo4j,
+    /// Meilisearch, a search engine (single binary).
+    Meilisearch,
+    /// Typesense, a search engine (Linux and macOS only).
+    Typesense,
+    /// RustFS, S3-compatible object storage.
+    Rustfs,
+    /// Ollama, for running language models locally.
+    Ollama,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 29] = [
+    pub const ALL: [Runtime; 33] = [
         Runtime::Apache,
         Runtime::Nginx,
         Runtime::Php,
@@ -109,6 +117,10 @@ impl Runtime {
         Runtime::Sqlite,
         Runtime::Clickhouse,
         Runtime::Neo4j,
+        Runtime::Meilisearch,
+        Runtime::Typesense,
+        Runtime::Rustfs,
+        Runtime::Ollama,
     ];
 
     pub fn id(self) -> &'static str {
@@ -142,6 +154,10 @@ impl Runtime {
             Self::Sqlite => "sqlite",
             Self::Clickhouse => "clickhouse",
             Self::Neo4j => "neo4j",
+            Self::Meilisearch => "meilisearch",
+            Self::Typesense => "typesense",
+            Self::Rustfs => "rustfs",
+            Self::Ollama => "ollama",
         }
     }
 
@@ -182,6 +198,12 @@ impl Runtime {
             Self::Sqlite => PathBuf::from(exe("sqlite3")),
             Self::Clickhouse => Path::new("usr").join("bin").join("clickhouse"),
             Self::Neo4j => Path::new("bin").join(if cfg!(windows) { "neo4j.bat" } else { "neo4j" }),
+            Self::Meilisearch => PathBuf::from(exe("meilisearch")),
+            Self::Typesense => PathBuf::from("typesense-server"),
+            Self::Rustfs => PathBuf::from(exe("rustfs")),
+            // Linux archives put it in bin/ (next to lib/ollama); Windows and macOS at the top.
+            Self::Ollama if cfg!(target_os = "linux") => Path::new("bin").join("ollama"),
+            Self::Ollama => PathBuf::from(exe("ollama")),
         }
     }
 }
@@ -192,6 +214,8 @@ pub enum Archive {
     Zip,
     TarGz,
     TarXz,
+    /// Zstandard-compressed tar (Ollama on Linux).
+    TarZst,
     /// A single file, saved as the runtime's marker file.
     File,
 }
@@ -274,6 +298,10 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec
         Runtime::Sqlite => sqlite_releases(client).await?,
         Runtime::Clickhouse => clickhouse_releases(client).await?,
         Runtime::Neo4j => neo4j_releases(client).await?,
+        Runtime::Meilisearch => meilisearch_releases(client).await?,
+        Runtime::Typesense => typesense_releases(client).await?,
+        Runtime::Rustfs => rustfs_releases(client).await?,
+        Runtime::Ollama => ollama_releases(client).await?,
     };
     releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
     Ok(releases)
@@ -1133,6 +1161,92 @@ async fn neo4j_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     Ok(vec![Release { runtime: Runtime::Neo4j, version, url, sha256, sha512: None, md5: None, sha3_256: None, archive, label: Some("Community".into()) }])
 }
 
+/// Meilisearch's Community edition (not "enterprise"): one binary per platform.
+async fn meilisearch_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let name = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("windows", false) => "meilisearch-windows-amd64.exe",
+        ("linux", false) => "meilisearch-linux-amd64",
+        ("linux", true) => "meilisearch-linux-aarch64",
+        ("macos", false) => "meilisearch-macos-amd64",
+        ("macos", true) => "meilisearch-macos-apple-silicon",
+        _ => return Err(unsupported("Meilisearch")),
+    };
+    github_latest(client, Runtime::Meilisearch, "meilisearch/meilisearch", Archive::File, |n, _| n == name).await
+}
+
+/// Typesense's server from dl.typesense.org (its GitHub releases have no files). No
+/// checksums are published, so HTTPS covers the download. There's no Windows build.
+async fn typesense_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    if cfg!(windows) {
+        return Err(Error::msg("Typesense has no Windows build. Use Meilisearch, or run Typesense in WSL (Linux), where LampRabit's Linux version can install it."));
+    }
+    let latest = get_json(client, "https://api.github.com/repos/typesense/typesense/releases/latest").await?;
+    let version = latest["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
+    if version.is_empty() {
+        return Err(Error::msg("Couldn't find Typesense's latest release"));
+    }
+    let platform = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("linux", false) => "linux-amd64",
+        ("linux", true) => "linux-arm64",
+        ("macos", false) => "darwin-amd64",
+        ("macos", true) => "darwin-arm64",
+        _ => return Err(unsupported("Typesense")),
+    };
+    Ok(vec![Release {
+        runtime: Runtime::Typesense,
+        url: format!("https://dl.typesense.org/releases/{version}/typesense-server-{version}-{platform}.tar.gz"),
+        version,
+        sha256: None,
+        sha512: None,
+        md5: None,
+        sha3_256: None,
+        archive: Archive::TarGz,
+        label: None,
+    }])
+}
+
+async fn rustfs_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let name = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("windows", false) => "windows-x86_64",
+        ("linux", false) => "linux-x86_64-gnu",
+        ("linux", true) => "linux-aarch64-gnu",
+        ("macos", true) => "macos-aarch64",
+        ("macos", false) => return Err(Error::msg("RustFS has no build for Intel Macs.")),
+        _ => return Err(unsupported("RustFS")),
+    };
+    github_latest(client, Runtime::Rustfs, "rustfs/rustfs", Archive::Zip, |n, v| n == format!("rustfs-{name}-v{v}.zip")).await
+}
+
+/// Ollama's own builds (CPU and NVIDIA support; large: about 1.5 GB on Windows and Linux).
+async fn ollama_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let (name, archive) = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("windows", false) => ("ollama-windows-amd64.zip", Archive::Zip),
+        ("windows", true) => ("ollama-windows-arm64.zip", Archive::Zip),
+        ("linux", false) => ("ollama-linux-amd64.tar.zst", Archive::TarZst),
+        ("linux", true) => ("ollama-linux-arm64.tar.zst", Archive::TarZst),
+        ("macos", _) => ("ollama-darwin.tgz", Archive::TarGz),
+        _ => return Err(unsupported("Ollama")),
+    };
+    let mut releases = github_latest(client, Runtime::Ollama, "ollama/ollama", archive, |n, _| n == name).await?;
+    for r in &mut releases {
+        r.label = Some("Large download".into());
+    }
+    Ok(releases)
+}
+
+/// An Ollama installed outside LampRabit (its own installer or app), which many people
+/// already have: its location, so the Services page can say so.
+pub fn ollama_elsewhere() -> Option<PathBuf> {
+    let candidates: Vec<PathBuf> = if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(|d| vec![PathBuf::from(d).join("Programs").join("Ollama").join("ollama.exe")]).unwrap_or_default()
+    } else if cfg!(target_os = "macos") {
+        vec![PathBuf::from("/Applications/Ollama.app"), PathBuf::from("/usr/local/bin/ollama")]
+    } else {
+        vec![PathBuf::from("/usr/local/bin/ollama"), PathBuf::from("/usr/bin/ollama")]
+    };
+    candidates.into_iter().find(|p| p.exists())
+}
+
 /// The executable of an installed Compass: the app bundle on macOS, otherwise the file
 /// next to resources/ named after Compass.
 pub fn compass_program(home: &Path) -> Option<PathBuf> {
@@ -1552,6 +1666,11 @@ fn extract_into(archive: &Path, kind: Archive, scratch: &Path, dest: &Path, mark
             .and_then(|mut z| z.extract(scratch))
             .map_err(|e| Error::msg(format!("could not extract archive: {e}")))?,
         Archive::TarGz => tar::Archive::new(flate2::read::GzDecoder::new(file)).unpack(scratch)?,
+        Archive::TarZst => {
+            let decoder = ruzstd::decoding::StreamingDecoder::new(std::io::BufReader::new(file))
+                .map_err(|e| Error::msg(format!("could not decompress archive: {e}")))?;
+            tar::Archive::new(decoder).unpack(scratch)?
+        }
         Archive::TarXz => {
             // Through a file rather than memory: unpacked, MySQL's archive is several hundred MB.
             let tar_path = scratch.with_extension("tar");
@@ -1648,7 +1767,7 @@ pub struct UpdateNotice {
 /// Newer patch releases for installed versions: same "major.minor" line (for example
 /// PHP 8.4.27 → 8.4.30), never a jump to a new minor that could change behaviour.
 pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNotice> {
-    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j]
+    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama]
         .into_iter()
         .map(|runtime| async move {
             let installed = installed(layout, runtime);
