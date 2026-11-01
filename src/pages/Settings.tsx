@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { open } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
   CheckCircle2,
   CircleSlash,
   Database,
   ExternalLink,
   Feather,
+  FolderInput,
   FolderOpen,
   Layers,
   LifeBuoy,
@@ -38,6 +38,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { runtimeTiles } from "../components/runtimes";
 import UninstallDialog from "../components/UninstallDialog";
+import MoveEnvironmentDialog from "../components/MoveEnvironmentDialog";
 import ApplyBar from "../components/ApplyBar";
 import { portFields, portShown, serverNotes } from "../lib/settingsFields";
 import { Button, Card, PageHeader, Segmented, Switch, inputClass } from "../components/ui";
@@ -83,6 +84,7 @@ export default function Settings() {
   const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: 5000 });
   const openDiagnostics = useAppStore((s) => s.setDiagnosticsOpen);
   const [uninstalling, setUninstalling] = useState(false);
+  const [moving, setMoving] = useState(false);
   const [draft, setDraft] = useState<SettingsT | null>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
   const [current, setCurrent] = useState<string>("general");
@@ -143,10 +145,6 @@ export default function Settings() {
     onError: (e) => notify("error", String(e)),
   });
 
-  const browse = async () => {
-    const dir = await open({ directory: true, defaultPath: draft?.rootDir, title: "Choose environment root" });
-    if (typeof dir === "string" && draft) setDraft({ ...draft, rootDir: dir });
-  };
 
   if (!draft || !versions) return null;
   const set = (patch: Partial<SettingsT>) => setDraft({ ...draft, ...patch });
@@ -195,11 +193,16 @@ export default function Settings() {
 
         <div className="motion-stagger min-w-0 space-y-6">
           <Section id="general" title="General" subtitle="Where your environment lives and how sites are named.">
-            <Row label="Environment root" hint="Holds runtimes, configs, www, databases and logs." wide>
-              <div className="flex gap-2">
-                <input className={inputClass} value={draft.rootDir} onChange={(e) => set({ rootDir: e.target.value })} aria-label="Environment root" />
-                <Button className="h-auto" onClick={browse}>
-                  <FolderOpen size={15} /> Browse…
+            <Row label="LampRabit folder" hint="Runtimes, configs, your projects (www), databases and logs. Moving it takes everything along." wide>
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-3 py-2 font-mono text-sm" title={draft.rootDir}>
+                  {settings.data?.rootDir ?? draft.rootDir}
+                </span>
+                <Button className="h-auto" onClick={() => settings.data && openPath(settings.data.rootDir).catch(() => {})}>
+                  <FolderOpen size={15} /> Open
+                </Button>
+                <Button className="h-auto" onClick={() => setMoving(true)}>
+                  <FolderInput size={15} /> Move…
                 </Button>
               </div>
             </Row>
@@ -516,6 +519,7 @@ export default function Settings() {
           {uninstalling && <UninstallDialog onClose={() => setUninstalling(false)} />}
         </div>
       </div>
+      {moving && settings.data && <MoveEnvironmentDialog current={settings.data.rootDir} onClose={() => setMoving(false)} />}
       <ApplyBar
         dirty={dirty}
         busy={save.isPending}

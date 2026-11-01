@@ -271,6 +271,22 @@ export interface TemplateVariable {
   required: boolean;
 }
 
+/** Whether a folder can hold the LampRabit folder (Settings → Move). */
+export interface MoveCheck {
+  problems: string[];
+  size: number;
+  free: number | null;
+  sameDrive: boolean;
+  fileSystem: string | null;
+}
+
+/** A program that keeps the LampRabit folder busy. */
+export interface Holder {
+  pid: number;
+  name: string;
+  path: string;
+}
+
 export type DbEngine = "mariadb" | "mysql" | "postgres" | "sqlite" | "mongodb";
 
 /** A database dump in <root>/backups/<engine>/. */
@@ -624,6 +640,10 @@ export const api = {
   restoreBackup: (engine: DbEngine, path: string, database: string) => invoke<void>("restore_backup", { engine, path, database }),
   deleteBackup: (path: string) => invoke<void>("delete_backup", { path }),
   openCompass: () => invoke<void>("open_compass"),
+  checkMoveTarget: (target: string) => invoke<MoveCheck>("check_move_target", { target }),
+  environmentInUse: () => invoke<Holder[]>("environment_in_use"),
+  stopEnvironmentHolder: (pid: number) => invoke<void>("stop_environment_holder", { pid }),
+  moveEnvironment: (target: string) => invoke<Settings>("move_environment", { target }),
   openDbClient: (database?: Database) => invoke<void>("open_db_client", { database: database ?? null }),
   startAll: () => invoke<string[]>("start_all"),
   /** Stops `stop`, then starts `start`; resolves to one message per failed start. */

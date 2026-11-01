@@ -15,6 +15,7 @@ mod php;
 mod ports;
 mod procgroup;
 mod projects;
+mod relocate;
 mod runtimes;
 mod services;
 mod shims;
@@ -410,6 +411,87 @@ async fn restore_backup(app: AppHandle, state: State<'_, AppState>, engine: temp
     backups::restore(&settings, &layout, engine, &path, &database).await?;
     logs::system(&app, logs::Level::Info, format!("Restored {database}"));
     Ok(())
+}
+
+/// Whether a folder can hold the LampRabit folder, and what moving there involves.
+#[tauri::command]
+async fn check_move_target(state: State<'_, AppState>, target: PathBuf) -> Result<relocate::MoveCheck> {
+    let root = state.snapshot().await.1.root().to_path_buf();
+    Ok(tauri::async_runtime::spawn_blocking(move || relocate::check(&root, &target)).await.map_err(|e| Error::msg(e.to_string()))?)
+}
+
+/// Programs other than LampRabit that keep the folder busy.
+#[tauri::command]
+async fn environment_in_use(state: State<'_, AppState>) -> Result<Vec<relocate::Holder>> {
+    let root = state.snapshot().await.1.root().to_path_buf();
+    Ok(relocate::holders(&root))
+}
+
+#[tauri::command]
+async fn stop_environment_holder(app: AppHandle, state: State<'_, AppState>, pid: u32) -> Result<()> {
+    let root = state.snapshot().await.1.root().to_path_buf();
+    relocate::stop_holder(&root, pid)?;
+    logs::system(&app, logs::Level::Info, format!("Stopped process {pid}, which was using the LampRabit folder"));
+    Ok(())
+}
+
+/// Moves the LampRabit folder to `target`: stops everything that runs from it, moves it
+/// (all or nothing), repairs what records absolute paths, and switches the settings,
+/// shims and PATH over. Services aren't restarted; the user starts what they need.
+#[tauri::command]
+async fn move_environment(app: AppHandle, state: State<'_, AppState>, target: PathBuf) -> Result<Settings> {
+    let _op = state.ops.lock().await;
+    let (settings, layout) = state.snapshot().await;
+    let old = layout.root().to_path_buf();
+    let check = {
+        let (old, target) = (old.clone(), target.clone());
+        tauri::async_runtime::spawn_blocking(move || relocate::check(&old, &target)).await.map_err(|e| Error::msg(e.to_string()))?
+    };
+    if !check.problems.is_empty() {
+        return Err(Error::msg(check.problems.join(" ")));
+    }
+    logs::system(&app, logs::Level::Info, format!("Moving the LampRabit folder from {} to {}", old.display(), target.display()));
+    // Everything LampRabit runs from the folder stops first.
+    let running: Vec<ServiceKind> = state.supervisor.pids().await.into_values().collect();
+    for &kind in &running {
+        state.supervisor.stop(&app, kind).await;
+    }
+    for kind in running {
+        state.supervisor.wait_stopped(kind).await;
+    }
+    state.apps.stop_all().await;
+    state.tunnels.stop_all().await;
+    state.supervisor.php.stop_all(&app).await;
+    let busy = relocate::holders(&old);
+    if !busy.is_empty() {
+        let names: Vec<String> = busy.iter().map(|h| format!("{} (PID {})", h.name, h.pid)).collect();
+        return Err(Error::msg(format!("These programs still use the folder: {}. Stop them and try again.", names.join(", "))));
+    }
+    if settings.add_to_path {
+        let _ = shims::set_on_path(&layout, false);
+    }
+    let (from, to, same) = (old.clone(), target.clone(), check.same_drive);
+    let app2 = app.clone();
+    let moved = tauri::async_runtime::spawn_blocking(move || relocate::move_root(&app2, &from, &to, same)).await.map_err(|e| Error::msg(e.to_string()))?;
+    if let Err(e) = moved {
+        if settings.add_to_path {
+            let _ = shims::set_on_path(&layout, true);
+        }
+        logs::system(&app, logs::Level::Error, e.to_string());
+        return Err(e);
+    }
+    relocate::repair_venvs(&old, &target);
+    let settings = state.update_settings(|s| s.root_dir = target.clone()).await?;
+    let layout = Layout::new(&settings.root_dir);
+    if settings.add_to_path {
+        if let Err(e) = shims::set_on_path(&layout, true) {
+            logs::system(&app, logs::Level::Warn, format!("Couldn't put the new shims folder on PATH: {e}"));
+        }
+    }
+    *state.ca_trusted.lock().await = None;
+    logs::set_system_file(&app, layout.logs().join("lampRabit.log"));
+    logs::system(&app, logs::Level::Info, format!("The LampRabit folder is now {}", target.display()));
+    Ok(settings)
 }
 
 /// Opens MongoDB Compass connected to LampRabit's MongoDB.
@@ -2243,6 +2325,10 @@ pub fn run() {
             restore_backup,
             delete_backup,
             open_compass,
+            check_move_target,
+            environment_in_use,
+            stop_environment_holder,
+            move_environment,
             open_db_client,
             runtime_catalog,
             installed_runtimes,

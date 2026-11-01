@@ -48,7 +48,7 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [ ] **23. Dependency manager** (part of 25)
 - [ ] **24. Languages: Python, Go, Rust, Java**
 - [ ] **25. Package managers: npm, pnpm, Yarn, Bun, Deno, pip, conda, uv, Maven, Gradle, Cargo**
-- [ ] **26. Movable environment folder**
+- [x] **26. Movable environment folder** (first-run choice waits for onboarding, phase 18)
 - [ ] **Later**: Git workflow builder, deployment checklists, recording setups as templates
 
 **Order (decided 2026-11-01):** services before everything else: 11 → 15 → 16 → 24 → 25 → 22, then the rest. The numbers stay so older references keep working.
@@ -272,6 +272,8 @@ Python, Go, Rust and Java, each as a runtime with versions side by side, like PH
 Absorbs phase 23. npm comes with Node, pip with Python and Cargo with Rust; pnpm and Yarn come through corepack; Bun, Deno, uv, Maven, Gradle and conda (Miniforge) are runtimes. Command discovery learns `pyproject.toml`, `requirements.txt`, `pom.xml`, `build.gradle(.kts)`, `Cargo.toml` and `deno.json`. Then the dependency panels: installed and outdated packages, add/update/remove with live output, the project's own language versions, nothing upgraded without consent.
 
 ## Phase 26: movable environment folder
+
+**Done (2026-11-01):** `relocate.rs` and Settings → LampRabit folder → Move. Checks (inside/around the folder, clashing folders, write access, system folders, free space, FAT/exFAT, network drives, Linux noexec) through sysinfo's disk list; programs using the folder (exe or working directory inside it, from sysinfo rather than the Windows Restart Manager) with Stop it; rename on the same drive, copy-check-delete across drives, rolled back on failure; PATH and shims switched, Python venvs (pgAdmin's, projects' .venv) repointed. Left: choosing the folder on first run (onboarding).
 
 Decided 2026-11-01: the LampRabit folder (bin, etc, www, data, logs…) can live anywhere the OS allows, and changing it moves everything.
 - Chosen on first run (onboarding) and changeable in Settings → Environment folder → Move.

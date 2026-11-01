@@ -10,10 +10,10 @@ use serde::Serialize;
 use crate::{config::Settings, layout::Layout, services, shims, sites, ssl, tunnels};
 
 /// Kept: the user's projects, databases, database backups and own project templates.
-const KEPT: [&str; 4] = ["www", "data", "backups", "templates"];
+pub const KEPT: [&str; 4] = ["www", "data", "backups", "templates"];
 /// Folders LampRabit creates under the environment root. Only these are deleted, so a root
 /// pointed at a folder that holds other things (a home folder) loses nothing else.
-const OWNED: [&str; 6] = ["bin", "etc", "logs", "tmp", "ssl", "shims"];
+pub const OWNED: [&str; 6] = ["bin", "etc", "logs", "tmp", "ssl", "shims"];
 
 /// The app's identifier from tauri.conf.json, for finding its folders without a running app.
 const IDENTIFIER: &str = "dev.lamprabit.desktop";
