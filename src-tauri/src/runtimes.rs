@@ -1608,6 +1608,12 @@ pub async fn setup_n8n(layout: &Layout, version: &str) -> Result<()> {
         let bin = n8n_node(24)?;
         // The package tarball was saved as the marker; npm installs from the registry.
         let _ = std::fs::remove_file(home.join("installed.txt"));
+        // From a clean folder: an interrupted earlier install leaves empty package folders
+        // that npm would take as installed (n8n then fails on a missing module).
+        let _ = std::fs::remove_dir_all(home.join("node_modules"));
+        for file in ["package.json", "package-lock.json"] {
+            let _ = std::fs::remove_file(home.join(file));
+        }
         let npm = bin.join(if cfg!(windows) { "npm.cmd" } else { "npm" });
         let path = crate::apps::node_path(&bin, layout);
         let mut cmd = tokio::process::Command::new(&npm);
