@@ -13,7 +13,7 @@ Apache or Nginx, PHP, MariaDB, MySQL, Redis and the tools around them, with one 
 [![License: MIT](https://img.shields.io/badge/license-MIT-1b2028)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20(preview)-1b2028)
 
-[**Website**](https://shivam-sv.github.io/LampRabitWebsite/) · [**Download**](https://github.com/Shivam-SV/LampRabit/releases/latest) · [Features](docs/website/features.md) · [Installation](docs/website/installation.md) · [FAQ](docs/website/faq.md) · [Documentation](#documentation)
+[**Website**](https://lamprabit.shivam-vastav33.workers.dev/) · [**Download**](https://github.com/Shivam-SV/LampRabit/releases/latest) · [Features](docs/website/features.md) · [Installation](docs/website/installation.md) · [FAQ](docs/website/faq.md) · [Documentation](#documentation)
 
 <img src="docs/screenshots/overview.png" alt="LampRabit overview dashboard with Apache, Nginx, MariaDB and Mailpit running" width="820" />
 
