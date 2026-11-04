@@ -120,6 +120,9 @@ pub struct SiteSettings {
     /// The port its domain goes to when the project listens on several (or, for PHP
     /// projects, at all); used while that port is listening.
     pub route_port: Option<u16>,
+    /// FrankenPHP keeps the app in memory between requests (worker mode). The app has to
+    /// support it (Laravel Octane, Symfony Runtime…); code changes need "Restart workers".
+    pub worker: bool,
 }
 
 /// A Node project's process (apps.rs) and how its domain reaches it.

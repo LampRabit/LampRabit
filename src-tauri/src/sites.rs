@@ -977,7 +977,10 @@ fn render_caddy(settings: &Settings, layout: &Layout, all: &[Site], plan: &[Pool
             None => format!(
                 "\troot * {root}\n\t@hidden path */.ht*\n\trespond @hidden 403\n{php}\tfile_server browse\n",
                 root = path(&site.docroot),
-                php = php(php::pool_for(plan, site.php.as_deref(), settings), "\t"),
+                php = match worker_script(settings, site).filter(|_| franken) {
+                    Some(file) => format!("\tphp_server {{\n\t\tworker {{\n\t\t\tfile {}\n\t\t\tnum 2\n\t\t}}\n\t}}\n", path(&file)),
+                    None => php(php::pool_for(plan, site.php.as_deref(), settings), "\t"),
+                },
             ),
         };
         // Tools only have their own name; projects also take their subdomains.
@@ -992,6 +995,16 @@ fn render_caddy(settings: &Settings, layout: &Layout, all: &[Site], plan: &[Pool
         storage = path(&layout.tmp().join(id)),
         log = path(&layout.logs().join(format!("{id}-error.log"))),
     )
+}
+
+/// The script FrankenPHP's workers run for a site in worker mode: Laravel Octane's
+/// frankenphp-worker.php when it's there, else the front controller (Symfony Runtime and
+/// worker-aware apps). None when worker mode is off or there's nothing to run.
+pub fn worker_script(settings: &Settings, site: &Site) -> Option<PathBuf> {
+    if site.tool.is_some() || !settings.sites.get(&site.name).is_some_and(|s| s.worker) {
+        return None;
+    }
+    [site.path.join("public").join("frankenphp-worker.php"), site.docroot.join("index.php")].into_iter().find(|f| f.is_file())
 }
 
 /// Issues any missing certificates and writes the server's site config.
@@ -1409,6 +1422,33 @@ mod tests {
         assert!(out.contains("php_server") && !out.contains("php_fastcgi"), "no LampRabit PHP workers");
         assert!(out.contains("admin 127.0.0.1:2020") && out.contains("http_port 8083"));
         assert!(out.contains("/lr/tmp/frankenphp") && out.contains("frankenphp-error.log"));
+    }
+
+    #[test]
+    fn frankenphp_worker_mode_runs_the_front_controller() {
+        let dir = std::env::temp_dir().join(format!("lr-worker-{}", std::process::id()));
+        let public = dir.join("shop").join("public");
+        std::fs::create_dir_all(&public).unwrap();
+        std::fs::write(public.join("index.php"), "<?php").unwrap();
+        let mut settings = Settings::default();
+        settings.web_servers = vec![Server::Frankenphp];
+        let layout = Layout::new(&dir);
+        let mut shop = site("shop.test");
+        shop.language = Language::Php;
+        shop.server = Server::Frankenphp;
+        shop.path = dir.join("shop");
+        shop.docroot = public.clone();
+        let off = render(&settings, &layout, std::slice::from_ref(&shop), &[], Server::Frankenphp);
+        assert!(!off.contains("worker {"), "off by default");
+
+        settings.sites.entry(shop.name.clone()).or_default().worker = true;
+        let on = render(&settings, &layout, std::slice::from_ref(&shop), &[], Server::Frankenphp);
+        assert!(on.contains("worker {") && on.contains("public/index.php"), "{on}");
+        // Laravel Octane's worker wins over index.php.
+        std::fs::write(public.join("frankenphp-worker.php"), "<?php").unwrap();
+        let octane = render(&settings, &layout, std::slice::from_ref(&shop), &[], Server::Frankenphp);
+        assert!(octane.contains("frankenphp-worker.php"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

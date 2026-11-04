@@ -635,7 +635,8 @@ export interface Settings {
   addToPath: boolean;
   startServicesOnLaunch: boolean;
   editor: string;
-  sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null }>;
+  /** `worker`: FrankenPHP worker mode (the app stays in memory between requests). */
+  sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null; worker?: boolean }>;
   profiles: StackProfile[];
   /** What `mysql`, new projects and the database tools use first. */
   defaultDatabase: Database;
@@ -696,6 +697,8 @@ export const api = {
   setSitePhp: (name: string, version: string | null) => invoke<void>("set_site_php", { name, version }),
   setLanguageVersion: (name: string, version: string | null) => invoke<void>("set_language_version", { name, version }),
   setSiteServer: (name: string, server: Server | null) => invoke<void>("set_site_server", { name, server }),
+  setSiteWorker: (name: string, enabled: boolean) => invoke<void>("set_site_worker", { name, enabled }),
+  restartFrankenphpWorkers: () => invoke<void>("restart_frankenphp_workers"),
   phpStatus: () => invoke<PoolStatus[]>("php_status"),
   createProject: (request: NewProject) => invoke<{ url: string; note: string | null }>("create_project", { request }),
   listTemplates: () => invoke<TemplateCatalog>("list_templates"),

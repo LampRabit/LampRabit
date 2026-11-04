@@ -993,6 +993,32 @@ async fn set_site_php(app: AppHandle, state: State<'_, AppState>, name: String, 
     restart_web_servers(&app, &state).await
 }
 
+/// Turns FrankenPHP's worker mode on or off for a site.
+#[tauri::command]
+async fn set_site_worker(app: AppHandle, state: State<'_, AppState>, name: String, enabled: bool) -> Result<()> {
+    let _op = state.ops.lock().await;
+    state.update_settings(|s| s.sites.entry(name.clone()).or_default().worker = enabled).await?;
+    logs::system(&app, logs::Level::Info, format!("Worker mode {} for {name}", if enabled { "on" } else { "off" }));
+    restart_web_servers(&app, &state).await
+}
+
+/// Reloads the code of FrankenPHP's workers (they keep the app in memory between requests)
+/// through its admin API, without stopping the server.
+#[tauri::command]
+async fn restart_frankenphp_workers(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    if !state.supervisor.is_running(ServiceKind::Frankenphp).await {
+        return Err(Error::msg("FrankenPHP isn't running; its workers load the current code when it starts."));
+    }
+    let (settings, _) = state.snapshot().await;
+    let url = format!("http://127.0.0.1:{}/frankenphp/workers/restart", settings.ports.frankenphp_admin);
+    let response = state.http.post(&url).send().await.map_err(|e| Error::msg(format!("Couldn't reach FrankenPHP's admin API: {e}")))?;
+    if !response.status().is_success() {
+        return Err(Error::msg(format!("FrankenPHP didn't restart its workers ({}). Restart FrankenPHP on Home instead.", response.status())));
+    }
+    logs::system(&app, logs::Level::Info, "FrankenPHP's workers restarted");
+    Ok(())
+}
+
 /// Picks the web server for a site when both are enabled.
 #[tauri::command]
 async fn set_site_server(app: AppHandle, state: State<'_, AppState>, name: String, server: Option<config::Server>) -> Result<()> {
@@ -2417,6 +2443,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             runtime_info,
+            set_site_worker,
+            restart_frankenphp_workers,
             runtime_requirements,
             get_settings,
             save_settings,

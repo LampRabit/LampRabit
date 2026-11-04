@@ -886,9 +886,16 @@ function SettingsTab({ site, settings, status }: { site: Site; settings?: Settin
   const setPhp = useMutation({ mutationFn: (v: string | null) => api.setSitePhp(site.name, v), onSuccess, onError });
   const setServer = useMutation({ mutationFn: (v: Server | null) => api.setSiteServer(site.name, v), onSuccess, onError });
   const setLanguage = useMutation({ mutationFn: (v: string | null) => api.setLanguageVersion(site.name, v), onSuccess, onError });
+  const setWorker = useMutation({ mutationFn: (v: boolean) => api.setSiteWorker(site.name, v), onSuccess, onError });
+  const restartWorkers = useMutation({
+    mutationFn: api.restartFrankenphpWorkers,
+    onSuccess: () => notify("info", "FrankenPHP's workers reloaded the code"),
+    onError,
+  });
+  const worker = !!settings?.sites[site.name]?.worker;
   const languageRuntime = (["python", "java", "go", "rust"] as const).find((l) => l === site.language);
   const languageVersions = languageRuntime ? (installed.data?.find((i) => i.runtime === languageRuntime)?.versions ?? []) : [];
-  const busy = toggleSsl.isPending || setPhp.isPending || setServer.isPending;
+  const busy = toggleSsl.isPending || setPhp.isPending || setServer.isPending || setWorker.isPending;
   const select = clsx(inputClass.replace("w-full", ""), "w-52");
 
   return (
@@ -952,6 +959,21 @@ function SettingsTab({ site, settings, status }: { site: Site; settings?: Settin
                   </option>
                 ))}
               </select>
+            </Row>
+          )}
+          {site.server === "frankenphp" && site.language === "php" && (
+            <Row
+              title="Worker mode"
+              hint="FrankenPHP keeps the app in memory between requests, which is much faster. The app has to support it (Laravel Octane, Symfony Runtime…); after changing code, restart the workers."
+            >
+              <div className="flex items-center gap-2">
+                {worker && (
+                  <Button size="sm" variant="ghost" disabled={restartWorkers.isPending} onClick={() => restartWorkers.mutate()}>
+                    {restartWorkers.isPending ? "Restarting…" : "Restart workers"}
+                  </Button>
+                )}
+                <Switch checked={worker} onChange={(v) => setWorker.mutate(v)} label={`Worker mode for ${site.domain}`} />
+              </div>
             </Row>
           )}
           <Row title="HTTPS" hint={`A certificate for ${site.domain} from LampRabit's local authority.`}>
