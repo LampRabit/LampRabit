@@ -6,15 +6,17 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import clsx from "clsx";
 import {
   api,
-  runtimeLabels,
   type InstalledRuntime,
   type Release,
+  type Requirement,
   type Runtime,
 } from "../lib/api";
+import { infoFor, labelFor, meet, needsNote, unmet, useCatalog } from "../lib/catalog";
+import RequirementsDialog from "../components/RequirementsDialog";
 import { installKey, useAppStore } from "../lib/store";
 import { toolUrl } from "../lib/tools";
 import { useRuntimeUpdates } from "../lib/updates";
-import { runtimeTiles } from "../components/runtimes";
+import { runtimeTiles, tileFor } from "../components/runtimes";
 import { Button, Card, IconTile, PageHeader } from "../components/ui";
 import NodeCard from "../components/NodeCard";
 import ServiceSettings from "../components/ServiceSettings";
@@ -22,148 +24,6 @@ import RelatedPanel from "../components/RelatedPanel";
 import BackupsPanel from "../components/BackupsPanel";
 import { ActiveTile, AvailableList, InstalledTile, InstalledTiles, NoActiveTile, VersionsLayout } from "../components/versions";
 import { TunnelsPanel } from "../components/Tunnels";
-
-/** `source` describes the download on Windows; `unix`, where it differs, on Linux and macOS. */
-const roles: Record<Runtime, { blurb: string; source: string; unix?: string }> = {
-  apache: { blurb: "Serves your sites", source: "Apache Lounge builds", unix: "LampRabit's builds of Apache httpd" },
-  nginx: {
-    blurb: "Serves your sites",
-    source: "Official nginx.org Windows builds (PGP-signed, no checksum)",
-    unix: "LampRabit's builds of nginx.org releases",
-  },
-  php: {
-    blurb: "Runs your code",
-    source: "Thread-safe builds from windows.php.net",
-    unix: "LampRabit's static builds with common extensions built in, Redis and Memcached clients included",
-  },
-  caddy: {
-    blurb: "Serves your sites",
-    source: "Official Caddy releases from GitHub; uses LampRabit's certificates and PHP, not its own",
-  },
-  frankenphp: {
-    blurb: "Serves your sites",
-    source: "Official FrankenPHP releases: Caddy with its own PHP built in, so LampRabit's PHP versions and extensions don't apply to its sites (no Intel Mac build)",
-  },
-  tomcat: {
-    blurb: "Runs Java web apps",
-    source: "Official Apache Tomcat releases (SHA-512 checked); runs on the active Java and serves Java projects behind your web server",
-  },
-  java: {
-    blurb: "Runs Java apps",
-    source: "Eclipse Temurin JDKs from Adoptium (checksum checked); java, javac and jar work in LampRabit's terminal, with JAVA_HOME set",
-  },
-  mariadb: { blurb: "Stores your data", source: "Official MariaDB releases" },
-  mongodb: {
-    blurb: "Stores your documents",
-    source: "Official MongoDB Community Server releases (checksum checked); each major version keeps its own data folder",
-  },
-  meilisearch: {
-    blurb: "Search engine",
-    source: "Official Meilisearch Community builds from GitHub (checksum checked); runs in development mode, with its search preview at its URL",
-  },
-  typesense: {
-    blurb: "Search engine",
-    source: "Official Typesense builds from dl.typesense.org (Linux and macOS; no Windows build; no checksums published). API key: lamprabit",
-  },
-  rustfs: {
-    blurb: "S3 object storage",
-    source: "RustFS from its GitHub releases (checksum checked): S3-compatible, with a web console. Access key lamprabit, secret lamprabit-secret",
-  },
-  minio: {
-    blurb: "S3 object storage",
-    source: "MinIO's last release (October 2025), built from its source by LampRabit's CI: the project is archived, so there are no security fixes. Access key lamprabit, secret lamprabit-secret",
-  },
-  elasticsearch: {
-    blurb: "Search engine",
-    source: "Official Elasticsearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory",
-  },
-  opensearch: {
-    blurb: "Search engine",
-    source: "Official OpenSearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory. No macOS build",
-  },
-  n8n: {
-    blurb: "Workflow automation",
-    source: "n8n from npm, installed into its own folder and run on NVM's Node.js (24 or newer). Editor at n8n.test",
-  },
-  rabbitmq: {
-    blurb: "Message queue",
-    source: "Official RabbitMQ releases (checksum checked) with the management console (user guest, password guest)",
-  },
-  go: {
-    blurb: "Runs Go code",
-    source: "Official Go releases from go.dev (checksum checked); go and gofmt work in LampRabit's terminal",
-  },
-  rust: {
-    blurb: "Runs Rust code",
-    source: "Rust stable through rustup, kept inside LampRabit's folder (not your ~/.cargo). On Windows the GNU toolchain, which needs no Visual Studio",
-  },
-  erlang: {
-    blurb: "Runs RabbitMQ",
-    source: "Official Erlang/OTP builds for Windows (checksum checked). On Linux and macOS, RabbitMQ uses your system's Erlang",
-  },
-  ollama: {
-    blurb: "Local AI models",
-    source: "Ollama's own builds from GitHub (a large download). Models go to LampRabit's data folder; the ollama command uses this server",
-  },
-  mongotools: {
-    blurb: "MongoDB backups",
-    source: "MongoDB's mongodump and mongorestore (checksum checked); LampRabit's MongoDB backups use them",
-  },
-  compass: {
-    blurb: "MongoDB GUI",
-    source: "MongoDB's desktop app from its GitHub releases; opens connected to LampRabit's MongoDB",
-  },
-  sqlite: {
-    blurb: "File databases",
-    source: "The sqlite3 shell from sqlite.org (SHA3 checked). PHP has SQLite built in, so projects don't need this to use it",
-  },
-  clickhouse: {
-    blurb: "Analytics database",
-    source: "Official ClickHouse builds from GitHub (Linux and macOS; no Windows build). Its web console is at /play on its HTTP port",
-  },
-  neo4j: {
-    blurb: "Graph database",
-    source: "Neo4j Community from dist.neo4j.org (checksum checked); runs on Java 21+, Neo4j Browser at neo4j.test",
-  },
-  mongosh: {
-    blurb: "MongoDB shell",
-    source: "MongoDB's shell from its GitHub releases; mongosh works in LampRabit's terminal, and MongoDB uses it to shut down cleanly",
-  },
-  python: {
-    blurb: "Runs Python code",
-    source: "python-build-standalone (the builds uv uses, checksum checked); python and pip work in LampRabit's terminal",
-  },
-  phppgadmin: {
-    blurb: "PostgreSQL admin",
-    source: "The PostgreSQL web interface in PHP (ReimuHakurei's maintained fork for PHP 8); log in as root without a password",
-  },
-  pgadmin: {
-    blurb: "PostgreSQL admin",
-    source: "PostgreSQL's official admin tool from PyPI, in its own Python environment (needs Python 3.10–3.14); add a server for 127.0.0.1 as root",
-  },
-  postgres: {
-    blurb: "Stores your data",
-    source: "PostgreSQL built from source for every OS by theseus-rs (checksum checked); psql and pg_dump work in LampRabit's terminal",
-  },
-  mysql: { blurb: "Stores your data", source: "Official MySQL releases; runs next to MariaDB on its own port" },
-  mailpit: { blurb: "Catches outgoing mail", source: "Local SMTP server with a web inbox" },
-  adminer: { blurb: "Database admin", source: "A single-file database manager" },
-  phpmyadmin: { blurb: "Database admin", source: "The classic MySQL/MariaDB web interface" },
-  ngrok: { blurb: "Public tunnels", source: "Share sites on a public URL (free account needed)" },
-  redis: {
-    blurb: "Cache and queues",
-    source: "Real Redis from the community redis-windows build (Redis has no official Windows build), with redis-cli",
-    unix: "LampRabit's builds of Redis, with redis-cli",
-  },
-  cloudflared: { blurb: "Public tunnels", source: "Cloudflare quick tunnels, no account needed" },
-  composer: { blurb: "PHP packages", source: "PHP's package manager; run composer from the LampRabit terminal" },
-  phpredisadmin: { blurb: "Redis admin", source: "Browse and edit Redis keys in the browser, like phpMyAdmin" },
-  memcached: {
-    blurb: "Memory cache",
-    source: "nono303's Windows build of Memcached (no official one exists), checked and repackaged by LampRabit",
-    unix: "LampRabit's builds of Memcached",
-  },
-};
 
 const versionKey = (v: string) => v.split(".").map(Number);
 const newestFirst = (a: string, b: string) => {
@@ -174,27 +34,9 @@ const newestFirst = (a: string, b: string) => {
   return 0;
 };
 
+/** A runtime id from the backend's catalog, or the two lists that aren't runtimes. */
 type ServiceSelection = Runtime | "node" | "tunnels";
 
-/** Services by what they do, in the Settings-style grouped navigation. */
-const groups: { id: string; title: string; blurb: string; items: ServiceSelection[] }[] = [
-  {
-    id: "web",
-    title: "Web and app servers",
-    blurb: "Apache, Nginx, Caddy or FrankenPHP serve your sites; Tomcat runs Java web apps behind them. Several can run side by side.",
-    items: ["apache", "nginx", "caddy", "frankenphp", "tomcat"],
-  },
-  { id: "languages", title: "Languages", blurb: "Several versions side by side; projects pick theirs.", items: ["php", "java", "python", "go", "rust", "node"] },
-  { id: "packages", title: "Package managers", blurb: "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH.", items: ["composer"] },
-  { id: "databases", title: "Databases", blurb: "They can all run side by side, each on its own port.", items: ["mariadb", "mysql", "postgres", "mongodb", "clickhouse", "neo4j", "sqlite"] },
-  { id: "search", title: "Search", blurb: "Full-text search engines for your apps.", items: ["meilisearch", "typesense", "elasticsearch", "opensearch"] },
-  { id: "storage", title: "Storage", blurb: "S3-compatible object storage. Their storage folder can be anywhere, even outside the LampRabit folder.", items: ["rustfs", "minio"] },
-  { id: "queues", title: "Queues", blurb: "Message brokers for background jobs and events.", items: ["rabbitmq", "erlang"] },
-  { id: "ai", title: "AI and automation", blurb: "Run language models locally and automate workflows.", items: ["ollama", "n8n"] },
-  { id: "cache", title: "Cache", blurb: "In-memory stores for caches, sessions and queues.", items: ["redis", "memcached"] },
-  { id: "tools", title: "Developer tools", blurb: "Mail catching and web interfaces for your databases and caches.", items: ["mailpit", "phpmyadmin", "adminer", "phppgadmin", "pgadmin", "phpredisadmin", "compass", "mongosh", "mongotools"] },
-  { id: "sharing", title: "Sharing", blurb: "Put a project or local port on a public URL.", items: ["cloudflared", "ngrok", "tunnels"] },
-];
 export default function Services() {
   const notify = useAppStore((s) => s.notify);
   const [selected, setSelected] = useState<ServiceSelection>("apache");
@@ -202,9 +44,11 @@ export default function Services() {
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const ollamaElsewhere = useQuery({ queryKey: ["ollama-elsewhere"], queryFn: api.ollamaElsewhere, staleTime: 60_000 });
+  const catalog = useCatalog();
+  const groups = catalog.data?.groups ?? [];
   const find = (r: Runtime) => installed.data?.find((i) => i.runtime === r);
   const defaultDb = settings.data?.defaultDatabase ?? "mariadb";
-  const selectedGroup = groups.find((g) => g.items.includes(selected))!;
+  const selectedGroup = groups.find((g) => g.items.includes(selected));
   const isRuntime = selected !== "node" && selected !== "tunnels";
   const runtime = isRuntime ? selected as Runtime : null;
 
@@ -212,18 +56,10 @@ export default function Services() {
   let note: string | undefined;
   if (runtime === "mariadb" || runtime === "mysql") {
     if (find(runtime)?.active && runtime === defaultDb) note = "Default database: new projects and the mysql command use it.";
-  } else if (runtime === "composer" && !find("php")?.active) {
-    note = "Composer runs on PHP: install a PHP version first.";
   } else if (runtime === "redis" && find("redis")?.active && !settings.data?.addToPath) {
     note = "redis-cli works in LampRabit's terminal. Enable Add LampRabit's commands to PATH in Settings → Terminal to use it anywhere.";
-  } else if (runtime === "phpredisadmin" && !find("redis")?.active) {
-    note = "Install Redis to browse its keys here.";
   } else if (runtime === "mongodb" && find("mongodb")?.active && !find("mongosh")?.active) {
     note = "Install mongosh too: the MongoDB shell, which also lets LampRabit stop MongoDB cleanly.";
-  } else if ((runtime === "phppgadmin" || runtime === "pgadmin") && !find("postgres")?.active) {
-    note = "Install PostgreSQL to manage it here.";
-  } else if (runtime === "pgadmin" && !find("pgadmin")?.active && !find("python")?.active) {
-    note = "pgAdmin runs on Python: install Python 3.13 (Languages) first.";
   }
   if (runtime === "mailpit" || runtime === "phpmyadmin" || runtime === "adminer" || runtime === "phpredisadmin" || runtime === "phppgadmin" || runtime === "pgadmin" || runtime === "neo4j") {
     openUrl = toolUrl(runtime, sites.data, settings.data?.ports.mailUi, runtime === "neo4j" ? settings.data?.ports.neo4jHttp : settings.data?.ports.pgadmin);
@@ -244,9 +80,10 @@ export default function Services() {
     return info?.active ? `Active · ${info.active}` : info?.versions.length ? `${info.versions.length} installed` : "Not installed";
   };
   const icon = (item: ServiceSelection) =>
-    item === "node" ? <Hexagon size={16} strokeWidth={1.75} /> : item === "tunnels" ? <Share2 size={16} strokeWidth={1.75} /> : runtimeTiles[item].icon(16);
+    item === "node" ? <Hexagon size={16} strokeWidth={1.75} /> : item === "tunnels" ? <Share2 size={16} strokeWidth={1.75} /> : tileFor(item).icon(16);
   const iconClass = (item: ServiceSelection) =>
-    item === "node" ? "bg-lime-600/10 text-lime-600" : item === "tunnels" ? "bg-violet-500/10 text-violet-600" : runtimeTiles[item].className;
+    item === "node" ? "bg-lime-600/10 text-lime-600" : item === "tunnels" ? "bg-violet-500/10 text-violet-600" : tileFor(item).className;
+  const itemLabel = (item: ServiceSelection) => (item === "tunnels" ? "Active tunnels" : labelFor(catalog.data, item));
 
   return (
     <>
@@ -259,7 +96,7 @@ export default function Services() {
               <section key={group.id} aria-labelledby={`service-group-${group.id}`}>
                 <h2 id={`service-group-${group.id}`} className="px-3 pb-2 text-xs font-bold tracking-wider text-muted uppercase">{group.title}</h2>
                 <ul className="space-y-0.5">
-                  {group.items.map((item) => (
+                  {(group.items as ServiceSelection[]).map((item) => (
                     <li key={item}>
                       <button
                         type="button"
@@ -272,7 +109,7 @@ export default function Services() {
                       >
                         <span className={clsx("flex size-7 shrink-0 items-center justify-center rounded-md", iconClass(item))}>{icon(item)}</span>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium">{item === "node" ? "Node.js" : item === "tunnels" ? "Active tunnels" : runtimeLabels[item]}</span>
+                          <span className="block truncate text-sm font-medium">{itemLabel(item)}</span>
                           <span className="block truncate text-[11px] text-muted">{status(item)}</span>
                         </span>
                       </button>
@@ -288,11 +125,11 @@ export default function Services() {
           <div className="mb-4 lg:hidden">
             <label className="block text-xs font-bold text-muted uppercase" htmlFor="service-picker">Service</label>
             <select id="service-picker" value={selected} onChange={(e) => setSelected(e.target.value as ServiceSelection)} className="mt-1 h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm">
-              {groups.map((group) => <optgroup key={group.id} label={group.title}>{group.items.map((item) => <option key={item} value={item}>{item === "node" ? "Node.js" : item === "tunnels" ? "Active tunnels" : runtimeLabels[item]}</option>)}</optgroup>)}
+              {groups.map((group) => <optgroup key={group.id} label={group.title}>{(group.items as ServiceSelection[]).map((item) => <option key={item} value={item}>{itemLabel(item)}</option>)}</optgroup>)}
             </select>
           </div>
           <div className="mb-3">
-            <p className="text-sm text-muted">{selectedGroup.blurb}</p>
+            <p className="text-sm text-muted">{selectedGroup?.blurb}</p>
           </div>
           {runtime === "ollama" && ollamaElsewhere.data && !find("ollama")?.active ? (
             <SystemOllamaCard path={ollamaElsewhere.data} />
@@ -347,8 +184,13 @@ function RuntimeCard({
   const installs = useAppStore((s) => s.installs);
   const [extOpen, setExtOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const label = runtimeLabels[runtime];
+  const catalogInfo = useCatalog();
+  const info = infoFor(catalogInfo.data, runtime);
+  const label = labelFor(catalogInfo.data, runtime);
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
+  // What the version in use (or the newest download) needs, for the note under the title.
+  const needs = useQuery({ queryKey: ["requirements", runtime], queryFn: () => api.runtimeRequirements(runtime), enabled: (info?.needs.length ?? 0) > 0 });
+  const [asking, setAsking] = useState<{ release: Release; requirements: Requirement[] } | null>(null);
   const os = paths.data?.os;
   const updates = useRuntimeUpdates().data?.filter((u) => u.runtime === runtime) ?? [];
 
@@ -365,15 +207,35 @@ function RuntimeCard({
     onError: (e) => notify("error", String(e)),
   });
   const refresh = () => {
-    for (const key of ["installed", "services", "settings"]) queryClient.invalidateQueries({ queryKey: [key] });
+    for (const key of ["installed", "services", "settings", "requirements"]) queryClient.invalidateQueries({ queryKey: [key] });
   };
   const onError = (e: unknown) => notify("error", String(e));
   const install = useMutation({
-    mutationFn: (r: Release) => api.installRuntime(r),
-    onSuccess: (_, r) => {
-      notify("info", `${label} ${r.version} installed`);
+    // Needs first (the versions that fit this release), then the release itself.
+    mutationFn: async ({ release, requirements = [] }: { release: Release; requirements?: Requirement[] }) => {
+      await meet(requirements);
+      await api.installRuntime(release);
+    },
+    onSuccess: (_, { release, requirements = [] }) => {
+      const extra = unmet(requirements).map((r) => r.label);
+      notify("info", `${label} ${release.version} installed${extra.length ? `, with ${extra.join(" and ")}` : ""}`);
+      setAsking(null);
       refresh();
       queryClient.invalidateQueries({ queryKey: ["runtime-updates"] });
+    },
+    onError: (e) => {
+      // Whatever got installed before the failure is real; show it.
+      refresh();
+      onError(e);
+    },
+  });
+  // Asks first when this version needs something that isn't in use yet.
+  const checkAndInstall = useMutation({
+    mutationFn: (release: Release) => (info?.needs.length ? api.runtimeRequirements(runtime, release.version) : Promise.resolve([])),
+    onSuccess: (requirements, release) => {
+      const missing = unmet(requirements);
+      if (missing.length === 0) install.mutate({ release });
+      else setAsking({ release, requirements: missing });
     },
     onError,
   });
@@ -391,17 +253,18 @@ function RuntimeCard({
   const folder = (v: string) => (paths.data ? `${paths.data.root}${os === "windows" ? "\\" : "/"}bin${os === "windows" ? "\\" : "/"}${runtime}${os === "windows" ? "\\" : "/"}${v}` : null);
   const progressOf = (v: string) => installs[installKey(runtime, v)];
   const update = (v: string) => updates.find((u) => u.installed === v);
-  const source = (os !== "windows" && roles[runtime].unix) || roles[runtime].source;
+  const needsWarning = info?.unavailable ?? needsNote(needs.data);
 
   return (
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center gap-4 border-b border-line px-5 py-4">
-        <IconTile className={runtimeTiles[runtime].className}>{runtimeTiles[runtime].icon(22)}</IconTile>
+        <IconTile className={tileFor(runtime).className}>{tileFor(runtime).icon(22)}</IconTile>
         <div className="min-w-0 flex-1 basis-60">
           <h3 className="text-lg font-bold tracking-tight">{label}</h3>
           <p className="text-sm text-muted">
-            {roles[runtime].blurb} · {source}
+            {info ? `${info.blurb} · ${info.source}` : null}
           </p>
+          {needsWarning && <p className={clsx("mt-1 text-xs font-medium", info?.unavailable ? "text-danger-text" : "text-warn")}>{needsWarning}</p>}
           {note && <p className="mt-1 text-xs font-medium text-accent-text">{note}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -422,6 +285,15 @@ function RuntimeCard({
         </div>
       </div>
       {runtime === "php" && <ExtensionsDialog open={extOpen} onClose={() => setExtOpen(false)} />}
+      {asking && (
+        <RequirementsDialog
+          name={`${label} ${asking.release.version}`}
+          requirements={asking.requirements}
+          busy={install.isPending}
+          onConfirm={() => install.mutate(asking)}
+          onClose={() => setAsking(null)}
+        />
+      )}
 
       <VersionsLayout
         active={
@@ -440,7 +312,7 @@ function RuntimeCard({
                   )}
                   {update(active) && !progressOf(update(active)!.release.version) && (
                     <button
-                      onClick={() => install.mutate(update(active)!.release)}
+                      onClick={() => checkAndInstall.mutate(update(active)!.release)}
                       className="text-left font-semibold text-accent-text hover:underline"
                       title="Installs alongside; switch to it when you're ready"
                     >
@@ -509,7 +381,7 @@ function RuntimeCard({
           })}
           onInstall={(v) => {
             const release = available.find((r) => r.version === v);
-            if (release) install.mutate(release);
+            if (release) checkAndInstall.mutate(release);
           }}
         />
       </VersionsLayout>

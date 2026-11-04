@@ -210,3 +210,14 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     icon: (size) => <TableProperties size={size} strokeWidth={1.75} />,
   },
 };
+
+/** A runtime's tile, or a plain one for a runtime the backend added that has none here yet. */
+export function tileFor(id: string): { className: string; text: string; icon: (size: number) => ReactNode } {
+  return (
+    runtimeTiles[id as Runtime] ?? {
+      className: "bg-surface-2 text-muted",
+      text: "text-muted",
+      icon: (size: number) => <Package size={size} strokeWidth={1.75} />,
+    }
+  );
+}

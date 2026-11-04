@@ -1,5 +1,6 @@
 mod apps;
 mod backups;
+mod catalog;
 mod comfort;
 mod commands;
 mod config;
@@ -2072,6 +2073,19 @@ fn check_port(port: u16) -> bool {
     services::port_free(port)
 }
 
+/// Every runtime with its group, description, source, platform gaps and companions.
+#[tauri::command]
+fn runtime_info() -> catalog::Catalog {
+    catalog::catalog()
+}
+
+/// What a runtime version needs, and how each need gets met (see `catalog::requirements`).
+#[tauri::command]
+async fn runtime_requirements(app: AppHandle, state: State<'_, AppState>, runtime: Runtime, version: Option<String>) -> Result<Vec<catalog::Requirement>> {
+    let (settings, layout) = state.snapshot().await;
+    catalog::requirements(&app, &state.http, &settings, &layout, runtime, version).await
+}
+
 #[tauri::command]
 async fn runtime_catalog(state: State<'_, AppState>, runtime: Runtime, fresh: Option<bool>) -> Result<Vec<Release>> {
     runtimes::available(&state.http, runtime, fresh.unwrap_or(false)).await
@@ -2402,6 +2416,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            runtime_info,
+            runtime_requirements,
             get_settings,
             save_settings,
             env_paths,

@@ -157,6 +157,50 @@ export interface Release {
   label: string | null;
 }
 
+/** A Services group, from the backend; items are runtime ids plus "node" and "tunnels". */
+export interface ServiceGroup {
+  id: string;
+  title: string;
+  blurb: string;
+  items: string[];
+}
+
+/** What the backend says about a runtime: its place on Services and what it needs. */
+export interface RuntimeInfo {
+  id: Runtime;
+  label: string;
+  blurb: string;
+  source: string;
+  /** Why it can't be installed on this OS, when it can't. */
+  unavailable: string | null;
+  needs: string[];
+  suggests: Runtime[];
+}
+
+export interface RuntimeCatalog {
+  groups: ServiceGroup[];
+  runtimes: RuntimeInfo[];
+}
+
+/** How one need of a runtime version gets met before it's installed. */
+export type RequirementAction =
+  | { kind: "ready"; version: string }
+  | { kind: "activate"; version: string }
+  | { kind: "install"; release: Release }
+  | { kind: "installNode"; version: string }
+  | { kind: "useNode"; version: string }
+  | { kind: "unavailable"; reason: string };
+
+export interface Requirement {
+  /** A runtime id, or "node". */
+  runtime: string;
+  label: string;
+  why: string;
+  /** "17 or newer", "3.10 to 3.14.x"; empty when any version works. */
+  range: string;
+  action: RequirementAction;
+}
+
 export interface InstalledRuntime {
   runtime: Runtime;
   active: string | null;
@@ -721,6 +765,9 @@ export const api = {
   saveText: (path: string, contents: string) => invoke<void>("save_text", { path, contents }),
   logHistory: () => invoke<LogHistory>("log_history"),
   clearLogs: () => invoke<void>("clear_logs"),
+  runtimeInfo: () => invoke<RuntimeCatalog>("runtime_info"),
+  /** What `version` (default: the active one, else the newest download) needs. */
+  runtimeRequirements: (runtime: Runtime, version?: string) => invoke<Requirement[]>("runtime_requirements", { runtime, version: version ?? null }),
   runtimeCatalog: (runtime: Runtime, fresh = false) => invoke<Release[]>("runtime_catalog", { runtime, fresh }),
   installedRuntimes: () => invoke<InstalledRuntime[]>("installed_runtimes"),
   installRuntime: (release: Release) => invoke<void>("install_runtime", { release }),
