@@ -92,8 +92,18 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         ),
         Runtime::Tomcat => ("Tomcat", "Runs Java web apps", "Official Apache Tomcat releases (SHA-512 checked); runs on the active Java and serves Java projects behind your web server", None),
         Runtime::Java => ("Java", "Runs Java apps", "Eclipse Temurin JDKs from Adoptium (checksum checked); java, javac and jar work in LampRabit's terminal, with JAVA_HOME set", None),
-        Runtime::Mariadb => ("MariaDB", "Stores your data", "Official MariaDB releases", None),
-        Runtime::Mysql => ("MySQL", "Stores your data", "Official MySQL releases; runs next to MariaDB on its own port", None),
+        Runtime::Mariadb => (
+            "MariaDB",
+            "Stores your data",
+            "Official MariaDB releases",
+            mac.then_some("MariaDB publishes no macOS builds, and LampRabit doesn't build its own yet. Use PostgreSQL, or MariaDB from Homebrew on its own port."),
+        ),
+        Runtime::Mysql => (
+            "MySQL",
+            "Stores your data",
+            "Official MySQL releases; runs next to MariaDB on its own port",
+            mac.then_some("MySQL on macOS isn't supported by LampRabit yet. Use PostgreSQL, or MySQL from Homebrew on its own port."),
+        ),
         Runtime::Postgres => ("PostgreSQL", "Stores your data", "PostgreSQL built from source for every OS by theseus-rs (checksum checked); psql and pg_dump work in LampRabit's terminal", None),
         Runtime::Mongodb => ("MongoDB", "Stores your documents", "Official MongoDB Community Server releases (checksum checked); each major version keeps its own data folder", None),
         Runtime::Mongosh => ("mongosh", "MongoDB shell", "MongoDB's shell from its GitHub releases; mongosh works in LampRabit's terminal, and MongoDB uses it to shut down cleanly", None),
@@ -215,7 +225,11 @@ fn need(runtime: &'static str, min: Option<&str>, max: Option<&str>, why: &'stat
 pub fn needs(runtime: Runtime, version: Option<&str>) -> Vec<Need> {
     let major = version.and_then(|v| parts(v).first().copied());
     match runtime {
-        Runtime::Composer => vec![need("php", Some("7.2.5"), None, "Composer runs on PHP")],
+        // Composer 2.2 (its LTS line) still runs on PHP 5.3; 2.3 and later need 7.2.5.
+        Runtime::Composer => {
+            let php = if version.is_some_and(|v| cmp(&parts(v), &[2, 3]).is_lt()) { "5.3.2" } else { "7.2.5" };
+            vec![need("php", Some(php), None, "Composer runs on PHP")]
+        }
         Runtime::Tomcat => {
             let java = match major {
                 Some(11..) | None => "17",

@@ -1920,7 +1920,9 @@ async fn composer_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
             return None;
         }
         seen.push(version.clone());
-        let label = r["lts"].as_bool().unwrap_or(false).then(|| "LTS".to_string());
+        // Composer's LTS line (2.2) is the one kept for PHP 5.3–7.1, not the one to pick
+        // for a new setup; the label says so, and one-click installs don't prefer it.
+        let label = r["lts"].as_bool().unwrap_or(false).then(|| "LTS for PHP 5.3–7.1".to_string());
         Some(async move {
             let url = format!("{SITE}{path}");
             let sha256 = client
