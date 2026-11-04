@@ -237,6 +237,7 @@ Write `{{name}}` anywhere a step takes text. Unknown names are reported when the
 | `{{mvnw}}` | Maven's wrapper: `mvnw.cmd` on Windows, `sh mvnw` elsewhere (zips drop the executable bit) |
 | `{{java_major}}` | The active Java's major version (`21`) |
 | `{{db.scheme}}`, `{{db.charset}}` | `mysql` and `utf8mb4`, or `postgresql` and `utf8` (database URLs) |
+| `{{db.pdo}}` | PDO's driver name: `mysql` (MariaDB too), `pgsql` or `sqlite`; empty when the project has no database, so `if: db.pdo == pgsql` adds PostgreSQL-only steps |
 | `{{mail.host}}`, `{{mail.port}}` | Mailpit's SMTP server |
 | `{{vars.<id>}}` | A variable's value |
 | `{{random:N}}` | N random characters (1–256), safe inside quoted PHP and `.env` strings |

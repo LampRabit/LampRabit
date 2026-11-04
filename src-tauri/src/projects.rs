@@ -385,6 +385,14 @@ fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: 
         ("db.server_version".into(), server_version),
         ("db.scheme".into(), scheme.into()),
         ("db.charset".into(), charset.into()),
+        // PDO's driver name (Drupal's too); empty without a database, so `if: db.pdo == pgsql`
+        // only holds when there is one.
+        ("db.pdo".into(), match (&req.database, engine) {
+            (None, _) => "",
+            (_, DbEngine::Postgres) => "pgsql",
+            (_, DbEngine::Sqlite) => "sqlite",
+            _ => "mysql",
+        }.into()),
         // A project's virtual environment's Python, as each OS lays it out.
         ("venv.python".into(), if cfg!(windows) { r".venv\Scripts\python.exe".into() } else { ".venv/bin/python".into() }),
         // Maven's wrapper: a .cmd on Windows; elsewhere through sh, since zips drop the
@@ -454,7 +462,7 @@ async fn has_tool(program: &str) -> bool {
 
 /// Everything a template needs, checked before anything is created: PHP version and
 /// extensions, and the tools its enabled steps use.
-async fn check_requirements(ctx: &Ctx<'_>, template: &Template, php: Option<&str>, steps: &[usize], path: &std::ffi::OsString) -> Result<()> {
+async fn check_requirements(ctx: &Ctx<'_>, req: &NewProject, template: &Template, php: Option<&str>, steps: &[usize], path: &std::ffi::OsString) -> Result<()> {
     if let (Some(minimum), Some(version)) = (template.requires.php.as_deref().filter(|m| *m != "any"), php) {
         if !at_least(version, minimum) {
             return Err(Error::msg(format!(
@@ -463,7 +471,20 @@ async fn check_requirements(ctx: &Ctx<'_>, template: &Template, php: Option<&str
             )));
         }
     }
-    if let (false, Some(version)) = (template.requires.extensions.is_empty(), php) {
+    // The drivers for the database picked in the wizard, so templates that support
+    // several engines don't have to list one engine's drivers for all of them.
+    let mut extensions = template.requires.extensions.clone();
+    if req.database.is_some() && template.engines.len() > 1 {
+        use crate::templates::DbEngine;
+        let drivers: &[&str] = match engine(ctx.settings, req) {
+            Some(DbEngine::Postgres) => &["pdo_pgsql", "pgsql"],
+            Some(DbEngine::Sqlite) => &["pdo_sqlite"],
+            Some(DbEngine::Mariadb | DbEngine::Mysql) => &["pdo_mysql", "mysqli"],
+            _ => &[],
+        };
+        extensions.extend(drivers.iter().map(|d| d.to_string()).filter(|d| !extensions.contains(d)).collect::<Vec<_>>());
+    }
+    if let (false, Some(version)) = (extensions.is_empty(), php) {
         let (php_bin, ini) = php_cli(ctx, version)?;
         let mut cmd = tokio::process::Command::new(&php_bin);
         cmd.arg("-c").arg(&ini).arg("-m");
@@ -471,7 +492,7 @@ async fn check_requirements(ctx: &Ctx<'_>, template: &Template, php: Option<&str
         let out = cmd.output().await.map_err(|e| Error::msg(format!("Couldn't run PHP {version}: {e}")))?;
         let loaded: Vec<String> = String::from_utf8_lossy(&out.stdout).lines().map(|l| l.trim().to_lowercase()).collect();
         let missing: Vec<&str> =
-            template.requires.extensions.iter().map(String::as_str).filter(|e| !loaded.iter().any(|l| *l == e.to_lowercase())).collect();
+            extensions.iter().map(String::as_str).filter(|e| !loaded.iter().any(|l| *l == e.to_lowercase())).collect();
         if !missing.is_empty() {
             return Err(Error::msg(format!(
                 "{} needs these PHP extensions, which PHP {version} doesn't load: {}. Turn them on in Services → PHP → Extensions.",
@@ -660,7 +681,7 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source:
     let path_os = std::env::join_paths(path.iter().cloned().chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()))).unwrap_or_default();
 
     ctx.step("Checking requirements");
-    check_requirements(ctx, template, php_version.as_deref(), &steps, &path_os).await?;
+    check_requirements(ctx, req, template, php_version.as_deref(), &steps, &path_os).await?;
     let composer = match steps.iter().any(|&i| matches!(template.steps[i].action, Action::Composer(_))) {
         true => Some(ensure_composer(ctx).await?),
         false => None,

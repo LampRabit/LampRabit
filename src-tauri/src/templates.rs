@@ -515,6 +515,7 @@ pub const PLACEHOLDERS: &[&str] = &[
     "java_major",
     "db.scheme",
     "db.charset",
+    "db.pdo",
     "mail.host",
     "mail.port",
     "node_version",
