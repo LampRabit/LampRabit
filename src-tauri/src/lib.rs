@@ -401,7 +401,8 @@ async fn running_database(state: &AppState, engine: templates::DbEngine) -> Resu
         templates::DbEngine::Mysql => ServiceKind::Mysql,
         templates::DbEngine::Postgres => ServiceKind::Postgres,
         templates::DbEngine::Mongodb => ServiceKind::Mongodb,
-        templates::DbEngine::Sqlite => return Err(Error::msg("SQLite databases are files in their project; copy the file to back it up.")),
+        // Files in the projects: nothing has to run.
+        templates::DbEngine::Sqlite => return Ok(()),
     };
     if state.supervisor.is_running(kind).await {
         Ok(())

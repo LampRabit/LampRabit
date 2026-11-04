@@ -13,7 +13,8 @@ const when = (ms: number) => new Date(ms).toLocaleString(undefined, { dateStyle:
 
 /**
  * Backups of one database server: a Back up button per database, and the dumps in
- * backups/<engine>/ with Restore (into the same or another database) and Delete.
+ * backups/<engine>/ with Restore (into the same or another database) and Delete. SQLite's
+ * databases are the .sqlite/.db files in the projects, so there's no server to start.
  */
 export default function BackupsPanel({ engine }: { engine: DbEngine }) {
   const queryClient = useQueryClient();
@@ -21,11 +22,16 @@ export default function BackupsPanel({ engine }: { engine: DbEngine }) {
   const label = runtimeLabels[engine];
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
-  const running = services.data?.find((s) => s.kind === engine)?.state === "running";
+  const files = engine === "sqlite";
+  const running = files || services.data?.find((s) => s.kind === engine)?.state === "running";
   const databases = useQuery({ queryKey: ["databases", engine], queryFn: () => api.listDatabases(engine), enabled: running });
   const backups = useQuery({ queryKey: ["backups"], queryFn: api.listBackups });
   const [restoring, setRestoring] = useState<Backup | null>(null);
   const [target, setTarget] = useState("");
+  // Same rules as the backend: a name, or for SQLite a file inside a project.
+  const validTarget = files
+    ? /^[^~]+\.(sqlite3?|db)$/i.test(target) && !target.split(/[\\/]/).some((part) => part === ".." || part === "")
+    : /^[A-Za-z0-9_-]{1,64}$/.test(target);
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const onError = (e: unknown) => notify("error", String(e));
@@ -78,13 +84,13 @@ export default function BackupsPanel({ engine }: { engine: DbEngine }) {
         ) : databases.isError ? (
           <p className="text-sm text-danger-text">{String(databases.error)}</p>
         ) : (databases.data ?? []).length === 0 ? (
-          <p className="text-sm text-muted">No databases yet.</p>
+          <p className="text-sm text-muted">{files ? "No SQLite databases in your projects yet (.sqlite, .sqlite3 or .db files in www)." : "No databases yet."}</p>
         ) : (
           <ul className="flex flex-wrap gap-2">
             {databases.data!.map((d) => (
               <li key={d}>
                 <Button size="sm" variant="soft" disabled={backup.isPending} onClick={() => backup.mutate(d)} title={`Back up ${d}`}>
-                  <DatabaseBackup size={14} /> {backup.isPending && backup.variables === d ? "Backing up…" : d}
+                  <DatabaseBackup size={14} /> <span className={files ? "font-mono" : undefined}>{backup.isPending && backup.variables === d ? "Backing up…" : d}</span>
                 </Button>
               </li>
             ))}
@@ -142,7 +148,7 @@ export default function BackupsPanel({ engine }: { engine: DbEngine }) {
               </Button>
               <Button
                 variant="primary"
-                disabled={restore.isPending || !/^[A-Za-z0-9_-]{1,64}$/.test(target)}
+                disabled={restore.isPending || !validTarget}
                 onClick={() => restore.mutate({ path: restoring.path, database: target })}
               >
                 {restore.isPending ? "Restoring…" : "Restore"}
@@ -151,10 +157,12 @@ export default function BackupsPanel({ engine }: { engine: DbEngine }) {
           }
         >
           <p className="text-sm text-muted">
-            The backup from {when(restoring.created)} goes into this {label} database. It's created if it doesn't exist; tables that are in the backup are replaced.
+            {files
+              ? `The backup from ${when(restoring.created)} replaces this file in www (or creates it). Stop the app that uses it first, or the copy may fail.`
+              : `The backup from ${when(restoring.created)} goes into this ${label} database. It's created if it doesn't exist; tables that are in the backup are replaced.`}
           </p>
           <label className="mt-4 block">
-            <span className="mb-1.5 block text-sm font-semibold">Database</span>
+            <span className="mb-1.5 block text-sm font-semibold">{files ? "File in www" : "Database"}</span>
             <input data-autofocus className={`${inputClass} font-mono`} value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Database to restore into" />
           </label>
         </Dialog>

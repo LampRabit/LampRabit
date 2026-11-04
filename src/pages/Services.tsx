@@ -314,7 +314,8 @@ export default function Services() {
           ) : selected === "node" ? <NodeCard /> : <TunnelsPanel />}
           {runtime && <RelatedPanel key={`related-${runtime}`} runtime={runtime} installed={installed.data} onSelect={setSelected} />}
           {runtime && <ServiceSettings key={`settings-${runtime}`} runtime={runtime} />}
-          {(runtime === "mariadb" || runtime === "mysql" || runtime === "postgres" || runtime === "mongodb") && find(runtime)?.active && <BackupsPanel key={`backups-${runtime}`} engine={runtime} />}
+          {/* SQLite databases are project files: they can be backed up without the shell installed. */}
+          {(runtime === "sqlite" || ((runtime === "mariadb" || runtime === "mysql" || runtime === "postgres" || runtime === "mongodb") && find(runtime)?.active)) && <BackupsPanel key={`backups-${runtime}`} engine={runtime} />}
           {selected === "tunnels" && <p className="mt-3 text-xs text-muted">Share a project from Sites or use this panel to share any local port.</p>}
         </section>
       </div>
