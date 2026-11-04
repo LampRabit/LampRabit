@@ -2,8 +2,9 @@
 //! its needs call for) into a throwaway LampRabit folder, then puts every service through
 //! the real supervisor: start, a healthy answer, a second start that must not spawn a
 //! second process, stop, and a free port afterwards. One service is also killed to check
-//! that "Restart after a crash" brings it back and that Stop then keeps it stopped. CI runs
-//! this on Windows, Linux and macOS (.github/workflows/smoke.yml).
+//! that "Restart after a crash" brings it back and that Stop then keeps it stopped. With PHP
+//! and a web server, a project with extra domains and processes is checked through the
+//! web server too. CI runs this on Windows, Linux and macOS (.github/workflows/smoke.yml).
 //!
 //! It never reads or writes the user's settings: the folder holds its own settings.toml,
 //! and every port is moved up by `PORT_SHIFT` so nothing clashes with what the machine
@@ -157,6 +158,16 @@ pub async fn run(app: AppHandle, options: Options) -> i32 {
         report.add(format!("restart after a crash ({})", kind.id()), started, outcome);
     }
 
+    // A project's extra domains and processes, through the primary web server.
+    let state = app.state::<AppState>();
+    let primary = ServiceKind::for_server(state.snapshot().await.0.primary_server());
+    if installed.contains(&Runtime::Php) && kinds.contains(&primary) {
+        let started = Instant::now();
+        let outcome = project(&app, primary).await;
+        report.add("project domains and processes".into(), started, outcome);
+        state.apps.stop_all().await;
+    }
+
     app.state::<AppState>().supervisor.shutdown().await;
     let count = |result: &str| report.steps.iter().filter(|s| s.result == result).count();
     let (ok, skipped, failed) = (count("ok"), count("skipped"), count("failed"));
@@ -293,6 +304,110 @@ async fn lifecycle(app: &AppHandle, kind: ServiceKind) -> std::result::Result<St
         return Err(Outcome::Failed(format!("port {port} is still taken after Stop")));
     }
     Ok(format!("{took}, second start ignored, stopped, port {port} free"))
+}
+
+/// What a domain answers through the web server's HTTP port.
+async fn fetch(app: &AppHandle, port: u16, host: &str) -> String {
+    let client = &app.state::<AppState>().http;
+    match client.get(format!("http://127.0.0.1:{port}/")).header("Host", host).send().await {
+        Ok(r) => r.text().await.unwrap_or_default(),
+        Err(e) => format!("(no answer: {e})"),
+    }
+}
+
+/// A project with extra domains and processes: admin.<project> serves a folder, api.<project>
+/// goes to a process (PHP's built-in server), a worker runs without a port, and a process
+/// that always exits has to give up after a few restarts.
+async fn project(app: &AppHandle, web: ServiceKind) -> std::result::Result<String, Outcome> {
+    let state = app.state::<AppState>();
+    let name = "smoke-site";
+    let (settings, layout) = state.snapshot().await;
+    let dir = layout.www().join(name);
+    let write = |rel: &str, text: &str| -> Result<()> {
+        let path = dir.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap_or(&dir))?;
+        Ok(std::fs::write(path, text)?)
+    };
+    write("index.php", "<?php echo 'main-' . 'ok';")?;
+    write("admin/index.html", "admin-ok")?;
+    write("api/index.php", "<?php echo 'api-' . 'ok';")?;
+    // Script files rather than `php -r "…"`: quoting through cmd.exe and the php shim
+    // differs per OS, and a project's commands rarely look like that anyway.
+    write("worker.php", "<?php sleep(3600);")?;
+    write("flaky.php", "<?php exit(3);")?;
+    let tld = &settings.tld;
+    let api_port = crate::apps::free_port(&settings);
+    let process = |name: &str, command: &str, port: Option<u16>, restart| crate::config::ProjectProcess {
+        name: name.into(),
+        command: command.into(),
+        port,
+        restart,
+        with_app: false,
+        ..Default::default()
+    };
+    let processes = vec![
+        process("api", "php -S 127.0.0.1:{port} -t api", Some(api_port), crate::config::RestartPolicy::OnFailure),
+        process("worker", "php worker.php", None, crate::config::RestartPolicy::OnFailure),
+        process("flaky", "php flaky.php", None, crate::config::RestartPolicy::OnFailure),
+    ];
+    crate::set_site_processes(app.clone(), app.state::<AppState>(), name.into(), processes).await?;
+    let domains = vec![
+        crate::config::ExtraDomain { host: format!("admin.{name}.{tld}"), target: crate::config::DomainTarget::Files { root: "admin".into() } },
+        crate::config::ExtraDomain { host: format!("api.{name}.{tld}"), target: crate::config::DomainTarget::Process { name: "api".into() } },
+    ];
+    // Checked like the app checks them: a domain under another project's name must fail.
+    let taken = vec![crate::config::ExtraDomain { host: format!("{name}.{tld}"), target: crate::config::DomainTarget::Main }];
+    if crate::set_site_domains(app.clone(), app.state::<AppState>(), name.into(), taken).await.is_ok() {
+        return Err(Outcome::Failed("the project's own main domain was accepted as an extra domain".into()));
+    }
+    crate::set_site_domains(app.clone(), app.state::<AppState>(), name.into(), domains).await?;
+
+    if !state.supervisor.is_running(web).await {
+        crate::start_service(app.clone(), app.state::<AppState>(), web).await?;
+    }
+    wait_healthy(app, web).await?;
+    let (settings, layout) = state.snapshot().await;
+    for process in ["api", "worker", "flaky"] {
+        state.apps.start_process(app, &settings, &layout, name, process).await?;
+    }
+    let http = settings.server_ports(settings.primary_server()).0;
+    let checks = [(format!("{name}.{tld}"), "main-ok"), (format!("admin.{name}.{tld}"), "admin-ok"), (format!("api.{name}.{tld}"), "api-ok")];
+    // The api process and the restarted server need a moment.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut answers = Vec::new();
+    loop {
+        answers.clear();
+        for (host, want) in &checks {
+            let got = fetch(app, http, host).await;
+            answers.push((host.clone(), *want, got));
+        }
+        if answers.iter().all(|(_, want, got)| got.contains(want)) || Instant::now() > deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    if let Some((host, want, got)) = answers.iter().find(|(_, want, got)| !got.contains(want)) {
+        return Err(Outcome::Failed(format!("{host} should answer \"{want}\", got: {}", got.chars().take(300).collect::<String>())));
+    }
+
+    let worker = state.apps.status(&crate::apps::process_key(name, "worker")).await;
+    if worker.state != "running" {
+        return Err(Outcome::Failed(format!("the worker (no port) is {}, not running", worker.state)));
+    }
+    // flaky exits at once: restarted a few times (2 s apart), then left stopped.
+    let key = crate::apps::process_key(name, "flaky");
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let mut gave_up = false;
+    while Instant::now() < deadline && !gave_up {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        gave_up = state.apps.logs(&layout, &key).await.iter().any(|l| l.contains("isn't restarted again"));
+    }
+    if !gave_up {
+        return Err(Outcome::Failed("the process that always exits wasn't given up on after a few restarts".into()));
+    }
+    let restarts = state.apps.logs(&layout, &key).await.iter().filter(|l| l.contains("restarting it")).count();
+    crate::processes_all(app.clone(), app.state::<AppState>(), name.into(), false).await?;
+    Ok(format!("3 domains answer through {}, worker running, flaky restarted {restarts} times then left stopped", web.label()))
 }
 
 /// Kills the service behind the supervisor's back and expects the restart Settings asks

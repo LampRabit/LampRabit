@@ -123,6 +123,64 @@ pub struct SiteSettings {
     /// FrankenPHP keeps the app in memory between requests (worker mode). The app has to
     /// support it (Laravel Octane, Symfony Runtime…); code changes need "Restart workers".
     pub worker: bool,
+    /// More domains for the project, each pointing at its files, a port or a process.
+    pub domains: Vec<ExtraDomain>,
+    /// Long-running commands next to the app: a queue worker, a scheduler, Vite.
+    pub processes: Vec<ProjectProcess>,
+}
+
+/// Another domain of a project (admin.shop.test), with the same choices as the main one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtraDomain {
+    pub host: String,
+    pub target: DomainTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DomainTarget {
+    /// Wherever the main domain goes right now (its files or its dev server).
+    Main,
+    /// A folder in the project ("" for the folder the main domain serves).
+    Files { root: String },
+    /// A local port, whoever listens on it.
+    Port { port: u16 },
+    /// One of the project's processes, at its port.
+    Process { name: String },
+}
+
+/// A long-running command of a project.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ProjectProcess {
+    /// Letters, digits and dashes; "queue", "vite".
+    pub name: String,
+    /// What runs, in the project folder; `{port}` is filled in.
+    pub command: String,
+    /// Where it listens, if it serves anything; also passed as $PORT.
+    pub port: Option<u16>,
+    pub env: BTreeMap<String, String>,
+    pub restart: RestartPolicy,
+    /// Starts and stops with the project's app (its Run button).
+    pub with_app: bool,
+}
+
+impl Default for ProjectProcess {
+    fn default() -> Self {
+        Self { name: String::new(), command: String::new(), port: None, env: BTreeMap::new(), restart: RestartPolicy::OnFailure, with_app: true }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RestartPolicy {
+    Never,
+    /// After a crash (a non-zero exit), a few times in a row at most.
+    #[default]
+    OnFailure,
+    /// Whenever it exits without being stopped (workers that exit to reload).
+    Always,
 }
 
 /// A Node project's process (apps.rs) and how its domain reaches it.

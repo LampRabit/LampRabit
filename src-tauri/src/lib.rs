@@ -1323,7 +1323,12 @@ async fn watch_ports(handle: AppHandle) {
             let files_only = site.language != sites::Language::Php && own.and_then(|s| s.app.as_ref()).is_some_and(|a| !a.serve);
             let status = statuses.iter().find(|s| s.name == site.name);
             let managed = status.filter(|s| matches!(s.state, "starting" | "running")).and_then(|s| s.port);
-            let detected = found.get(&site.name).map(Vec::as_slice).unwrap_or_default();
+            // The project's processes listen on their own ports (Vite, an API); those go to
+            // the domains pointing at them, not to the main domain, unless it's pinned there.
+            let pinned = own.and_then(|s| s.route_port);
+            let reserved: Vec<u16> = own.map(|s| s.processes.iter().filter_map(|p| p.port).filter(|p| Some(*p) != pinned).collect()).unwrap_or_default();
+            let detected: Vec<ports::Detected> = found.get(&site.name).map(|d| d.iter().filter(|d| !reserved.contains(&d.port)).cloned().collect()).unwrap_or_default();
+            let detected = detected.as_slice();
             if let (Some(s), Some(first)) = (status, detected.first()) {
                 if s.state == "starting" {
                     let port = managed.filter(|p| detected.iter().any(|d| d.port == *p)).unwrap_or(first.port);
@@ -1426,13 +1431,122 @@ async fn app_start(app: AppHandle, state: State<'_, AppState>, name: String) -> 
     if let Some(note) = note {
         state.apps.record(&app, &layout, &name, "error", note).await;
     }
+    // Its processes that run with it; one failing doesn't stop the app (its log says why).
+    let _ = state.apps.start_with_app(&app, &settings, &layout, &name).await;
     Ok(status)
 }
 
 #[tauri::command]
 async fn app_stop(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<()> {
     state.apps.stop(&app, &name).await;
+    let (settings, _) = state.snapshot().await;
+    state.apps.stop_processes(&app, &settings, &name, true).await;
     Ok(())
+}
+
+/// Saves a project's extra domains and serves them (new certificates and hosts entries
+/// come with the web server's restart).
+#[tauri::command]
+async fn set_site_domains(app: AppHandle, state: State<'_, AppState>, name: String, domains: Vec<config::ExtraDomain>) -> Result<()> {
+    let _op = state.ops.lock().await;
+    let (settings, layout) = state.snapshot().await;
+    project_dir(&layout, &name)?;
+    let domains: Vec<config::ExtraDomain> = domains
+        .into_iter()
+        .map(|d| config::ExtraDomain { host: d.host.trim().trim_end_matches('.').to_lowercase(), target: d.target })
+        .collect();
+    sites::check_domains(&settings, &layout, &name, &domains)?;
+    let count = domains.len();
+    state.update_settings(|s| s.sites.entry(name.clone()).or_default().domains = domains).await?;
+    logs::system(&app, logs::Level::Info, format!("{name} has {count} extra domain{}", if count == 1 { "" } else { "s" }));
+    restart_web_servers(&app, &state).await
+}
+
+/// Saves a project's processes. Removed ones are stopped; a changed one keeps running
+/// with its old command until it's restarted.
+#[tauri::command]
+async fn set_site_processes(app: AppHandle, state: State<'_, AppState>, name: String, processes: Vec<config::ProjectProcess>) -> Result<()> {
+    let _op = state.ops.lock().await;
+    let (settings, layout) = state.snapshot().await;
+    project_dir(&layout, &name)?;
+    let mut names = HashSet::new();
+    let app_port = settings.sites.get(&name).and_then(|s| s.app.as_ref()).map(|a| a.port);
+    let mut ports = HashSet::new();
+    for p in &processes {
+        if p.name.is_empty() || !p.name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') || p.name.starts_with('-') {
+            return Err(Error::msg(format!("\"{}\" can't be a process name: use lowercase letters, digits and dashes, like queue or vite.", p.name)));
+        }
+        if !names.insert(p.name.clone()) {
+            return Err(Error::msg(format!("Two processes are called {}.", p.name)));
+        }
+        if p.command.trim().is_empty() {
+            return Err(Error::msg(format!("Enter the command {} runs.", p.name)));
+        }
+        if let Some(port) = p.port {
+            if port < 1024 || Some(port) == app_port || !ports.insert(port) {
+                return Err(Error::msg(format!("{}: port {port} is taken (below 1024, the app's, or another process's). Pick another one.", p.name)));
+            }
+        }
+    }
+    // A domain can't point at a process that's going away, or that no longer has a port.
+    if let Some(own) = settings.sites.get(&name) {
+        for d in &own.domains {
+            if let config::DomainTarget::Process { name: target } = &d.target {
+                if !processes.iter().any(|p| &p.name == target && p.port.is_some()) {
+                    return Err(Error::msg(format!("{} points to the process {target}. Point it somewhere else first.", d.host)));
+                }
+            }
+        }
+    }
+    let removed: Vec<String> = settings.sites.get(&name).map(|s| s.processes.iter().filter(|old| !names.contains(&old.name)).map(|old| old.name.clone()).collect()).unwrap_or_default();
+    for process in &removed {
+        state.apps.stop(&app, &apps::process_key(&name, process)).await;
+    }
+    let ports_changed = settings.sites.get(&name).is_some_and(|s| s.processes.iter().map(|p| (&p.name, p.port)).ne(processes.iter().map(|p| (&p.name, p.port))));
+    state.update_settings(|s| s.sites.entry(name.clone()).or_default().processes = processes).await?;
+    // Domains that point at a process follow its port.
+    if ports_changed && settings.sites.get(&name).is_some_and(|s| s.domains.iter().any(|d| matches!(d.target, config::DomainTarget::Process { .. }))) {
+        restart_web_servers(&app, &state).await?;
+    }
+    ports::poke();
+    Ok(())
+}
+
+#[tauri::command]
+async fn process_start(app: AppHandle, state: State<'_, AppState>, name: String, process: String) -> Result<apps::AppStatus> {
+    let (settings, layout) = state.snapshot().await;
+    state.apps.start_process(&app, &settings, &layout, &name, &process).await
+}
+
+#[tauri::command]
+async fn process_stop(app: AppHandle, state: State<'_, AppState>, name: String, process: String) -> Result<()> {
+    state.apps.stop(&app, &apps::process_key(&name, &process)).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn process_restart(app: AppHandle, state: State<'_, AppState>, name: String, process: String) -> Result<apps::AppStatus> {
+    state.apps.stop(&app, &apps::process_key(&name, &process)).await;
+    let (settings, layout) = state.snapshot().await;
+    state.apps.start_process(&app, &settings, &layout, &name, &process).await
+}
+
+/// Starts (or stops) all of a project's processes, whether or not they run with the app.
+#[tauri::command]
+async fn processes_all(app: AppHandle, state: State<'_, AppState>, name: String, start: bool) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    if !start {
+        state.apps.stop_processes(&app, &settings, &name, false).await;
+        return Ok(());
+    }
+    let all: Vec<String> = settings.sites.get(&name).map(|s| s.processes.iter().map(|p| p.name.clone()).collect()).unwrap_or_default();
+    let mut errors = Vec::new();
+    for process in all {
+        if let Err(e) = state.apps.start_process(&app, &settings, &layout, &name, &process).await {
+            errors.push(format!("{process}: {e}"));
+        }
+    }
+    if errors.is_empty() { Ok(()) } else { Err(Error::msg(errors.join("\n"))) }
 }
 
 #[tauri::command]
@@ -2319,6 +2433,23 @@ fn spawn_crash_restarts(app: &AppHandle) {
     });
 }
 
+/// Project processes that exited and should run again (apps.rs decides; this has the
+/// settings to start them with).
+fn spawn_process_restarts(app: &AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Some(mut requests) = apps::restart_requests() else { return };
+        while let Some((project, process)) = requests.recv().await {
+            let state = handle.state::<AppState>();
+            let (settings, layout) = state.snapshot().await;
+            if let Err(e) = state.apps.start_process(&handle, &settings, &layout, &project, &process).await {
+                let key = apps::process_key(&project, &process);
+                state.apps.record(&handle, &layout, &key, "error", format!("Couldn't restart {process}: {e}")).await;
+            }
+        }
+    });
+}
+
 /// `--smoke-test`: the services through the real supervisor, without a window or the
 /// user's settings (smoke.rs). Exits with the test's result.
 fn run_smoke_test(mut context: tauri::Context<tauri::Wry>, options: smoke::Options) {
@@ -2337,6 +2468,7 @@ fn run_smoke_test(mut context: tauri::Context<tauri::Wry>, options: smoke::Optio
             app.manage(logs::LogHub::default());
             logs::set_system_file(app.handle(), Layout::new(&root).logs().join("lampRabit.log"));
             spawn_crash_restarts(app.handle());
+            spawn_process_restarts(app.handle());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let code = smoke::run(handle, options).await;
@@ -2464,6 +2596,7 @@ pub fn run() {
             });
 
             spawn_crash_restarts(app.handle());
+            spawn_process_restarts(app.handle());
 
             tauri::async_runtime::spawn(watch_ports(app.handle().clone()));
 
@@ -2497,6 +2630,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             runtime_info,
             set_site_worker,
+            set_site_domains,
+            set_site_processes,
+            process_start,
+            process_stop,
+            process_restart,
+            processes_all,
             restart_frankenphp_workers,
             runtime_requirements,
             get_settings,

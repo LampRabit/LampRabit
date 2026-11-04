@@ -26,6 +26,8 @@ import {
 import clsx from "clsx";
 import { api, runtimeLabels, serviceLabels, type AppStatus, type Language, type ProjectFacts, type Server, type Settings, type Site, type SitesInfo } from "../lib/api";
 import { useAppStore } from "../lib/store";
+import ProjectDomains from "../components/ProjectDomains";
+import ProjectProcesses from "../components/ProjectProcesses";
 import { toolUrl } from "../lib/tools";
 import { formatAgo, useNow } from "../lib/time";
 import { Button, Card, PageHeader, Switch, inputClass } from "../components/ui";
@@ -60,7 +62,7 @@ const frameworkStyle: Record<string, string> = {
 const languageLabel: Record<Language, string> = { php: "PHP", node: "Node.js", java: "Java", python: "Python", go: "Go", rust: "Rust", static: "Static" };
 
 type Sort = "recent" | "name";
-type Tab = "overview" | "commands" | "settings";
+type Tab = "overview" | "commands" | "domains" | "processes" | "settings";
 
 export default function Sites() {
   const queryClient = useQueryClient();
@@ -361,6 +363,8 @@ function ProjectDetail({ site, info, status, tab, setTab }: { site: Site; info?:
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "commands", label: "Commands" },
+    { id: "domains", label: "Domains" },
+    { id: "processes", label: "Processes" },
     { id: "settings", label: "Settings" },
   ];
 
@@ -461,6 +465,8 @@ function ProjectDetail({ site, info, status, tab, setTab }: { site: Site; info?:
           <OutputPanel name={site.name} />
         </div>
       )}
+      {tab === "domains" && <ProjectDomains site={site} settings={settings.data} />}
+      {tab === "processes" && <ProjectProcesses site={site} settings={settings.data} />}
       {tab === "settings" && <SettingsTab site={site} settings={settings.data} status={status} />}
     </div>
   );

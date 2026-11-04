@@ -152,7 +152,7 @@ FlyEnv (BSD-3) supports nearly all of these, but it downloads from its own mirro
 - Commands per project, from YAML (`commands:`) and discovery (package.json, composer.json, artisan, bin/console, bin/magento, please, drush, cake, spark), with output in the project and in Logs.
 - Sites redesign: project list with live status, Overview (`project_facts`: versions, requirements, dependencies, .env, git), Commands, Settings.
 
-**Left:** extra domains per project, several processes per project (queue, scheduler, Vite) with a restart policy.
+**Done (2026-11-04):** extra domains per project, each pointing like the main one can: at the project's files or a folder in it, a port, one of its processes, or wherever the main domain goes (`SiteSettings.domains`; `sites::served` turns them into sites of their own, before the projects so Apache doesn't send them to `*.<project>`). Several processes per project (`SiteSettings.processes`: command, optional port as `{port}`/$PORT, environment, restart after a crash / always / never with at most 3 restarts in 5 minutes, start with the app), run by apps.rs as `<project>/<name>` with their own output. Their ports don't take over the main domain. Sites → Domains and Processes tabs, with Laravel/Symfony/Vite presets. The smoke test checks a project with both through every web server.
 
 The groundwork for most later phases. A project stays a folder in `www/`; `SiteSettings` gains optional fields, so existing settings need no migration:
 

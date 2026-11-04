@@ -266,6 +266,34 @@ export interface PortStatus {
   owner: PortOwner | null;
 }
 
+/** Where an extra domain of a project goes: the same choices as its main domain. */
+export type DomainTarget =
+  | { kind: "main" }
+  /** A folder in the project; "" for the one the main domain serves. */
+  | { kind: "files"; root: string }
+  | { kind: "port"; port: number }
+  | { kind: "process"; name: string };
+
+export interface ExtraDomain {
+  host: string;
+  target: DomainTarget;
+}
+
+export type RestartPolicy = "never" | "on-failure" | "always";
+
+/** A long-running command of a project (queue worker, scheduler, Vite). */
+export interface ProjectProcess {
+  name: string;
+  /** Runs in the project folder; {port} is filled in. */
+  command: string;
+  /** Where it listens, if it serves anything; also $PORT. */
+  port: number | null;
+  env: Record<string, string>;
+  restart: RestartPolicy;
+  /** Starts and stops with the project's app. */
+  withApp: boolean;
+}
+
 export interface Site {
   name: string;
   domain: string;
@@ -640,7 +668,7 @@ export interface Settings {
   startServicesOnLaunch: boolean;
   editor: string;
   /** `worker`: FrankenPHP worker mode (the app stays in memory between requests). */
-  sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null; worker?: boolean }>;
+  sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null; worker?: boolean; domains?: ExtraDomain[]; processes?: ProjectProcess[] }>;
   profiles: StackProfile[];
   /** What `mysql`, new projects and the database tools use first. */
   defaultDatabase: Database;
@@ -715,6 +743,13 @@ export const api = {
   appStatuses: () => invoke<AppStatus[]>("app_statuses"),
   appLogs: (name: string) => invoke<string[]>("app_logs", { name }),
   appFreePort: () => invoke<number>("app_free_port"),
+  setSiteDomains: (name: string, domains: ExtraDomain[]) => invoke<void>("set_site_domains", { name, domains }),
+  setSiteProcesses: (name: string, processes: ProjectProcess[]) => invoke<void>("set_site_processes", { name, processes }),
+  /** Statuses and output use the key "project/process" (`processKey`). */
+  processStart: (name: string, process: string) => invoke<AppStatus>("process_start", { name, process }),
+  processStop: (name: string, process: string) => invoke<void>("process_stop", { name, process }),
+  processRestart: (name: string, process: string) => invoke<AppStatus>("process_restart", { name, process }),
+  processesAll: (name: string, start: boolean) => invoke<void>("processes_all", { name, start }),
   projectCommands: (name: string) => invoke<ProjectCommands>("project_commands", { name }),
   projectFacts: (name: string) => invoke<ProjectFacts>("project_facts", { name }),
   setSiteRoute: (name: string, port: number | null) => invoke<void>("set_site_route", { name, port }),

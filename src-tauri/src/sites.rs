@@ -10,7 +10,7 @@ use std::{
 use serde::Serialize;
 
 use crate::{
-    config::{ServeMode, Server, Settings},
+    config::{DomainTarget, ExtraDomain, ServeMode, Server, Settings},
     error::{Error, Result},
     layout::Layout,
     php::{self, PoolPlan},
@@ -422,13 +422,118 @@ pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {
     tools
 }
 
-/// Everything the web servers serve: folders in www/ plus installed tools. A folder wins
-/// if it happens to use a tool's domain.
+/// Everything the web servers serve: projects' extra domains, folders in www/, then
+/// installed tools. A folder wins if it happens to use a tool's domain. Extra domains come
+/// first: Apache takes the first virtual host that matches, and admin.shop.test must not
+/// land in shop.test's `*.shop.test`.
 pub fn served(settings: &Settings, layout: &Layout) -> Vec<Site> {
-    let mut all = scan(settings, layout);
-    let taken: BTreeSet<String> = all.iter().map(|s| s.domain.clone()).collect();
+    let projects = scan(settings, layout);
+    let mut all = extra_sites(settings, &projects);
+    let mut taken: BTreeSet<String> = all.iter().map(|s| s.domain.clone()).collect();
+    for site in projects {
+        if taken.insert(site.domain.clone()) {
+            all.push(site);
+        }
+    }
     all.extend(tools(settings, layout).into_iter().filter(|t| !taken.contains(&t.domain)));
     all
+}
+
+/// A project's extra domains as sites of their own: a copy of the project with the domain
+/// and where it points changed, so every web server, certificate and hosts entry handles
+/// them like any other site.
+fn extra_sites(settings: &Settings, projects: &[Site]) -> Vec<Site> {
+    let mut out = Vec::new();
+    for parent in projects {
+        let Some(own) = settings.sites.get(&parent.name) else { continue };
+        for extra in &own.domains {
+            let mut site = parent.clone();
+            site.name = format!("{} › {}", parent.name, extra.host);
+            site.domain = extra.host.clone();
+            site.url = site_url(settings, site.server, &extra.host, site.ssl);
+            // A proxied domain goes to a port: the project's (if it found one listening
+            // there, it knows the address), else 127.0.0.1.
+            let to_port = |site: &mut Site, port: u16| {
+                let host = parent.ports.iter().find(|d| d.port == port).map_or_else(|| "127.0.0.1".to_string(), |d| d.host.clone());
+                site.proxy = Some(format!("http://{host}:{port}/"));
+                site.route = Some(crate::ports::Route { port, host });
+            };
+            match &extra.target {
+                DomainTarget::Main => {}
+                DomainTarget::Files { root } => {
+                    site.proxy = None;
+                    site.route = None;
+                    site.docroot = if root.is_empty() { docroot(&parent.path) } else { parent.path.join(root) };
+                }
+                DomainTarget::Port { port } => to_port(&mut site, *port),
+                DomainTarget::Process { name } => match own.processes.iter().find(|p| &p.name == name).and_then(|p| p.port) {
+                    Some(port) => to_port(&mut site, port),
+                    // Removed, or nothing to proxy to: the files rather than a dead address.
+                    None => {
+                        site.proxy = None;
+                        site.route = None;
+                    }
+                },
+            }
+            out.push(site);
+        }
+    }
+    out
+}
+
+/// Checks a project's extra domains before they're saved: real host names under the
+/// site suffix, used nowhere else, and targets that exist.
+pub fn check_domains(settings: &Settings, layout: &Layout, name: &str, domains: &[ExtraDomain]) -> Result<()> {
+    let suffix = format!(".{}", settings.tld);
+    let project = layout.www().join(name);
+    let own = settings.sites.get(name);
+    // Every domain served now, except this project's own extras (they're being replaced).
+    let others: Vec<(String, String)> = served(settings, layout)
+        .into_iter()
+        .filter(|s| !s.name.starts_with(&format!("{name} › ")))
+        .map(|s| (s.domain, s.name))
+        .collect();
+    let mut seen = BTreeSet::new();
+    for d in domains {
+        let host = &d.host;
+        let labels_ok = host.split('.').all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
+        if !labels_ok || !host.ends_with(&suffix) || host.len() <= suffix.len() {
+            return Err(Error::msg(format!("\"{host}\" isn't a domain LampRabit can serve: use lowercase letters, digits and dashes, ending in {suffix} (like admin.{name}{suffix}).")));
+        }
+        if !seen.insert(host.clone()) {
+            return Err(Error::msg(format!("{host} is listed twice.")));
+        }
+        if let Some((_, by)) = others.iter().find(|(domain, _)| domain == host) {
+            let by = by.split(" › ").next().unwrap_or(by);
+            return Err(Error::msg(format!("{host} is already used by {by}.")));
+        }
+        match &d.target {
+            DomainTarget::Main | DomainTarget::Port { .. } => {}
+            DomainTarget::Files { root } => {
+                let plain = std::path::Path::new(root).components().all(|c| matches!(c, std::path::Component::Normal(_)));
+                if !plain || !project.join(root).is_dir() {
+                    return Err(Error::msg(format!("{host}: \"{root}\" isn't a folder in {name}. Pick a folder inside the project, like admin/public.")));
+                }
+            }
+            DomainTarget::Process { name: process } => {
+                let found = own.and_then(|s| s.processes.iter().find(|p| &p.name == process));
+                match found {
+                    None => return Err(Error::msg(format!("{host} points to the process \"{process}\", which {name} doesn't have."))),
+                    Some(p) if p.port.is_none() => {
+                        return Err(Error::msg(format!("{host} points to \"{process}\", which has no port. Give the process the port it listens on first.")));
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        if let DomainTarget::Port { port } = d.target {
+            let (http, https) = settings.server_ports(settings.primary_server());
+            if port == 0 || port == http || port == https {
+                return Err(Error::msg(format!("{host}: port {port} is the web server's own. Use the port the app listens on.")));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
@@ -902,10 +1007,16 @@ fn render_caddy(settings: &Settings, layout: &Layout, all: &[Site], plan: &[Pool
     // Workers of a pool each take one request at a time (php-cgi on Windows), so requests
     // go to the least busy one and wait briefly for a free one rather than failing.
     let php = |pool: Option<&PoolPlan>, indent: &str| match pool {
-        _ if franken => format!("{indent}php_server\n"),
+        // A folder's index.html before PHP's front controller: by default both send every
+        // request that isn't a file to index.php, so an HTML-only site (or a folder of one)
+        // answered "No input file specified".
+        _ if franken => format!("{indent}php_server {{\n{indent}\ttry_files {{path}} {{path}}/index.html {{path}}/index.php index.php\n{indent}}}\n"),
         Some(p) => {
             let to: Vec<String> = p.ports().map(|port| format!("127.0.0.1:{port}")).collect();
-            format!("{indent}php_fastcgi {} {{\n{indent}\tlb_policy least_conn\n{indent}\tlb_try_duration 5s\n{indent}}}\n", to.join(" "))
+            format!(
+                "{indent}php_fastcgi {} {{\n{indent}\ttry_files {{path}} {{path}}/index.html {{path}}/index.php index.php\n{indent}\tlb_policy least_conn\n{indent}\tlb_try_duration 5s\n{indent}}}\n",
+                to.join(" ")
+            )
         }
         None => String::new(),
     };
@@ -1422,6 +1533,40 @@ mod tests {
         assert!(out.contains("php_server") && !out.contains("php_fastcgi"), "no LampRabit PHP workers");
         assert!(out.contains("admin 127.0.0.1:2020") && out.contains("http_port 8083"));
         assert!(out.contains("/lr/tmp/frankenphp") && out.contains("frankenphp-error.log"));
+    }
+
+    #[test]
+    fn extra_domains_point_where_they_are_told_and_come_first() {
+        let mut settings = Settings::default();
+        let mut shop = site("shop.test");
+        shop.name = "shop".into();
+        shop.path = PathBuf::from("/www/shop");
+        shop.docroot = PathBuf::from("/www/shop/public");
+        shop.language = Language::Php;
+        let own = settings.sites.entry("shop".into()).or_default();
+        own.processes.push(crate::config::ProjectProcess { name: "api".into(), command: "node api.js".into(), port: Some(4100), ..Default::default() });
+        own.processes.push(crate::config::ProjectProcess { name: "queue".into(), command: "php artisan queue:work".into(), ..Default::default() });
+        own.domains = vec![
+            ExtraDomain { host: "admin.shop.test".into(), target: DomainTarget::Files { root: "admin/public".into() } },
+            ExtraDomain { host: "api.shop.test".into(), target: DomainTarget::Process { name: "api".into() } },
+            ExtraDomain { host: "vite.shop.test".into(), target: DomainTarget::Port { port: 5173 } },
+            ExtraDomain { host: "www.shop.test".into(), target: DomainTarget::Main },
+            ExtraDomain { host: "jobs.shop.test".into(), target: DomainTarget::Process { name: "queue".into() } },
+        ];
+        let extras = extra_sites(&settings, std::slice::from_ref(&shop));
+        let by = |host: &str| extras.iter().find(|s| s.domain == host).unwrap();
+        assert_eq!(by("admin.shop.test").docroot, PathBuf::from("/www/shop/admin/public"));
+        assert!(by("admin.shop.test").proxy.is_none());
+        assert_eq!(by("api.shop.test").proxy.as_deref(), Some("http://127.0.0.1:4100/"));
+        assert_eq!(by("vite.shop.test").proxy.as_deref(), Some("http://127.0.0.1:5173/"));
+        assert_eq!(by("www.shop.test").docroot, shop.docroot, "same as the main domain");
+        assert!(by("jobs.shop.test").proxy.is_none(), "a process without a port has nothing to proxy to");
+
+        // Apache takes the first match: the extra domain before the project's *.shop.test.
+        let mut all = extras.clone();
+        all.push(shop);
+        let out = render(&settings, &Layout::new(PathBuf::from("/lr")), &all, &[], Server::Apache);
+        assert!(out.find("admin.shop.test").unwrap() < out.find("*.shop.test").unwrap());
     }
 
     #[test]
