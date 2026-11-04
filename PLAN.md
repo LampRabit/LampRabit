@@ -86,7 +86,7 @@ macOS was in preview because only Redis, Mailpit, ngrok, cloudflared and Compose
 - Gatekeeper: downloaded runtimes carry `com.apple.quarantine`; remove it after the checksum check.
 - A macOS CI job that installs and starts each runtime (smoke test), like the existing checks.
 ### 10.3 Stability on all OSes
-- A cross-platform smoke test: install runtime → start → health probe → stop, for every service, on Windows, Linux and macOS in CI.
+- ✅ A cross-platform smoke test (2026-11-04): `lamprabit --smoke-test <folder> <runtime>…` (smoke.rs) installs each runtime with the versions its needs call for into a throwaway folder (own settings, every port +20000), then start → healthy → second start ignored → stop → port free for every service, and one killed service has to come back through "Restart after a crash" and stay stopped after Stop. `.github/workflows/smoke.yml` runs it on Windows, Linux (Xvfb) and macOS for pull requests that touch the backend, weekly with the heavy services, and by hand; platform gaps are reported as skipped with their reason.
 - A compatibility matrix (runtime × OS × arch, with the reason when one isn't available) in the docs, generated from the catalogs where possible.
 ### 10.4 Uninstall ✅ (2026-10-30)
 - `uninstall.rs` removes the folders LampRabit creates under the root (`bin`, `etc`, `logs`, `tmp`, `ssl`, `shims`, nothing else), the root itself only if empty, the settings and (Windows uninstaller) WebView data, the hosts block, the trusted CA (system store and, on Linux, the browsers' NSS databases), the PATH entry, the ngrok token and the Linux sysctl file. Keeps `www/` and `data/`.

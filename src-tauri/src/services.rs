@@ -241,6 +241,16 @@ impl ServiceKind {
         }
     }
 
+    /// The port the service listens on (its main one), for checks outside the supervisor.
+    pub fn port_of(self, settings: &Settings) -> u16 {
+        self.port(settings)
+    }
+
+    /// Whether the service answers right now (the smoke test's health check).
+    pub async fn probe_now(self, settings: &Settings, client: &reqwest::Client) -> bool {
+        matches!(self.probe(settings, client).await, Probe::Ok)
+    }
+
     /// Asks the service whether it answers, the way `def().check` says.
     async fn probe(self, settings: &Settings, client: &reqwest::Client) -> Probe {
         // Mailpit's main port is SMTP; its health endpoint is on the web UI's.

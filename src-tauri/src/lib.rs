@@ -22,6 +22,7 @@ mod runtimes;
 mod services;
 mod shims;
 mod sites;
+mod smoke;
 mod ssl;
 mod templates;
 mod tunnels;
@@ -59,6 +60,21 @@ struct AppState {
 }
 
 impl AppState {
+    fn new(settings: Settings, settings_path: PathBuf) -> Self {
+        AppState {
+            settings: RwLock::new(settings),
+            settings_path,
+            supervisor: Supervisor::default(),
+            http: runtimes::client(),
+            installing: Mutex::new(HashSet::new()),
+            ca_trusted: Mutex::new(None),
+            tunnels: tunnels::Tunnels::default(),
+            ops: Mutex::new(()),
+            processes: std::sync::Mutex::new(sysinfo::System::new()),
+            apps: apps::Apps::default(),
+        }
+    }
+
     async fn snapshot(&self) -> (Settings, Layout) {
         let settings = self.settings.read().await.clone();
         let layout = Layout::new(&settings.root_dir);
@@ -2285,12 +2301,74 @@ async fn set_active_version(
     Ok(())
 }
 
+/// Crashed services come back after a short pause when Settings says so; the pause lets
+/// ports and lock files go first.
+fn spawn_crash_restarts(app: &AppHandle) {
+    let handle = app.clone();
+    let crashes = app.state::<AppState>().supervisor.crashes();
+    tauri::async_runtime::spawn(async move {
+        let Some(mut crashes) = crashes else { return };
+        while let Some(kind) = crashes.recv().await {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            let state = handle.state::<AppState>();
+            let _op = state.ops.lock().await;
+            let (settings, layout) = state.snapshot().await;
+            // start() already logged and recorded why it failed.
+            let _ = state.supervisor.restart_crashed(&handle, kind, &settings, &layout).await;
+        }
+    });
+}
+
+/// `--smoke-test`: the services through the real supervisor, without a window or the
+/// user's settings (smoke.rs). Exits with the test's result.
+fn run_smoke_test(mut context: tauri::Context<tauri::Wry>, options: smoke::Options) {
+    context.config_mut().app.windows.clear();
+    let settings = smoke::settings(&options);
+    if let Err(e) = Layout::new(&settings.root_dir).ensure() {
+        eprintln!("smoke test: can't use {}: {e}", settings.root_dir.display());
+        std::process::exit(2);
+    }
+    let settings_path = settings.root_dir.join("settings.toml");
+    let _ = settings.save(&settings_path);
+    let app = tauri::Builder::default()
+        .setup(move |app| {
+            let root = settings.root_dir.clone();
+            app.manage(AppState::new(settings, settings_path));
+            app.manage(logs::LogHub::default());
+            logs::set_system_file(app.handle(), Layout::new(&root).logs().join("lampRabit.log"));
+            spawn_crash_restarts(app.handle());
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let code = smoke::run(handle, options).await;
+                // The services are stopped by now. AppHandle::exit loses the code on Linux
+                // (GTK's loop ends with 0), and CI needs it.
+                std::process::exit(code);
+            });
+            Ok(())
+        })
+        .build(context)
+        .expect("error while building LampRabit");
+    app.run(|_, _| {});
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // The Windows uninstaller's cleanup: no window, and before the single-instance plugin,
     // which would otherwise hand the call to a running copy.
     if std::env::args().any(|a| a == "--uninstall-cleanup") {
         uninstall::cli();
+        return;
+    }
+    let context = tauri::generate_context!();
+    // Also before the single-instance plugin: a LampRabit already open must not take it.
+    if let Some(options) = smoke::options() {
+        match options {
+            Ok(options) => run_smoke_test(context, options),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
+        }
         return;
     }
     tauri::Builder::default()
@@ -2345,18 +2423,7 @@ pub fn run() {
             if tidy_extension_choices(&mut settings) {
                 let _ = settings.save(&settings_path);
             }
-            app.manage(AppState {
-                settings: RwLock::new(settings),
-                settings_path,
-                supervisor: Supervisor::default(),
-                http: runtimes::client(),
-                installing: Mutex::new(HashSet::new()),
-                ca_trusted: Mutex::new(None),
-                tunnels: tunnels::Tunnels::default(),
-                ops: Mutex::new(()),
-                processes: std::sync::Mutex::new(sysinfo::System::new()),
-                apps: apps::Apps::default(),
-            });
+            app.manage(AppState::new(settings, settings_path));
             app.manage(logs::LogHub::default());
             {
                 let root = app.state::<AppState>().settings.try_read().map(|s| s.root_dir.clone()).unwrap_or_default();
@@ -2396,21 +2463,7 @@ pub fn run() {
                 }
             });
 
-            // Crashed services come back after a short pause when Settings says so; the
-            // pause lets ports and lock files go first.
-            let handle = app.handle().clone();
-            let crashes = app.state::<AppState>().supervisor.crashes();
-            tauri::async_runtime::spawn(async move {
-                let Some(mut crashes) = crashes else { return };
-                while let Some(kind) = crashes.recv().await {
-                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                    let state = handle.state::<AppState>();
-                    let _op = state.ops.lock().await;
-                    let (settings, layout) = state.snapshot().await;
-                    // start() already logged and recorded why it failed.
-                    let _ = state.supervisor.restart_crashed(&handle, kind, &settings, &layout).await;
-                }
-            });
+            spawn_crash_restarts(app.handle());
 
             tauri::async_runtime::spawn(watch_ports(app.handle().clone()));
 
@@ -2531,7 +2584,7 @@ pub fn run() {
             remove_runtime,
             set_active_version,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building LampRabit")
         .run(|app, event| {
             if let RunEvent::Exit = event {
