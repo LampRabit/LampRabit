@@ -52,7 +52,7 @@ fn groups() -> Vec<Group> {
     vec![
         g("web", "Web and app servers", "Apache, Nginx, Caddy or FrankenPHP serve your sites; Tomcat runs Java web apps behind them. Several can run side by side.", &["apache", "nginx", "caddy", "frankenphp", "tomcat"]),
         g("languages", "Languages", "Several versions side by side; projects pick theirs.", &["php", "java", "python", "go", "rust", "node"]),
-        g("packages", "Package managers", "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH.", &["composer"]),
+        g("packages", "Package managers", "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH.", &["composer", "maven", "gradle"]),
         g("databases", "Databases", "They can all run side by side, each on its own port.", &["mariadb", "mysql", "postgres", "mongodb", "clickhouse", "neo4j", "sqlite"]),
         g("search", "Search", "Full-text search engines for your apps.", &["meilisearch", "typesense", "elasticsearch", "opensearch"]),
         g("storage", "Storage", "S3-compatible object storage. Their storage folder can be anywhere, even outside the LampRabit folder.", &["rustfs", "minio"]),
@@ -162,6 +162,8 @@ fn info(runtime: Runtime) -> RuntimeInfo {
             None,
         ),
         Runtime::Composer => ("Composer", "PHP packages", "PHP's package manager; run composer from the LampRabit terminal", None),
+        Runtime::Maven => ("Maven", "Java builds", "Apache Maven from Apache's mirror (SHA-512 checked); mvn works in LampRabit's terminal on the active Java", None),
+        Runtime::Gradle => ("Gradle", "Java builds", "Gradle's official distribution from services.gradle.org (SHA-256 checked); gradle works in LampRabit's terminal on the active Java", None),
         Runtime::Phpredisadmin => ("phpRedisAdmin", "Redis admin", "Browse and edit Redis keys in the browser, like phpMyAdmin", None),
         Runtime::Memcached => (
             "Memcached",
@@ -223,6 +225,12 @@ pub fn needs(runtime: Runtime, version: Option<&str>) -> Vec<Need> {
             vec![need("java", Some(java), None, "Tomcat runs on the active Java")]
         }
         Runtime::Neo4j => vec![need("java", Some("21"), None, "Neo4j runs on the active Java")],
+        // Maven 4 needs Java 17; Maven 3 runs on 8 and anything newer.
+        Runtime::Maven => vec![need("java", Some(if major.is_none_or(|m| m >= 4) { "17" } else { "8" }), None, "Maven runs on the active Java")],
+        Runtime::Gradle => {
+            let (min, max) = version.map_or(("17", Some("25")), gradle_java);
+            vec![need("java", Some(min), max, "Gradle runs on the active Java, and each version only up to a newest Java")]
+        }
         Runtime::N8n => vec![need("node", Some("24"), None, "n8n runs on NVM's default Node.js")],
         Runtime::Pgadmin => vec![
             Need { prefer: Some("3.13"), ..need("python", Some("3.10"), Some("3.14"), "pgAdmin runs in a Python environment") },
@@ -256,6 +264,31 @@ fn rabbitmq_erlang(version: &str) -> (&'static str, &'static str) {
         ("26.2", "27")
     } else {
         ("26.2", "26.2")
+    }
+}
+
+/// The Java versions each Gradle release can run on, from Gradle's compatibility matrix
+/// (docs.gradle.org/current/userguide/compatibility.html, checked 2026-11-04). Releases newer
+/// than it knows get the newest row without an upper bound.
+fn gradle_java(version: &str) -> (&'static str, Option<&'static str>) {
+    let v = parts(version);
+    let at_least = |m: &[u64]| cmp(&v, m) != std::cmp::Ordering::Less;
+    if at_least(&[10]) {
+        ("17", None)
+    } else if at_least(&[9, 1]) {
+        ("17", Some("25"))
+    } else if at_least(&[9]) {
+        ("17", Some("24"))
+    } else if at_least(&[8, 14]) {
+        ("8", Some("24"))
+    } else if at_least(&[8, 10]) {
+        ("8", Some("23"))
+    } else if at_least(&[8, 8]) {
+        ("8", Some("22"))
+    } else if at_least(&[8, 5]) {
+        ("8", Some("21"))
+    } else {
+        ("8", Some("20"))
     }
 }
 
@@ -432,6 +465,17 @@ mod tests {
         assert_eq!(rabbitmq_erlang("4.4.0"), ("27.0", "29"));
         let otp = need("erlang", Some("26.2"), Some("27"), "");
         assert!(otp.fits("27.3.4") && otp.fits("26.2.5") && !otp.fits("28.1") && !otp.fits("26.1"));
+    }
+
+    #[test]
+    fn build_tools_need_a_java_they_run_on() {
+        let java = |r, v| needs(r, Some(v)).remove(0);
+        assert_eq!(java(Runtime::Maven, "3.9.11").min.as_deref(), Some("8"));
+        assert_eq!(java(Runtime::Maven, "4.0.1").min.as_deref(), Some("17"));
+        let gradle9 = java(Runtime::Gradle, "9.2.1");
+        assert!(gradle9.fits("21.0.9") && gradle9.fits("25.0.1") && !gradle9.fits("11.0.29"));
+        let gradle8 = java(Runtime::Gradle, "8.14.3");
+        assert!(gradle8.fits("8.0.472") && gradle8.fits("21.0.9") && !gradle8.fits("25.0.1"), "Gradle 8 can't run on Java 25");
     }
 
     #[test]

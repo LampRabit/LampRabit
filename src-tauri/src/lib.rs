@@ -101,7 +101,7 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         Runtime::N8n => &[ServiceKind::N8n],
         Runtime::Rabbitmq | Runtime::Erlang => &[ServiceKind::Rabbitmq],
         // Languages run from the terminal and projects' own processes.
-        Runtime::Go | Runtime::Rust => &[],
+        Runtime::Go | Runtime::Rust | Runtime::Maven | Runtime::Gradle => &[],
         // Projects run Python themselves; pgAdmin keeps the Python it was installed with.
         Runtime::Python => &[],
         Runtime::Phppgadmin => &ServiceKind::WEB,

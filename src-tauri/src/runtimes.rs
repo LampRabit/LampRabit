@@ -98,12 +98,16 @@ pub enum Runtime {
     Erlang,
     /// Go, from go.dev.
     Go,
+    /// Apache Maven, Java's build tool, on the active Java.
+    Maven,
+    /// Gradle, Java's other build tool, on the active Java.
+    Gradle,
     /// Rust through rustup, with its homes inside LampRabit's folder.
     Rust,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 41] = [
+    pub const ALL: [Runtime; 43] = [
         Runtime::Apache,
         Runtime::Nginx,
         Runtime::Php,
@@ -145,6 +149,8 @@ impl Runtime {
         Runtime::Erlang,
         Runtime::Go,
         Runtime::Rust,
+        Runtime::Maven,
+        Runtime::Gradle,
     ];
 
     pub fn from_id(id: &str) -> Option<Self> {
@@ -194,6 +200,8 @@ impl Runtime {
             Self::Erlang => "erlang",
             Self::Go => "go",
             Self::Rust => "rust",
+            Self::Maven => "maven",
+            Self::Gradle => "gradle",
         }
     }
 
@@ -250,6 +258,8 @@ impl Runtime {
             Self::Go => Path::new("bin").join(exe("go")),
             // Written last by `setup_rust`, so a half-finished install doesn't count.
             Self::Rust => PathBuf::from("installed.txt"),
+            Self::Maven => Path::new("bin").join("mvn"),
+            Self::Gradle => Path::new("bin").join("gradle"),
         }
     }
 }
@@ -397,6 +407,8 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         Runtime::Erlang => erlang_releases(client).await?,
         Runtime::Go => go_releases(client).await?,
         Runtime::Rust => rust_releases(client).await?,
+        Runtime::Maven => maven_releases(client).await?,
+        Runtime::Gradle => gradle_releases(client).await?,
     };
     releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
     Ok(releases)
@@ -1461,6 +1473,67 @@ async fn erlang_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     Ok(releases)
 }
 
+/// The newest Maven 4 and Maven 3 from Apache's mirror, SHA-512 checked like Tomcat. The
+/// tarball keeps the Unix scripts executable; Windows gets the zip.
+async fn maven_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    const MIRROR: &str = "https://dlcdn.apache.org/maven";
+    let (ext, archive) = if cfg!(windows) { ("zip", Archive::Zip) } else { ("tar.gz", Archive::TarGz) };
+    let lookups = [(4, "Java 17+"), (3, "Java 8+")].map(|(line, label)| async move {
+        let listing = client.get(format!("{MIRROR}/maven-{line}/")).send().await.ok()?.error_for_status().ok()?.text().await.ok()?;
+        // Only final releases: 4.0.0-rc-4 and the like are skipped.
+        let version = listing
+            .split("href=\"")
+            .skip(1)
+            .filter_map(|s| s.split('/').next())
+            .filter(|v| v.starts_with(&format!("{line}.")) && v.split('.').all(|p| p.parse::<u32>().is_ok()))
+            .max_by_key(|v| version_key(v))?
+            .to_string();
+        let url = format!("{MIRROR}/maven-{line}/{version}/binaries/apache-maven-{version}-bin.{ext}");
+        let sha512 = client.get(format!("{url}.sha512")).send().await.ok()?.error_for_status().ok()?.text().await.ok()?;
+        let sha512 = sha512.split_whitespace().next()?.to_ascii_lowercase();
+        Some(Release { runtime: Runtime::Maven, version, url, sha256: None, sha512: Some(sha512), md5: None, sha3_256: None, archive, label: Some(label.into()) })
+    });
+    let releases: Vec<Release> = futures_util::future::join_all(lookups).await.into_iter().flatten().collect();
+    if releases.is_empty() {
+        return Err(Error::msg("Couldn't load the Maven versions from dlcdn.apache.org. Check your connection and try again."));
+    }
+    Ok(releases)
+}
+
+/// The newest final release of Gradle's two latest major versions, from services.gradle.org,
+/// with the SHA-256 Gradle publishes for each distribution (one zip for every OS).
+async fn gradle_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let list = get_json(client, "https://services.gradle.org/versions/all").await?;
+    let mut newest: std::collections::BTreeMap<u32, (String, String, String)> = Default::default();
+    for v in list.as_array().into_iter().flatten() {
+        let final_release = !v["snapshot"].as_bool().unwrap_or(true)
+            && !v["nightly"].as_bool().unwrap_or(true)
+            && !v["broken"].as_bool().unwrap_or(true)
+            && v["rcFor"].as_str().unwrap_or_default().is_empty()
+            && v["milestoneFor"].as_str().unwrap_or_default().is_empty();
+        let (Some(version), Some(url), Some(sum)) = (v["version"].as_str(), v["downloadUrl"].as_str(), v["checksumUrl"].as_str()) else { continue };
+        let Some(major) = version.split('.').next().and_then(|m| m.parse::<u32>().ok()) else { continue };
+        if final_release && newest.get(&major).is_none_or(|(n, _, _)| version_key(n) < version_key(version)) {
+            newest.insert(major, (version.to_string(), url.to_string(), sum.to_string()));
+        }
+    }
+    let mut releases = Vec::new();
+    for (version, url, sum_url) in newest.into_values().rev().take(2) {
+        let sha256 = client.get(&sum_url).send().await.ok().and_then(|r| r.error_for_status().ok());
+        let Some(sha256) = (match sha256 {
+            Some(r) => r.text().await.ok().and_then(|t| t.split_whitespace().next().map(str::to_ascii_lowercase)),
+            None => None,
+        }) else {
+            continue;
+        };
+        releases.push(Release { runtime: Runtime::Gradle, version, url, sha256: Some(sha256), sha512: None, md5: None, sha3_256: None, archive: Archive::Zip, label: None });
+    }
+    if releases.is_empty() {
+        return Err(Error::msg("Couldn't load the Gradle versions from services.gradle.org. Check your connection and try again."));
+    }
+    Ok(releases)
+}
+
 /// The supported Go releases (the newest two lines) from go.dev, with their SHA-256s.
 async fn go_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     let os = match std::env::consts::OS {
@@ -2181,7 +2254,7 @@ pub struct UpdateNotice {
 /// Newer patch releases for installed versions: same "major.minor" line (for example
 /// PHP 8.4.27 → 8.4.30), never a jump to a new minor that could change behaviour.
 pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNotice> {
-    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama, Runtime::Minio, Runtime::Elasticsearch, Runtime::Opensearch, Runtime::N8n, Runtime::Rabbitmq, Runtime::Erlang, Runtime::Go]
+    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama, Runtime::Minio, Runtime::Elasticsearch, Runtime::Opensearch, Runtime::N8n, Runtime::Rabbitmq, Runtime::Erlang, Runtime::Go, Runtime::Maven, Runtime::Gradle]
         .into_iter()
         .map(|runtime| async move {
             let installed = installed(layout, runtime);

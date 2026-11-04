@@ -95,6 +95,16 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
             shim(&dir, name, &cases)?;
         }
     }
+    // Maven and Gradle on the active Java (their scripts find it through JAVA_HOME).
+    if let Some(java) = settings.versions.get("java").map(|v| layout.bin("java", v)) {
+        for (runtime, name, script) in [("maven", "mvn", if cfg!(windows) { "mvn.cmd" } else { "mvn" }), ("gradle", "gradle", if cfg!(windows) { "gradle.bat" } else { "gradle" })] {
+            let Some(v) = settings.versions.get(runtime) else { continue };
+            let target = layout.bin(runtime, v).join("bin").join(script);
+            if target.exists() {
+                shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env: vec![("JAVA_HOME".to_string(), path(&java))] }])?;
+            }
+        }
+    }
         // mongosh, pointed at LampRabit's MongoDB when it isn't on the usual port.
     if let Some(home) = settings.versions.get("mongosh").map(|v| layout.bin("mongosh", v)) {
         let target = home.join("bin").join(exe("mongosh"));

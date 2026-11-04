@@ -99,6 +99,16 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     text: "text-orange-800 dark:text-orange-400",
     icon: (size) => <Cog size={size} strokeWidth={1.75} />,
   },
+  maven: {
+    className: "bg-red-700/10 text-red-700 dark:text-red-400",
+    text: "text-red-700 dark:text-red-400",
+    icon: (size) => <Package size={size} strokeWidth={1.75} />,
+  },
+  gradle: {
+    className: "bg-teal-600/10 text-teal-700 dark:text-teal-400",
+    text: "text-teal-700 dark:text-teal-400",
+    icon: (size) => <Layers3 size={size} strokeWidth={1.75} />,
+  },
   erlang: {
     className: "bg-red-500/10 text-red-600 dark:text-red-400",
     text: "text-red-600 dark:text-red-400",

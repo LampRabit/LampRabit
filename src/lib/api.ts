@@ -45,7 +45,9 @@ export type Runtime =
   | "rabbitmq"
   | "erlang"
   | "go"
-  | "rust";
+  | "rust"
+  | "maven"
+  | "gradle";
 export const coreRuntimes: Runtime[] = ["apache", "nginx", "caddy", "frankenphp", "php", "mariadb", "mysql"];
 export const toolRuntimes: Runtime[] = ["composer", "mailpit", "adminer", "phpmyadmin", "redis", "phpredisadmin", "memcached", "ngrok", "cloudflared"];
 
@@ -118,6 +120,8 @@ export const runtimeLabels: Record<Runtime, string> = {
   erlang: "Erlang",
   go: "Go",
   rust: "Rust",
+  maven: "Maven",
+  gradle: "Gradle",
 };
 
 export interface UpdateNotice {
