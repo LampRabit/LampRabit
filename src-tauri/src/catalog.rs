@@ -275,6 +275,10 @@ fn gradle_java(version: &str) -> (&'static str, Option<&'static str>) {
     let at_least = |m: &[u64]| cmp(&v, m) != std::cmp::Ordering::Less;
     if at_least(&[10]) {
         ("17", None)
+    } else if at_least(&[9, 8]) {
+        ("17", Some("27"))
+    } else if at_least(&[9, 4]) {
+        ("17", Some("26"))
     } else if at_least(&[9, 1]) {
         ("17", Some("25"))
     } else if at_least(&[9]) {
@@ -287,8 +291,10 @@ fn gradle_java(version: &str) -> (&'static str, Option<&'static str>) {
         ("8", Some("22"))
     } else if at_least(&[8, 5]) {
         ("8", Some("21"))
-    } else {
+    } else if at_least(&[8, 3]) {
         ("8", Some("20"))
+    } else {
+        ("8", Some("19"))
     }
 }
 
@@ -476,6 +482,7 @@ mod tests {
         assert!(gradle9.fits("21.0.9") && gradle9.fits("25.0.1") && !gradle9.fits("11.0.29"));
         let gradle8 = java(Runtime::Gradle, "8.14.3");
         assert!(gradle8.fits("8.0.472") && gradle8.fits("21.0.9") && !gradle8.fits("25.0.1"), "Gradle 8 can't run on Java 25");
+        assert!(java(Runtime::Gradle, "9.8.0").fits("27.0.1") && !java(Runtime::Gradle, "9.4.1").fits("27.0.1"));
     }
 
     #[test]
