@@ -284,8 +284,10 @@ export type RestartPolicy = "never" | "on-failure" | "always";
 /** A long-running command of a project (queue worker, scheduler, Vite). */
 export interface ProjectProcess {
   name: string;
-  /** Runs in the project folder; {port} is filled in. */
+  /** {port} is filled in. */
   command: string;
+  /** Where it runs, relative to the project; "" for the project folder. */
+  cwd: string;
   /** Where it listens, if it serves anything; also $PORT. */
   port: number | null;
   env: Record<string, string>;
@@ -668,7 +670,7 @@ export interface Settings {
   startServicesOnLaunch: boolean;
   editor: string;
   /** `worker`: FrankenPHP worker mode (the app stays in memory between requests). */
-  sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null; worker?: boolean; domains?: ExtraDomain[]; processes?: ProjectProcess[] }>;
+  sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null; worker?: boolean; main?: DomainTarget | null; domains?: ExtraDomain[]; processes?: ProjectProcess[] }>;
   profiles: StackProfile[];
   /** What `mysql`, new projects and the database tools use first. */
   defaultDatabase: Database;
@@ -744,6 +746,10 @@ export const api = {
   appLogs: (name: string) => invoke<string[]>("app_logs", { name }),
   appFreePort: () => invoke<number>("app_free_port"),
   setSiteDomains: (name: string, domains: ExtraDomain[]) => invoke<void>("set_site_domains", { name, domains }),
+  /** Where the main domain goes; null follows what's running. */
+  setSiteMain: (name: string, target: DomainTarget | null) => invoke<void>("set_site_main", { name, target }),
+  /** The project's folders ("public", "admin/public"), for folder pickers. */
+  projectFolders: (name: string) => invoke<string[]>("project_folders", { name }),
   setSiteProcesses: (name: string, processes: ProjectProcess[]) => invoke<void>("set_site_processes", { name, processes }),
   /** Statuses and output use the key "project/process" (`processKey`). */
   processStart: (name: string, process: string) => invoke<AppStatus>("process_start", { name, process }),

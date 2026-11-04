@@ -439,6 +439,39 @@ pub fn served(settings: &Settings, layout: &Layout) -> Vec<Site> {
     all
 }
 
+/// A route to a port chosen by hand: the address the port scan found it on, else 127.0.0.1.
+fn fixed_route(ports: &[crate::ports::Detected], port: u16) -> (Option<crate::ports::Route>, Option<String>) {
+    let host = ports.iter().find(|d| d.port == port).map_or_else(|| "127.0.0.1".to_string(), |d| d.host.clone());
+    let proxy = format!("http://{host}:{port}/");
+    (Some(crate::ports::Route { port, host }), Some(proxy))
+}
+
+/// A project's folders a domain can serve or a process can run in, as paths relative to
+/// it ("public", "admin/public"), a few levels deep, without dependencies and caches.
+pub fn project_folders(dir: &Path) -> Vec<String> {
+    const SKIP: &[&str] = &["node_modules", "vendor", "storage", "var", "target", "bootstrap", "__pycache__", "dist-ssr", "coverage"];
+    fn walk(dir: &Path, rel: &str, depth: u8, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let mut names: Vec<String> = entries
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| !n.starts_with('.') && !SKIP.contains(&n.as_str()))
+            .collect();
+        names.sort();
+        for name in names {
+            let rel = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            out.push(rel.clone());
+            if depth > 1 && out.len() < 300 {
+                walk(&dir.join(&name), &rel, depth - 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, "", 3, &mut out);
+    out
+}
+
 /// A project's extra domains as sites of their own: a copy of the project with the domain
 /// and where it points changed, so every web server, certificate and hosts entry handles
 /// them like any other site.
@@ -481,12 +514,13 @@ fn extra_sites(settings: &Settings, projects: &[Site]) -> Vec<Site> {
     out
 }
 
-/// Checks a project's extra domains before they're saved: real host names under the
-/// site suffix, used nowhere else, and targets that exist.
+/// Checks a project's extra domains before they're saved: real subdomains of the
+/// project's domain, used nowhere else, and targets that exist.
 pub fn check_domains(settings: &Settings, layout: &Layout, name: &str, domains: &[ExtraDomain]) -> Result<()> {
-    let suffix = format!(".{}", settings.tld);
-    let project = layout.www().join(name);
-    let own = settings.sites.get(name);
+    // Subdomains of the project's own domain only: admin.shop.test for shop.test. Others
+    // would need their own hosts entries and could take another project's name.
+    let parent = format!("{}.{}", label(name).unwrap_or_default(), settings.tld);
+    let suffix = format!(".{parent}");
     // Every domain served now, except this project's own extras (they're being replaced).
     let others: Vec<(String, String)> = served(settings, layout)
         .into_iter()
@@ -498,7 +532,7 @@ pub fn check_domains(settings: &Settings, layout: &Layout, name: &str, domains: 
         let host = &d.host;
         let labels_ok = host.split('.').all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
         if !labels_ok || !host.ends_with(&suffix) || host.len() <= suffix.len() {
-            return Err(Error::msg(format!("\"{host}\" isn't a domain LampRabit can serve: use lowercase letters, digits and dashes, ending in {suffix} (like admin.{name}{suffix}).")));
+            return Err(Error::msg(format!("\"{host}\" isn't a subdomain of {parent}: use lowercase letters, digits and dashes before {suffix} (like admin{suffix}).")));
         }
         if !seen.insert(host.clone()) {
             return Err(Error::msg(format!("{host} is listed twice.")));
@@ -507,28 +541,33 @@ pub fn check_domains(settings: &Settings, layout: &Layout, name: &str, domains: 
             let by = by.split(" › ").next().unwrap_or(by);
             return Err(Error::msg(format!("{host} is already used by {by}.")));
         }
-        match &d.target {
-            DomainTarget::Main | DomainTarget::Port { .. } => {}
-            DomainTarget::Files { root } => {
-                let plain = std::path::Path::new(root).components().all(|c| matches!(c, std::path::Component::Normal(_)));
-                if !plain || !project.join(root).is_dir() {
-                    return Err(Error::msg(format!("{host}: \"{root}\" isn't a folder in {name}. Pick a folder inside the project, like admin/public.")));
-                }
-            }
-            DomainTarget::Process { name: process } => {
-                let found = own.and_then(|s| s.processes.iter().find(|p| &p.name == process));
-                match found {
-                    None => return Err(Error::msg(format!("{host} points to the process \"{process}\", which {name} doesn't have."))),
-                    Some(p) if p.port.is_none() => {
-                        return Err(Error::msg(format!("{host} points to \"{process}\", which has no port. Give the process the port it listens on first.")));
-                    }
-                    Some(_) => {}
-                }
+        check_target(settings, layout, name, host, &d.target)?;
+    }
+    Ok(())
+}
+
+/// Checks where a domain (`host`, for the messages) of project `name` points.
+pub fn check_target(settings: &Settings, layout: &Layout, name: &str, host: &str, target: &DomainTarget) -> Result<()> {
+    let project = layout.www().join(name);
+    let own = settings.sites.get(name);
+    match target {
+        DomainTarget::Main => {}
+        DomainTarget::Files { root } => {
+            let plain = std::path::Path::new(root).components().all(|c| matches!(c, std::path::Component::Normal(_)));
+            if !plain || !project.join(root).is_dir() {
+                return Err(Error::msg(format!("{host}: \"{root}\" isn't a folder in {name}. Pick a folder inside the project, like admin/public.")));
             }
         }
-        if let DomainTarget::Port { port } = d.target {
+        DomainTarget::Process { name: process } => match own.and_then(|s| s.processes.iter().find(|p| &p.name == process)) {
+            None => return Err(Error::msg(format!("{host} points to the process \"{process}\", which {name} doesn't have."))),
+            Some(p) if p.port.is_none() => {
+                return Err(Error::msg(format!("{host} points to \"{process}\", which has no port. Give the process the port it listens on first.")));
+            }
+            Some(_) => {}
+        },
+        DomainTarget::Port { port } => {
             let (http, https) = settings.server_ports(settings.primary_server());
-            if port == 0 || port == http || port == https {
+            if *port == 0 || *port == http || *port == https {
                 return Err(Error::msg(format!("{host}: port {port} is the web server's own. Use the port the app listens on.")));
             }
         }
@@ -622,6 +661,23 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             if language == Language::Node && route.is_none() {
                 docroot = ["dist", "build", "out", "public"].iter().map(|d| path.join(d)).find(|d| d.join("index.html").is_file()).unwrap_or_else(|| path.clone());
             }
+            // Where the main domain goes when it was chosen by hand, whatever is running.
+            let (route, proxy) = match own.and_then(|s| s.main.as_ref()) {
+                Some(DomainTarget::Files { root }) => {
+                    if !root.is_empty() {
+                        docroot = path.join(root);
+                    }
+                    (None, None)
+                }
+                Some(DomainTarget::Port { port }) => fixed_route(&ports, *port),
+                Some(DomainTarget::Process { name: process }) => {
+                    match own.and_then(|s| s.processes.iter().find(|p| &p.name == process)).and_then(|p| p.port) {
+                        Some(port) => fixed_route(&ports, port),
+                        None => (None, None),
+                    }
+                }
+                Some(DomainTarget::Main) | None => (route, proxy),
+            };
             let modified = e
                 .metadata()
                 .and_then(|m| m.modified())
@@ -1533,6 +1589,16 @@ mod tests {
         assert!(out.contains("php_server") && !out.contains("php_fastcgi"), "no LampRabit PHP workers");
         assert!(out.contains("admin 127.0.0.1:2020") && out.contains("http_port 8083"));
         assert!(out.contains("/lr/tmp/frankenphp") && out.contains("frankenphp-error.log"));
+    }
+
+    #[test]
+    fn folder_pickers_list_project_folders_without_dependencies() {
+        let dir = std::env::temp_dir().join(format!("lr-folders-{}", std::process::id()));
+        for d in ["public", "admin/public", "vendor/laravel", "node_modules/vite", ".git/objects", "api"] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        assert_eq!(project_folders(&dir), ["admin", "admin/public", "api", "public"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

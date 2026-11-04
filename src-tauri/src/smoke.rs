@@ -346,7 +346,8 @@ async fn project(app: &AppHandle, web: ServiceKind) -> std::result::Result<Strin
         ..Default::default()
     };
     let processes = vec![
-        process("api", "php -S 127.0.0.1:{port} -t api", Some(api_port), crate::config::RestartPolicy::OnFailure),
+        // Runs in api/ through its folder setting, not -t.
+        crate::config::ProjectProcess { cwd: "api".into(), ..process("api", "php -S 127.0.0.1:{port}", Some(api_port), crate::config::RestartPolicy::OnFailure) },
         process("worker", "php worker.php", None, crate::config::RestartPolicy::OnFailure),
         process("flaky", "php flaky.php", None, crate::config::RestartPolicy::OnFailure),
     ];
@@ -355,10 +356,12 @@ async fn project(app: &AppHandle, web: ServiceKind) -> std::result::Result<Strin
         crate::config::ExtraDomain { host: format!("admin.{name}.{tld}"), target: crate::config::DomainTarget::Files { root: "admin".into() } },
         crate::config::ExtraDomain { host: format!("api.{name}.{tld}"), target: crate::config::DomainTarget::Process { name: "api".into() } },
     ];
-    // Checked like the app checks them: a domain under another project's name must fail.
-    let taken = vec![crate::config::ExtraDomain { host: format!("{name}.{tld}"), target: crate::config::DomainTarget::Main }];
-    if crate::set_site_domains(app.clone(), app.state::<AppState>(), name.into(), taken).await.is_ok() {
-        return Err(Outcome::Failed("the project's own main domain was accepted as an extra domain".into()));
+    // Checked like the app checks them: only subdomains of the project's own domain.
+    for host in [format!("{name}.{tld}"), format!("other-thing.{tld}")] {
+        let wrong = vec![crate::config::ExtraDomain { host: host.clone(), target: crate::config::DomainTarget::Main }];
+        if crate::set_site_domains(app.clone(), app.state::<AppState>(), name.into(), wrong).await.is_ok() {
+            return Err(Outcome::Failed(format!("{host} was accepted, but only subdomains of {name}.{tld} should be")));
+        }
     }
     crate::set_site_domains(app.clone(), app.state::<AppState>(), name.into(), domains).await?;
 
@@ -390,6 +393,33 @@ async fn project(app: &AppHandle, web: ServiceKind) -> std::result::Result<Strin
         return Err(Outcome::Failed(format!("{host} should answer \"{want}\", got: {}", got.chars().take(300).collect::<String>())));
     }
 
+    // The main domain pointed by hand at the api process, then back to automatic.
+    let main_host = format!("{name}.{tld}");
+    let api_target = crate::config::DomainTarget::Process { name: "api".into() };
+    crate::set_site_main(app.clone(), app.state::<AppState>(), name.into(), Some(api_target)).await?;
+    let mut got = String::new();
+    for _ in 0..20 {
+        got = fetch(app, http, &main_host).await;
+        if got.contains("api-ok") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    if !got.contains("api-ok") {
+        return Err(Outcome::Failed(format!("{main_host}, pointed at the api process, answered: {}", got.chars().take(200).collect::<String>())));
+    }
+    crate::set_site_main(app.clone(), app.state::<AppState>(), name.into(), None).await?;
+    for _ in 0..20 {
+        got = fetch(app, http, &main_host).await;
+        if got.contains("main-ok") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    if !got.contains("main-ok") {
+        return Err(Outcome::Failed(format!("{main_host}, back on automatic, answered: {}", got.chars().take(200).collect::<String>())));
+    }
+
     let worker = state.apps.status(&crate::apps::process_key(name, "worker")).await;
     if worker.state != "running" {
         return Err(Outcome::Failed(format!("the worker (no port) is {}, not running", worker.state)));
@@ -407,7 +437,7 @@ async fn project(app: &AppHandle, web: ServiceKind) -> std::result::Result<Strin
     }
     let restarts = state.apps.logs(&layout, &key).await.iter().filter(|l| l.contains("restarting it")).count();
     crate::processes_all(app.clone(), app.state::<AppState>(), name.into(), false).await?;
-    Ok(format!("3 domains answer through {}, worker running, flaky restarted {restarts} times then left stopped", web.label()))
+    Ok(format!("3 domains answer through {}, the main one follows a hand-picked process and back, worker running, flaky restarted {restarts} times then left stopped", web.label()))
 }
 
 /// Kills the service behind the supervisor's back and expects the restart Settings asks

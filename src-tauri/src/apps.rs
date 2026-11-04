@@ -555,7 +555,10 @@ impl Apps {
                 return Err(Error::msg(format!("Port {port} is already in use{owner}. Stop that program, or give {process} another port.")));
             }
         }
-        let dir = layout.www().join(project);
+        let dir = layout.www().join(project).join(&config.cwd);
+        if !dir.is_dir() {
+            return Err(Error::msg(format!("{process} runs in {project}/{}, which doesn't exist. Pick another folder for it.", config.cwd)));
+        }
         let path = Self::command_path(settings, layout, project);
         let command = match config.port {
             Some(port) => command.replace("{port}", &port.to_string()),

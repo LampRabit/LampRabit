@@ -1335,6 +1335,12 @@ async fn watch_ports(handle: AppHandle) {
                     state.apps.mark_ready(&handle, &site.name, port).await;
                 }
             }
+            // A main domain set by hand goes where it was told (sites::scan), not where ports lead.
+            if own.is_some_and(|s| s.main.is_some()) {
+                next.remove(&site.name);
+                missing.remove(&site.name);
+                continue;
+            }
             let want = ports::choose(site.language, files_only, own.and_then(|s| s.route_port), managed, detected);
             if want.as_ref() == current.get(&site.name) {
                 missing.remove(&site.name);
@@ -1462,6 +1468,31 @@ async fn set_site_domains(app: AppHandle, state: State<'_, AppState>, name: Stri
     restart_web_servers(&app, &state).await
 }
 
+/// Sets where a project's main domain goes: by hand (its files or a folder, a port, a
+/// process), or None to follow what's running.
+#[tauri::command]
+async fn set_site_main(app: AppHandle, state: State<'_, AppState>, name: String, target: Option<config::DomainTarget>) -> Result<()> {
+    let _op = state.ops.lock().await;
+    let (settings, layout) = state.snapshot().await;
+    project_dir(&layout, &name)?;
+    let target = target.filter(|t| *t != config::DomainTarget::Main);
+    if let Some(t) = &target {
+        let host = sites::url_for(&settings, &name).unwrap_or_else(|| name.clone());
+        sites::check_target(&settings, &layout, &name, &host, t)?;
+    }
+    state.update_settings(|s| s.sites.entry(name.clone()).or_default().main = target).await?;
+    ports::poke();
+    restart_web_servers(&app, &state).await
+}
+
+/// A project's folders, for the domain and process folder pickers.
+#[tauri::command]
+async fn project_folders(state: State<'_, AppState>, name: String) -> Result<Vec<String>> {
+    let (_, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    Ok(sites::project_folders(&dir))
+}
+
 /// Saves a project's processes. Removed ones are stopped; a changed one keeps running
 /// with its old command until it's restarted.
 #[tauri::command]
@@ -1482,6 +1513,10 @@ async fn set_site_processes(app: AppHandle, state: State<'_, AppState>, name: St
         if p.command.trim().is_empty() {
             return Err(Error::msg(format!("Enter the command {} runs.", p.name)));
         }
+        let plain = std::path::Path::new(&p.cwd).components().all(|c| matches!(c, std::path::Component::Normal(_)));
+        if !plain || !layout.www().join(&name).join(&p.cwd).is_dir() {
+            return Err(Error::msg(format!("{}: \"{}\" isn't a folder in {name}.", p.name, p.cwd)));
+        }
         if let Some(port) = p.port {
             if port < 1024 || Some(port) == app_port || !ports.insert(port) {
                 return Err(Error::msg(format!("{}: port {port} is taken (below 1024, the app's, or another process's). Pick another one.", p.name)));
@@ -1490,10 +1525,11 @@ async fn set_site_processes(app: AppHandle, state: State<'_, AppState>, name: St
     }
     // A domain can't point at a process that's going away, or that no longer has a port.
     if let Some(own) = settings.sites.get(&name) {
-        for d in &own.domains {
-            if let config::DomainTarget::Process { name: target } = &d.target {
+        let main = own.main.iter().map(|t| (name.clone(), t));
+        for (host, target) in own.domains.iter().map(|d| (d.host.clone(), &d.target)).chain(main) {
+            if let config::DomainTarget::Process { name: target } = target {
                 if !processes.iter().any(|p| &p.name == target && p.port.is_some()) {
-                    return Err(Error::msg(format!("{} points to the process {target}. Point it somewhere else first.", d.host)));
+                    return Err(Error::msg(format!("{host} points to the process {target}. Point it somewhere else first.")));
                 }
             }
         }
@@ -1505,7 +1541,8 @@ async fn set_site_processes(app: AppHandle, state: State<'_, AppState>, name: St
     let ports_changed = settings.sites.get(&name).is_some_and(|s| s.processes.iter().map(|p| (&p.name, p.port)).ne(processes.iter().map(|p| (&p.name, p.port))));
     state.update_settings(|s| s.sites.entry(name.clone()).or_default().processes = processes).await?;
     // Domains that point at a process follow its port.
-    if ports_changed && settings.sites.get(&name).is_some_and(|s| s.domains.iter().any(|d| matches!(d.target, config::DomainTarget::Process { .. }))) {
+    let to_process = |t: &config::DomainTarget| matches!(t, config::DomainTarget::Process { .. });
+    if ports_changed && settings.sites.get(&name).is_some_and(|s| s.domains.iter().any(|d| to_process(&d.target)) || s.main.as_ref().is_some_and(to_process)) {
         restart_web_servers(&app, &state).await?;
     }
     ports::poke();
@@ -2631,6 +2668,8 @@ pub fn run() {
             runtime_info,
             set_site_worker,
             set_site_domains,
+            set_site_main,
+            project_folders,
             set_site_processes,
             process_start,
             process_stop,
