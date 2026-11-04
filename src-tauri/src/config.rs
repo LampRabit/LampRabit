@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
 
@@ -53,6 +53,8 @@ pub struct Settings {
     /// when absent. Can be outside the LampRabit folder (another drive, a NAS): it isn't
     /// moved with it, and uninstall never deletes it.
     pub storage: BTreeMap<String, PathBuf>,
+    /// Services (by id) started again when they crash, up to a few times in a row.
+    pub auto_restart: BTreeSet<String>,
 }
 
 /// The two MySQL-compatible servers LampRabit runs.
@@ -273,6 +275,10 @@ impl Settings {
 
     /// Turns the pre-0.3 `web_server` choice into `web_servers`, and makes sure at least
     /// one server is enabled and none twice.
+    pub fn restarts_after_crash(&self, service: &str) -> bool {
+        self.auto_restart.contains(service)
+    }
+
     pub fn normalize(&mut self) {
         if let Some(old) = self.web_server.take() {
             self.web_servers = match old {
@@ -453,6 +459,8 @@ impl Default for Settings {
             profiles: Vec::new(),
             default_database: Database::Mariadb,
             storage: BTreeMap::new(),
+            // n8n's Node process is the one that falls over on large workflows.
+            auto_restart: BTreeSet::from(["n8n".to_string()]),
         }
     }
 }

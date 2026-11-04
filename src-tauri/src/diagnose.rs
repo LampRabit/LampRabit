@@ -241,6 +241,7 @@ pub fn tail(path: &std::path::Path, bytes: u64) -> String {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Probe {
     Ok,
     Bad(String),

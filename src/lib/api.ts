@@ -597,6 +597,8 @@ export interface Settings {
   defaultDatabase: Database;
   /** Object storage folders by service id (RustFS, MinIO); data/<id> when absent. */
   storage: Record<string, string>;
+  /** Services (by id) started again when they crash, a few times in a row at most. */
+  autoRestart: string[];
 }
 
 export type Database = "mariadb" | "mysql";

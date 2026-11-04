@@ -82,6 +82,7 @@ export default function Settings() {
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
   const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: 5000 });
+  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const openDiagnostics = useAppStore((s) => s.setDiagnosticsOpen);
   const [uninstalling, setUninstalling] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -149,6 +150,7 @@ export default function Settings() {
   if (!draft || !versions) return null;
   const set = (patch: Partial<SettingsT>) => setDraft({ ...draft, ...patch });
   const setPort = (key: keyof SettingsT["ports"], value: number) => setDraft({ ...draft, ports: { ...draft.ports, [key]: value } });
+  const installedServices = (services.data ?? []).filter((s) => s.installed && !s.external);
   const dbInstalled = { mariadb: !!activeVersions?.mariadb, mysql: !!activeVersions?.mysql };
 
   return (
@@ -260,6 +262,27 @@ export default function Settings() {
               checked={draft.closeToTray}
               onChange={(v) => set({ closeToTray: v })}
             />
+            <Row
+              label="Restart after a crash"
+              hint="Starts a service again when it stops unexpectedly. After three crashes within five minutes it stays stopped, so the cause shows in Logs."
+              wide
+            >
+              <div className="flex flex-wrap gap-x-6 gap-y-2">
+                {installedServices.length === 0 && <span className="text-sm text-muted">Install a service to choose here.</span>}
+                {installedServices.map((s) => (
+                  <label key={s.kind} className="flex items-center gap-2 text-sm">
+                    <Switch
+                      checked={draft.autoRestart.includes(s.kind)}
+                      onChange={(on) =>
+                        set({ autoRestart: on ? [...draft.autoRestart, s.kind].sort() : draft.autoRestart.filter((k) => k !== s.kind) })
+                      }
+                      label={`Restart ${s.label} after a crash`}
+                    />
+                    {s.label}
+                  </label>
+                ))}
+              </div>
+            </Row>
           </Section>
 
           <Section id="terminal" title="Terminal" subtitle="LampRabit's commands always run your active versions with its config.">

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ffi::OsString, path::{Path, PathBuf}, process::Stdio, sync::Arc, time::Duration};
+use std::{collections::{HashMap, HashSet}, ffi::OsString, path::{Path, PathBuf}, process::Stdio, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -6,7 +6,7 @@ use tokio::{
     fs::{File, OpenOptions},
     io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader},
     process::Command,
-    sync::{Mutex, oneshot},
+    sync::{Mutex, mpsc, oneshot},
 };
 
 use crate::{
@@ -25,6 +25,12 @@ use crate::{
 
 /// How long a graceful stop may take before the process tree is killed.
 const STOP_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a slow service (JVM, Python, Node) may take to answer after it's spawned.
+const READY_TIMEOUT: Duration = Duration::from_secs(90);
+/// A service that crashes more often than this within `RESTART_WINDOW` is left stopped:
+/// restarting it again would only hide a problem that needs looking at.
+const MAX_RESTARTS: u32 = 3;
+const RESTART_WINDOW: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -71,6 +77,22 @@ struct Def {
     label: &'static str,
     /// The service's own log in logs/, next to `<id>-output.log`.
     log: &'static str,
+    /// How the health checks and the start-up wait ask whether it answers.
+    check: Check,
+    /// Takes a while to come up: it stays Starting until `check` passes, so nothing
+    /// (the UI, Start all, tools) treats it as ready while it's still loading.
+    slow: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Check {
+    /// An HTTP GET of this path; any answer counts (a 404 for / is fine).
+    Http(&'static str),
+    Tcp,
+    Mysql,
+    Postgres,
+    /// Send a line, expect a reply starting with this text.
+    Line(&'static [u8], &'static str),
 }
 
 impl ServiceKind {
@@ -101,33 +123,35 @@ impl ServiceKind {
     }
 
     fn def(self) -> Def {
-        let (id, label, log) = match self {
-            Self::Apache => ("apache", "Apache", "apache-error.log"),
-            Self::Nginx => ("nginx", "Nginx", "nginx-error.log"),
-            Self::Caddy => ("caddy", "Caddy", "caddy-error.log"),
-            Self::Frankenphp => ("frankenphp", "FrankenPHP", "frankenphp-error.log"),
-            Self::Tomcat => ("tomcat", "Tomcat", "tomcat-output.log"),
-            Self::Postgres => ("postgres", "PostgreSQL", "postgres-output.log"),
-            Self::Pgadmin => ("pgadmin", "pgAdmin", "pgadmin.log"),
-            Self::Mongodb => ("mongodb", "MongoDB", "mongodb-output.log"),
-            Self::Clickhouse => ("clickhouse", "ClickHouse", "clickhouse-output.log"),
-            Self::Neo4j => ("neo4j", "Neo4j", "neo4j-output.log"),
-            Self::Meilisearch => ("meilisearch", "Meilisearch", "meilisearch-output.log"),
-            Self::Typesense => ("typesense", "Typesense", "typesense-output.log"),
-            Self::Rustfs => ("rustfs", "RustFS", "rustfs-output.log"),
-            Self::Ollama => ("ollama", "Ollama", "ollama-output.log"),
-            Self::Minio => ("minio", "MinIO", "minio-output.log"),
-            Self::Elasticsearch => ("elasticsearch", "Elasticsearch", "elasticsearch-output.log"),
-            Self::Opensearch => ("opensearch", "OpenSearch", "opensearch-output.log"),
-            Self::N8n => ("n8n", "n8n", "n8n-output.log"),
-            Self::Rabbitmq => ("rabbitmq", "RabbitMQ", "rabbitmq-output.log"),
-            Self::Mariadb => ("mariadb", "MariaDB", "mariadb-error.log"),
-            Self::Mysql => ("mysql", "MySQL", "mysql-error.log"),
-            Self::Mailpit => ("mailpit", "Mailpit", "mailpit-output.log"),
-            Self::Redis => ("redis", "Redis", "redis-output.log"),
-            Self::Memcached => ("memcached", "Memcached", "memcached-output.log"),
+        use Check::*;
+        let (id, label, log, check, slow) = match self {
+            Self::Apache => ("apache", "Apache", "apache-error.log", Http("/"), false),
+            Self::Nginx => ("nginx", "Nginx", "nginx-error.log", Http("/"), false),
+            Self::Caddy => ("caddy", "Caddy", "caddy-error.log", Http("/"), false),
+            Self::Frankenphp => ("frankenphp", "FrankenPHP", "frankenphp-error.log", Http("/"), false),
+            // A 404 for / is fine: only apps under their own Host are deployed.
+            Self::Tomcat => ("tomcat", "Tomcat", "tomcat-output.log", Http("/"), false),
+            Self::Postgres => ("postgres", "PostgreSQL", "postgres-output.log", Postgres, false),
+            Self::Pgadmin => ("pgadmin", "pgAdmin", "pgadmin.log", Http("/misc/ping"), true),
+            Self::Mongodb => ("mongodb", "MongoDB", "mongodb-output.log", Tcp, false),
+            Self::Clickhouse => ("clickhouse", "ClickHouse", "clickhouse-output.log", Http("/ping"), false),
+            Self::Neo4j => ("neo4j", "Neo4j", "neo4j-output.log", Http("/"), true),
+            Self::Meilisearch => ("meilisearch", "Meilisearch", "meilisearch-output.log", Http("/health"), false),
+            Self::Typesense => ("typesense", "Typesense", "typesense-output.log", Http("/health"), false),
+            Self::Rustfs => ("rustfs", "RustFS", "rustfs-output.log", Http("/health"), false),
+            Self::Ollama => ("ollama", "Ollama", "ollama-output.log", Http("/api/version"), false),
+            Self::Minio => ("minio", "MinIO", "minio-output.log", Http("/minio/health/live"), false),
+            Self::Elasticsearch => ("elasticsearch", "Elasticsearch", "elasticsearch-output.log", Http("/"), true),
+            Self::Opensearch => ("opensearch", "OpenSearch", "opensearch-output.log", Http("/"), true),
+            Self::N8n => ("n8n", "n8n", "n8n-output.log", Http("/healthz"), true),
+            Self::Rabbitmq => ("rabbitmq", "RabbitMQ", "rabbitmq-output.log", Tcp, true),
+            Self::Mariadb => ("mariadb", "MariaDB", "mariadb-error.log", Mysql, false),
+            Self::Mysql => ("mysql", "MySQL", "mysql-error.log", Mysql, false),
+            Self::Mailpit => ("mailpit", "Mailpit", "mailpit-output.log", Http("/livez"), false),
+            Self::Redis => ("redis", "Redis", "redis-output.log", Line(b"PING\r\n", "+PONG"), false),
+            Self::Memcached => ("memcached", "Memcached", "memcached-output.log", Line(b"version\r\n", "VERSION"), false),
         };
-        Def { id, label, log }
+        Def { id, label, log, check, slow }
     }
 
     /// Web servers only run when Settings → Web server includes them.
@@ -214,6 +238,19 @@ impl ServiceKind {
             Self::Mailpit => settings.ports.mail_smtp,
             Self::Redis => settings.ports.redis,
             Self::Memcached => settings.ports.memcached,
+        }
+    }
+
+    /// Asks the service whether it answers, the way `def().check` says.
+    async fn probe(self, settings: &Settings, client: &reqwest::Client) -> Probe {
+        // Mailpit's main port is SMTP; its health endpoint is on the web UI's.
+        let port = if self == Self::Mailpit { settings.ports.mail_ui } else { self.port(settings) };
+        match self.def().check {
+            Check::Http(path) => diagnose::probe_http(client, &format!("http://127.0.0.1:{port}{path}")).await,
+            Check::Tcp => diagnose::probe_tcp(port).await,
+            Check::Mysql => diagnose::probe_mysql(port).await,
+            Check::Postgres => diagnose::probe_postgres(port).await,
+            Check::Line(send, expect) => diagnose::probe_line(port, send, expect).await,
         }
     }
 }
@@ -615,6 +652,14 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                     ("N8N_PROXY_HOPS", "1".into()),
                     ("N8N_DIAGNOSTICS_ENABLED", "false".into()),
                     ("N8N_VERSION_NOTIFICATIONS_ENABLED", "false".into()),
+                    // Room for larger workflows than Node's default heap allows.
+                    ("NODE_OPTIONS", "--max-old-space-size=4096".into()),
+                    // Task runners need extra processes (and a Python venv for Python
+                    // code nodes) that drift out of sync on a local install.
+                    ("N8N_RUNNERS_ENABLED", "false".into()),
+                    // Binary data (files in workflows) on disk instead of in memory.
+                    ("N8N_DEFAULT_BINARY_DATA_MODE", "filesystem".into()),
+                    ("N8N_PAYLOAD_SIZE_MAX", "256".into()),
                 ],
             }
         }
@@ -963,7 +1008,10 @@ pub fn reap_orphans(layout: &Layout) -> Vec<String> {
         let pgadmin = exe.starts_with(bin.join("pgadmin"));
         // Elasticsearch and OpenSearch run on the Java bundled in their own folders.
         let search = exe.starts_with(bin.join("elasticsearch")) || exe.starts_with(bin.join("opensearch"));
-        if exe.starts_with(&bin) && (SERVERS.contains(&name) || tomcat || pgadmin || search) && process.kill() {
+        // n8n runs on NVM's Node, which may live elsewhere; its script is LampRabit's. An
+        // n8n the user runs from their own folder is left alone.
+        let n8n = process.cmd().iter().any(|a| Path::new(a).starts_with(bin.join("n8n")));
+        if ((exe.starts_with(&bin) && (SERVERS.contains(&name) || tomcat || pgadmin || search)) || n8n) && process.kill() {
             stopped.push(format!("{name} (PID {pid})"));
         }
     }
@@ -1027,16 +1075,85 @@ struct Handle {
     stop_tx: Option<oneshot::Sender<()>>,
 }
 
-#[derive(Default)]
+/// Crash restarts counted against `MAX_RESTARTS`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Budget {
+    used: u32,
+    /// When the first restart of the current window happened (ms since epoch).
+    since: u64,
+}
+
+impl Budget {
+    /// Takes one restart at `now`, returning the attempt number, or None when the service
+    /// already crashed `MAX_RESTARTS` times within `RESTART_WINDOW`. Uptime doesn't
+    /// refill it: a service that comes up and crashes every minute isn't fixed by
+    /// restarting it forever.
+    fn take(&mut self, now: u64) -> Option<u32> {
+        if self.used == 0 || now.saturating_sub(self.since) > RESTART_WINDOW.as_millis() as u64 {
+            *self = Budget { used: 0, since: now };
+        }
+        if self.used >= MAX_RESTARTS {
+            return None;
+        }
+        self.used += 1;
+        Some(self.used)
+    }
+}
+
 pub struct Supervisor {
     running: Arc<Mutex<HashMap<ServiceKind, Handle>>>,
     /// PHP FastCGI pools, started and stopped with the web servers.
     pub php: Arc<PhpPools>,
     problems: Arc<std::sync::Mutex<HashMap<ServiceKind, Problem>>>,
     health: Arc<std::sync::Mutex<HashMap<ServiceKind, Health>>>,
+    /// Services that crashed and wait for `restart_crashed`; Stop or Start clears them.
+    pending: Arc<std::sync::Mutex<HashSet<ServiceKind>>>,
+    budgets: Arc<std::sync::Mutex<HashMap<ServiceKind, Budget>>>,
+    crashed_tx: mpsc::UnboundedSender<ServiceKind>,
+    crashed_rx: std::sync::Mutex<Option<mpsc::UnboundedReceiver<ServiceKind>>>,
+}
+
+impl Default for Supervisor {
+    fn default() -> Self {
+        let (crashed_tx, crashed_rx) = mpsc::unbounded_channel();
+        Self {
+            running: Arc::default(),
+            php: Arc::default(),
+            problems: Arc::default(),
+            health: Arc::default(),
+            pending: Arc::default(),
+            budgets: Arc::default(),
+            crashed_tx,
+            crashed_rx: std::sync::Mutex::new(Some(crashed_rx)),
+        }
+    }
 }
 
 impl Supervisor {
+    /// Services that exited unexpectedly, for the app to restart when Settings says so
+    /// (it has the settings; the exit watcher doesn't). Can be taken once.
+    pub fn crashes(&self) -> Option<mpsc::UnboundedReceiver<ServiceKind>> {
+        self.crashed_rx.lock().unwrap().take()
+    }
+
+    /// Restarts a crashed service, unless it was stopped or started by hand meanwhile or
+    /// it keeps crashing.
+    pub async fn restart_crashed(&self, app: &AppHandle, kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<()> {
+        if !self.pending.lock().unwrap().remove(&kind) || !settings.restarts_after_crash(kind.id()) {
+            return Ok(());
+        }
+        let Some(attempt) = self.budgets.lock().unwrap().entry(kind).or_default().take(now_ms()) else {
+            logs::system(
+                app,
+                Level::Error,
+                format!("{} crashed {MAX_RESTARTS} times in a few minutes, so it isn't restarted again; check its log, then start it yourself", kind.label()),
+            );
+            return Ok(());
+        };
+        logs::system(app, Level::Warn, format!("Restarting {} after a crash (attempt {attempt} of {MAX_RESTARTS})", kind.label()));
+        self.start_service(app, kind, settings, layout).await
+    }
+
     pub async fn list(&self, settings: &Settings, layout: &Layout) -> Vec<ServiceInfo> {
         let running = self.running.lock().await;
         let problems = self.problems.lock().unwrap().clone();
@@ -1095,39 +1212,9 @@ impl Supervisor {
         self.health.lock().unwrap().retain(|k, _| running.iter().any(|(r, _)| r == k));
 
         for (kind, started_at) in running {
-            let probe = match kind {
-                ServiceKind::Apache => {
-                    diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.http)).await
-                }
-                ServiceKind::Mariadb => diagnose::probe_mysql(settings.ports.mysql).await,
-                ServiceKind::Mysql => diagnose::probe_mysql(settings.ports.mysql_server).await,
-                ServiceKind::Nginx | ServiceKind::Caddy | ServiceKind::Frankenphp => {
-                    let port = settings.server_ports(kind.web_server().unwrap()).0;
-                    diagnose::probe_http(client, &format!("http://127.0.0.1:{port}/")).await
-                }
-                ServiceKind::Mailpit => {
-                    diagnose::probe_http(client, &format!("http://127.0.0.1:{}/livez", settings.ports.mail_ui)).await
-                }
-                ServiceKind::Redis => diagnose::probe_line(settings.ports.redis, b"PING\r\n", "+PONG").await,
-                ServiceKind::Memcached => diagnose::probe_line(settings.ports.memcached, b"version\r\n", "VERSION").await,
-                // A 404 for / is fine: only apps under their own Host are deployed.
-                ServiceKind::Postgres => diagnose::probe_postgres(settings.ports.postgres).await,
-                ServiceKind::Mongodb => diagnose::probe_tcp(settings.ports.mongodb).await,
-                ServiceKind::Clickhouse => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/ping", settings.ports.clickhouse_http)).await,
-                ServiceKind::Neo4j => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.neo4j_http)).await,
-                ServiceKind::Meilisearch => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/health", settings.ports.meilisearch)).await,
-                ServiceKind::Typesense => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/health", settings.ports.typesense)).await,
-                ServiceKind::Rustfs => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/health", settings.ports.rustfs)).await,
-                ServiceKind::Minio => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/minio/health/live", settings.ports.minio)).await,
-                ServiceKind::Elasticsearch => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.elasticsearch)).await,
-                ServiceKind::Opensearch => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.opensearch)).await,
-                ServiceKind::N8n => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/healthz", settings.ports.n8n)).await,
-                ServiceKind::Rabbitmq => diagnose::probe_tcp(settings.ports.rabbitmq).await,
-                ServiceKind::Ollama => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/api/version", settings.ports.ollama)).await,
-                ServiceKind::Pgadmin => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/misc/ping", settings.ports.pgadmin)).await,
-                ServiceKind::Tomcat => diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.tomcat_http)).await,
-            };
-            let young = now_ms().saturating_sub(started_at) < 8_000;
+            let probe = kind.probe(settings, client).await;
+            // Slow services are only Running once they answered; give the rest a moment.
+            let young = now_ms().saturating_sub(started_at) < 15_000;
             let changed = {
                 let mut map = self.health.lock().unwrap();
                 let prev = map.get(&kind).cloned();
@@ -1177,6 +1264,14 @@ impl Supervisor {
         settings: &Settings,
         layout: &Layout,
     ) -> Result<()> {
+        // Started by hand: a restart that was waiting isn't needed, and the crash count
+        // starts over since someone is looking at it.
+        self.pending.lock().unwrap().remove(&kind);
+        self.budgets.lock().unwrap().remove(&kind);
+        self.start_service(app, kind, settings, layout).await
+    }
+
+    async fn start_service(&self, app: &AppHandle, kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<()> {
         // The Ollama app already serving is what's wanted; there's nothing to start.
         if kind == ServiceKind::Ollama && !self.is_running(kind).await && answers(kind.port(settings)) {
             logs::system(app, Level::Info, "Ollama is already running (the Ollama app); LampRabit uses it as is");
@@ -1318,16 +1413,46 @@ impl Supervisor {
             Level::Info,
             format!("{} started (PID {}, port {port})", kind.label(), child.id().unwrap_or_default()),
         );
+        let slow = kind.def().slow;
+        let state = if slow { ServiceState::Starting } else { ServiceState::Running };
         self.running.lock().await.insert(
             kind,
-            Handle {
-                pid: child.id(),
-                state: ServiceState::Running,
-                started_at: Some(now_ms()),
-                stop_tx: Some(stop_tx),
-            },
+            Handle { pid: child.id(), state, started_at: Some(now_ms()), stop_tx: Some(stop_tx) },
         );
-        emit_status(app, kind, ServiceState::Running, None);
+        emit_status(app, kind, state, None);
+        if slow {
+            let (running, health, app, settings) = (self.running.clone(), self.health.clone(), app.clone(), settings.clone());
+            tauri::async_runtime::spawn(async move {
+                let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build().unwrap_or_default();
+                let deadline = tokio::time::Instant::now() + READY_TIMEOUT;
+                let mut answered = false;
+                while !answered && tokio::time::Instant::now() < deadline {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    // Stopped, crashed or replaced meanwhile: the exit watcher reports that.
+                    if !running.lock().await.get(&kind).is_some_and(|h| h.state == ServiceState::Starting) {
+                        return;
+                    }
+                    answered = matches!(kind.probe(&settings, &client).await, Probe::Ok);
+                }
+                {
+                    let mut running = running.lock().await;
+                    let Some(h) = running.get_mut(&kind).filter(|h| h.state == ServiceState::Starting) else { return };
+                    h.state = ServiceState::Running;
+                }
+                // Still running but not answering: it's up, though not healthy, and the
+                // health checks keep trying.
+                let (status, detail) = if answered {
+                    ("healthy", None)
+                } else {
+                    let secs = READY_TIMEOUT.as_secs();
+                    logs::system(&app, Level::Warn, format!("{} didn't answer within {secs} s; check its log", kind.label()));
+                    ("degraded", Some(format!("No answer within {secs} s of starting")))
+                };
+                health.lock().unwrap().insert(kind, Health { status, detail, checked_at: now_ms(), failures: if answered { 0 } else { 2 } });
+                emit_status(&app, kind, ServiceState::Running, None);
+                let _ = app.emit("service-health", kind);
+            });
+        }
         if kind == ServiceKind::Postgres {
             let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
             tauri::async_runtime::spawn(async move {
@@ -1356,6 +1481,7 @@ impl Supervisor {
 
         let running = self.running.clone();
         let problems = self.problems.clone();
+        let (pending, crashed) = (self.pending.clone(), self.crashed_tx.clone());
         let pools = self.php.clone();
         let logs_to_read = [kind.log_path(layout), layout.logs().join(format!("{}-output.log", kind.id()))];
         let app = app.clone();
@@ -1414,12 +1540,20 @@ impl Supervisor {
                 None => logs::system(&app, Level::Info, format!("{} stopped", kind.label())),
             }
             emit_status(&app, kind, state, message);
+            // Only a crash: a clean exit or a requested stop ends with Stopped.
+            if state == ServiceState::Error {
+                pending.lock().unwrap().insert(kind);
+                let _ = crashed.send(kind);
+            }
         });
 
         Ok(())
     }
 
     pub async fn stop(&self, app: &AppHandle, kind: ServiceKind) {
+        if self.pending.lock().unwrap().remove(&kind) {
+            logs::system(app, Level::Info, format!("{} won't be restarted after its crash", kind.label()));
+        }
         let mut running = self.running.lock().await;
         if let Some(handle) = running.get_mut(&kind) {
             if let Some(tx) = handle.stop_tx.take() {
@@ -1532,4 +1666,49 @@ where
             crate::logs::push(&app, kind.id(), "output", line);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MIN: u64 = 60_000;
+
+    #[test]
+    fn restart_budget_allows_three_then_stops() {
+        let mut b = Budget::default();
+        assert_eq!(b.take(0), Some(1));
+        assert_eq!(b.take(MIN), Some(2));
+        assert_eq!(b.take(2 * MIN), Some(3));
+        assert_eq!(b.take(3 * MIN), None);
+        // Being refused doesn't extend the window.
+        assert_eq!(b.since, 0);
+    }
+
+    #[test]
+    fn restart_budget_refills_after_the_window() {
+        let mut b = Budget::default();
+        for t in 0..3 {
+            b.take(t * MIN);
+        }
+        assert_eq!(b.take(4 * MIN), None);
+        assert_eq!(b.take(6 * MIN), Some(1));
+    }
+
+    #[test]
+    fn restart_budget_window_starts_at_the_first_crash() {
+        // A service that ran for an hour before crashing gets a fresh window.
+        let mut b = Budget::default();
+        assert_eq!(b.take(60 * MIN), Some(1));
+        assert_eq!(b.since, 60 * MIN);
+    }
+
+    #[test]
+    fn slow_services_have_a_real_check() {
+        // A bare TCP connect answers before a JVM service is ready; only RabbitMQ (no
+        // HTTP on its AMQP port) is allowed that.
+        for kind in ServiceKind::all().into_iter().filter(|k| k.def().slow) {
+            assert!(matches!(kind.def().check, Check::Http(_)) || kind == ServiceKind::Rabbitmq, "{kind:?}");
+        }
+    }
 }

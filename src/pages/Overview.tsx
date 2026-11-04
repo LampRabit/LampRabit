@@ -612,6 +612,9 @@ function ServiceRow({
   const restart = useMutation({ mutationFn: () => api.restartService(service.kind), onError });
   const meta = serviceMeta[service.kind];
   const running = service.state === "running";
+  // Spawned and waiting to answer (Elasticsearch, n8n… take up to a minute): it can be
+  // stopped already.
+  const loading = service.state === "starting" && service.pid != null;
   const busy = service.state === "starting" || service.state === "stopping" || restart.isPending || start.isPending || stop.isPending;
   const degraded = running && service.health?.status === "degraded";
   const conflict = conflictFor(service, ports);
@@ -699,9 +702,9 @@ function ServiceRow({
             <span className="px-2 text-xs text-muted" title="Started by the Ollama app; quit it there to stop it.">
               Ollama app
             </span>
-          ) : running || service.state === "stopping" ? (
+          ) : running || loading || service.state === "stopping" ? (
             <>
-              <Button size="sm" onClick={() => stop.mutate()} disabled={busy} aria-label={`Stop ${service.label}`}>
+              <Button size="sm" onClick={() => stop.mutate()} disabled={busy && !loading} aria-label={`Stop ${service.label}`}>
                 <Square size={11} className="fill-current" /> Stop
               </Button>
               <Button size="sm" variant="ghost" onClick={() => restart.mutate()} disabled={busy} aria-label={`Restart ${service.label}`} title="Restart (R)">

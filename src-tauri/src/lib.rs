@@ -2355,6 +2355,22 @@ pub fn run() {
                 }
             });
 
+            // Crashed services come back after a short pause when Settings says so; the
+            // pause lets ports and lock files go first.
+            let handle = app.handle().clone();
+            let crashes = app.state::<AppState>().supervisor.crashes();
+            tauri::async_runtime::spawn(async move {
+                let Some(mut crashes) = crashes else { return };
+                while let Some(kind) = crashes.recv().await {
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                    let state = handle.state::<AppState>();
+                    let _op = state.ops.lock().await;
+                    let (settings, layout) = state.snapshot().await;
+                    // start() already logged and recorded why it failed.
+                    let _ = state.supervisor.restart_crashed(&handle, kind, &settings, &layout).await;
+                }
+            });
+
             tauri::async_runtime::spawn(watch_ports(app.handle().clone()));
 
             let handle = app.handle().clone();
