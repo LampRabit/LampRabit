@@ -32,14 +32,14 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **8. Release**: installers (NSIS/MSI, dmg, AppImage/deb), signed auto-updates, CI on every push, tag-triggered draft releases (see RELEASING.md)
 - [x] **Polish**: animated logo (ears, eyes, nose every few minutes), page/dialog/list motion, Motion setting (System / Full / Reduced / Off)
 - [x] **9. Linux parity and developer dashboard** (see below)
-- [ ] **10. macOS parity, stability on every OS, safe uninstall**
-- [ ] **11. Service foundation and web servers: Caddy, FrankenPHP, Tomcat (with Java)**
-- [ ] **12. Projects: several domains, processes, Node.js serving** (Node.js serving, port discovery, commands done; extra domains and several processes left)
-- [ ] **13. Logs redesign and dump catcher** (filters and project sources done; dump catcher left)
+- [ ] **10. macOS parity, stability on every OS, safe uninstall** (macOS part in the backlog, the user's choice 2026-11-05)
+- [x] **11. Service foundation and web servers: Caddy, FrankenPHP, Tomcat (with Java)** (2026-11-05: runtime needs and platform gaps from `catalog.rs`; the frontend's runtime and service labels load from it)
+- [x] **12. Projects: several domains, processes, Node.js serving** (2026-11-05: stack profiles list project processes; `lamprabit.toml` saved and applied from a project's Settings)
+- [x] **13. Logs redesign and dump catcher** (2026-11-05: dump catcher, source sidebar, virtualised list, line details, per-source clear, rotation)
 - [ ] **14. Movable tab bar**
 - [ ] **15. More databases: PostgreSQL, MongoDB, SQLite, ClickHouse, Neo4j, backups**
 - [x] **16. More services: Meilisearch, Typesense, RustFS, MinIO, OpenSearch/Elasticsearch, RabbitMQ, Ollama, n8n**
-- [x] **17. Templates and more frameworks** (first part; Node templates and recording wait for phase 12)
+- [x] **17. Templates and more frameworks** (2026-11-05: `processes:` and `domains:` in templates, a template editor, Save as a template)
 - [ ] **18. Onboarding**
 - [ ] **19. Project doctor**
 - [ ] **20. Headless core and the `lamprabit` CLI**
@@ -48,8 +48,8 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [ ] **23. Dependency manager** (part of 25)
 - [ ] **24. Languages: Python, Go, Rust, Java**
 - [ ] **25. Package managers: npm, pnpm, Yarn, Bun, Deno, pip, conda, uv, Maven, Gradle, Cargo**
-- [x] **26. Movable environment folder** (first-run choice waits for onboarding, phase 18)
-- [ ] **Later**: Git workflow builder, deployment checklists, recording setups as templates
+- [x] **26. Movable environment folder** (2026-11-05: the first run asks where the folder goes)
+- [ ] **Later**: Git workflow builder, deployment checklists
 
 **Order (decided 2026-11-01):** services before everything else: 11 → 15 → 16 → 24 → 25 → 22, then the rest. The numbers stay so older references keep working.
 

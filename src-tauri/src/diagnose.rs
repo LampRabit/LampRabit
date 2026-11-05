@@ -52,36 +52,60 @@ pub fn now_ms() -> u64 {
 
 /// Finds the process listening on `port`, if the OS lets us see it.
 pub async fn port_owner(port: u16) -> Option<PortOwner> {
-    let (pid, name) = if cfg!(windows) { windows_owner(port).await? } else { unix_owner(port).await? };
+    let (pid, name) = if cfg!(windows) {
+        windows_owner(port).await?
+    } else {
+        unix_owner(port).await?
+    };
     let lower = name.to_lowercase();
-    let system = pid == 0 || pid == 4 || lower == "system" || lower == "svchost.exe" || pid == std::process::id();
-    Some(PortOwner { note: owner_note(pid, &lower), stoppable: !system, pid, name })
+    let system = pid == 0
+        || pid == 4
+        || lower == "system"
+        || lower == "svchost.exe"
+        || pid == std::process::id();
+    Some(PortOwner {
+        note: owner_note(pid, &lower),
+        stoppable: !system,
+        pid,
+        name,
+    })
 }
 
 async fn output(program: &str, args: &[&str]) -> Option<String> {
     let mut cmd = Command::new(program);
     cmd.args(args);
     procgroup::prepare(&mut cmd);
-    let out = tokio::time::timeout(Duration::from_secs(5), cmd.output()).await.ok()?.ok()?;
+    let out = tokio::time::timeout(Duration::from_secs(5), cmd.output())
+        .await
+        .ok()?
+        .ok()?;
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 async fn windows_owner(port: u16) -> Option<(u32, String)> {
     // "TCP  0.0.0.0:80  0.0.0.0:0  LISTENING  4". The state word is localised, so a
     // listener is recognised by its wildcard foreign address instead.
-    let netstat = output("netstat", &["-ano", "-p", "TCP"]).await.unwrap_or_default()
-        + &output("netstat", &["-ano", "-p", "TCPv6"]).await.unwrap_or_default();
+    let netstat = output("netstat", &["-ano", "-p", "TCP"])
+        .await
+        .unwrap_or_default()
+        + &output("netstat", &["-ano", "-p", "TCPv6"])
+            .await
+            .unwrap_or_default();
     let suffix = format!(":{port}");
     let pid: u32 = netstat.lines().find_map(|line| {
         let cols: Vec<&str> = line.split_whitespace().collect();
         let listening = cols.len() == 5 && (cols[2] == "0.0.0.0:0" || cols[2] == "[::]:0");
-        (listening && cols[1].ends_with(&suffix)).then(|| cols[4].parse().ok()).flatten()
+        (listening && cols[1].ends_with(&suffix))
+            .then(|| cols[4].parse().ok())
+            .flatten()
     })?;
     if pid == 4 {
         return Some((pid, "System".into()));
     }
     let filter = format!("PID eq {pid}");
-    let list = output("tasklist", &["/FI", &filter, "/FO", "CSV", "/NH"]).await.unwrap_or_default();
+    let list = output("tasklist", &["/FI", &filter, "/FO", "CSV", "/NH"])
+        .await
+        .unwrap_or_default();
     let name = list.split('"').nth(1).unwrap_or("unknown").to_string();
     Some((pid, name))
 }
@@ -89,8 +113,14 @@ async fn windows_owner(port: u16) -> Option<(u32, String)> {
 async fn unix_owner(port: u16) -> Option<(u32, String)> {
     let spec = format!("-iTCP:{port}");
     let out = output("lsof", &["-nP", &spec, "-sTCP:LISTEN", "-Fpc"]).await?;
-    let pid = out.lines().find_map(|l| l.strip_prefix('p')?.parse().ok())?;
-    let name = out.lines().find_map(|l| l.strip_prefix('c')).unwrap_or("unknown").to_string();
+    let pid = out
+        .lines()
+        .find_map(|l| l.strip_prefix('p')?.parse().ok())?;
+    let name = out
+        .lines()
+        .find_map(|l| l.strip_prefix('c'))
+        .unwrap_or("unknown")
+        .to_string();
     Some((pid, name))
 }
 
@@ -109,7 +139,11 @@ fn owner_note(pid: u32, name: &str) -> Option<String> {
         "Older Skype versions take ports 80 and 443. Turn off \"Use port 80 and 443\" in Skype's settings."
     } else if name.contains("svchost") {
         "A Windows service is using this port."
-    } else if name.contains("docker") || name.contains("vpnkit") || name.contains("wslrelay") || name.contains("com.docker") {
+    } else if name.contains("docker")
+        || name.contains("vpnkit")
+        || name.contains("wslrelay")
+        || name.contains("com.docker")
+    {
         "Docker or WSL is forwarding a container port here."
     } else if name.starts_with("node") {
         "A Node.js development server is running."
@@ -188,7 +222,9 @@ pub fn explain_exit(service: &str, exit_code: Option<i32>, log_tail: &str) -> Pr
         return Problem::new(
             format!("{service} is missing system libraries"),
             "Windows couldn't load a DLL the program needs.",
-            &["Install the Microsoft Visual C++ 2015–2022 Redistributable (x64) from Microsoft, then start again."],
+            &[
+                "Install the Microsoft Visual C++ 2015–2022 Redistributable (x64) from Microsoft, then start again.",
+            ],
         );
     }
     let lower = log_tail.to_lowercase();
@@ -216,7 +252,10 @@ pub fn explain_exit(service: &str, exit_code: Option<i32>, log_tail: &str) -> Pr
     Problem::new(
         format!("{service} stopped unexpectedly"),
         if last_error.is_empty() {
-            format!("It exited with code {}.", exit_code.map_or("unknown".into(), |c| c.to_string()))
+            format!(
+                "It exited with code {}.",
+                exit_code.map_or("unknown".into(), |c| c.to_string())
+            )
         } else {
             last_error
         },
@@ -227,7 +266,9 @@ pub fn explain_exit(service: &str, exit_code: Option<i32>, log_tail: &str) -> Pr
 /// The last `bytes` of a file, starting at a line boundary.
 pub fn tail(path: &std::path::Path, bytes: u64) -> String {
     use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut f) = std::fs::File::open(path) else { return String::new() };
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return String::new();
+    };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     let from = len.saturating_sub(bytes);
     let mut buf = Vec::new();
@@ -249,7 +290,9 @@ pub enum Probe {
 
 pub async fn probe_http(client: &reqwest::Client, url: &str) -> Probe {
     match client.get(url).timeout(Duration::from_secs(3)).send().await {
-        Ok(r) if r.status().is_server_error() => Probe::Bad(format!("Answers with HTTP {}", r.status().as_u16())),
+        Ok(r) if r.status().is_server_error() => {
+            Probe::Bad(format!("Answers with HTTP {}", r.status().as_u16()))
+        }
         // Read the page before hanging up: Caddy logs a warning for every response the
         // client abandons halfway, which would fill its log every few seconds.
         Ok(r) => {
@@ -284,7 +327,12 @@ pub async fn probe_line(port: u16, command: &[u8], expect: &str) -> Probe {
 /// Whether something accepts connections on the port (MongoDB, whose wire protocol needs
 /// a full message to say more).
 pub async fn probe_tcp(port: u16) -> Probe {
-    match tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(("127.0.0.1", port))).await {
+    match tokio::time::timeout(
+        Duration::from_secs(3),
+        TcpStream::connect(("127.0.0.1", port)),
+    )
+    .await
+    {
         Ok(Ok(_)) => Probe::Ok,
         _ => Probe::Bad(format!("Not accepting connections on port {port}")),
     }
@@ -317,9 +365,10 @@ pub async fn probe_mysql(port: u16) -> Probe {
     };
     match tokio::time::timeout(Duration::from_secs(3), attempt).await {
         Ok(Some(packet)) if packet.len() > 4 && packet[4] == 0x0a => Probe::Ok,
-        Ok(Some(packet)) if packet.len() > 7 && packet[4] == 0xff => {
-            Probe::Bad(format!("Refusing connections: {}", String::from_utf8_lossy(&packet[7..]).trim()))
-        }
+        Ok(Some(packet)) if packet.len() > 7 && packet[4] == 0xff => Probe::Bad(format!(
+            "Refusing connections: {}",
+            String::from_utf8_lossy(&packet[7..]).trim()
+        )),
         Ok(Some(_)) => Probe::Bad("Unexpected reply to a new connection".into()),
         _ => Probe::Bad(format!("Not accepting connections on port {port}")),
     }

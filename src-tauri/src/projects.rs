@@ -62,6 +62,10 @@ pub struct Built {
     pub note: Option<String>,
     /// A Node project's run setup (without its port, which the caller picks).
     pub app: Option<crate::config::NodeApp>,
+    /// The template's processes; port Some(0) means "pick a free one".
+    pub processes: Vec<crate::config::ProjectProcess>,
+    /// The template's subdomains, by their first label.
+    pub domains: Vec<(String, crate::config::DomainTarget)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -325,7 +329,7 @@ pub async fn create_database(ctx: &Ctx<'_>, req: &NewProject, database: &str) ->
 /// Sets `KEY=value` lines in a .env-style file, adding the keys that are missing. Matches
 /// keys shipped commented out ("# DB_HOST=..." in Laravel, "# app.baseURL = ''" in
 /// CodeIgniter) and keeps the file's ` = ` spacing.
-fn set_env(path: &Path, values: &[(String, String)]) -> Result<()> {
+pub(crate) fn set_env(path: &Path, values: &[(String, String)]) -> Result<()> {
     let text = std::fs::read_to_string(path).unwrap_or_default();
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     let spaced_file = lines.iter().any(|l| !l.trim_start().starts_with('#') && l.contains(" = "));
@@ -797,7 +801,34 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source:
         package_manager: req.package_manager,
         serve: a.mode == crate::config::ServeMode::Dynamic,
     });
-    Ok(Built { note: template.done.as_deref().map(|d| values.render(d)), app })
+    let holds = |when: &Option<String>| when.as_deref().is_none_or(|w| values.holds(w).unwrap_or(false));
+    let processes = template
+        .processes
+        .iter()
+        .filter(|p| holds(&p.when))
+        .map(|p| crate::config::ProjectProcess {
+            name: p.name.clone(),
+            command: values.render(&p.command),
+            cwd: values.render(&p.cwd),
+            port: match p.port.as_deref() {
+                Some("auto") => Some(0),
+                Some(n) => n.parse().ok(),
+                None => None,
+            },
+            env: p.env.iter().map(|(k, v)| (k.clone(), values.render(v))).collect(),
+            restart: p.restart,
+            with_app: p.autostart,
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+    // A subdomain pointing at a process that was left out goes with it.
+    let domains = template
+        .domains
+        .iter()
+        .filter(|d| holds(&d.when) && d.process.as_ref().is_none_or(|p| processes.iter().any(|x| &x.name == p)))
+        .map(|d| (d.name.clone(), d.target()))
+        .collect();
+    Ok(Built { note: template.done.as_deref().map(|d| values.render(d)), app, processes, domains })
 }
 
 #[cfg(test)]

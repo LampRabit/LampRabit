@@ -55,6 +55,13 @@ pub struct Settings {
     pub storage: BTreeMap<String, PathBuf>,
     /// Services (by id) started again when they crash, up to a few times in a row.
     pub auto_restart: BTreeSet<String>,
+    /// PHP's dump() and dd() go to Logs (VarDumper's server mode) instead of the page.
+    pub catch_dumps: bool,
+    /// A log file bigger than this (MB) is rotated; `log_keep` older copies are kept, and
+    /// the logs folder as a whole stays under `log_total_mb`.
+    pub log_max_mb: u32,
+    pub log_keep: u32,
+    pub log_total_mb: u32,
 }
 
 /// The two MySQL-compatible servers LampRabit runs.
@@ -94,6 +101,10 @@ impl Database {
 pub struct StackProfile {
     pub name: String,
     pub services: Vec<crate::services::ServiceKind>,
+    /// Project processes it starts too, as "project/process". Only ones listed here: Start
+    /// all and plain services never start projects.
+    #[serde(default)]
+    pub processes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -131,6 +142,11 @@ pub struct SiteSettings {
     pub domains: Vec<ExtraDomain>,
     /// Long-running commands next to the app: a queue worker, a scheduler, Vite.
     pub processes: Vec<ProjectProcess>,
+    /// php.ini settings for this site only (memory_limit, upload_max_filesize…), written
+    /// as a [PATH=] section of php.ini, which php-cgi and php-fpm apply per folder.
+    pub php_ini: std::collections::BTreeMap<String, String>,
+    /// Xdebug starts with every request of this site, not only with XDEBUG_TRIGGER.
+    pub xdebug: bool,
 }
 
 /// Another domain of a project (admin.shop.test), with the same choices as the main one.
@@ -171,11 +187,15 @@ pub struct ProjectProcess {
     pub restart: RestartPolicy,
     /// Starts and stops with the project's app (its Run button).
     pub with_app: bool,
+    /// Starts when LampRabit starts (so at login, when LampRabit starts with the system).
+    pub at_launch: bool,
+    /// A crontab line (`0 3 * * *`): started at those times if it isn't running. Empty for none.
+    pub schedule: String,
 }
 
 impl Default for ProjectProcess {
     fn default() -> Self {
-        Self { name: String::new(), command: String::new(), cwd: String::new(), port: None, env: BTreeMap::new(), restart: RestartPolicy::OnFailure, with_app: true }
+        Self { name: String::new(), command: String::new(), cwd: String::new(), port: None, env: BTreeMap::new(), restart: RestartPolicy::OnFailure, with_app: true, at_launch: false, schedule: String::new() }
     }
 }
 
@@ -428,6 +448,8 @@ pub struct Ports {
     pub memcached: u16,
     /// Mailpit's web inbox.
     pub mail_ui: u16,
+    /// Where PHP's dump() sends dumps for Logs (Symfony's dump server uses 9912 too).
+    pub dumps: u16,
 }
 
 /// Active version per runtime; `None` means not installed yet.
@@ -529,6 +551,10 @@ impl Default for Settings {
             storage: BTreeMap::new(),
             // n8n's Node process is the one that falls over on large workflows.
             auto_restart: BTreeSet::from(["n8n".to_string()]),
+            catch_dumps: false,
+            log_max_mb: 10,
+            log_keep: 3,
+            log_total_mb: 500,
         }
     }
 }
@@ -578,6 +604,7 @@ impl Default for Ports {
             redis: 6379,
             memcached: 11211,
             mail_ui: 8025,
+            dumps: 9912,
         }
     }
 }

@@ -253,7 +253,7 @@ pub fn tomcat_apps(settings: &Settings, layout: &Layout) -> Vec<(String, PathBuf
 
 /// Folder name → DNS label: lowercase letters, digits and dashes. Common accented letters
 /// keep their base letter ("Café" → "cafe") instead of turning into dashes.
-fn label(name: &str) -> Option<String> {
+pub(crate) fn label(name: &str) -> Option<String> {
     let label: String = name
         .to_lowercase()
         .chars()
@@ -472,6 +472,14 @@ pub fn project_folders(dir: &Path) -> Vec<String> {
     out
 }
 
+/// Between a project's name and an extra domain's host in that domain's site name.
+const EXTRA: &str = " › ";
+
+/// Whether a served site is one of a project's extra domains rather than the project.
+pub fn is_extra(site: &Site) -> bool {
+    site.name.contains(EXTRA)
+}
+
 /// A project's extra domains as sites of their own: a copy of the project with the domain
 /// and where it points changed, so every web server, certificate and hosts entry handles
 /// them like any other site.
@@ -481,7 +489,7 @@ fn extra_sites(settings: &Settings, projects: &[Site]) -> Vec<Site> {
         let Some(own) = settings.sites.get(&parent.name) else { continue };
         for extra in &own.domains {
             let mut site = parent.clone();
-            site.name = format!("{} › {}", parent.name, extra.host);
+            site.name = format!("{}{EXTRA}{}", parent.name, extra.host);
             site.domain = extra.host.clone();
             site.url = site_url(settings, site.server, &extra.host, site.ssl);
             // A proxied domain goes to a port: the project's (if it found one listening
@@ -524,7 +532,7 @@ pub fn check_domains(settings: &Settings, layout: &Layout, name: &str, domains: 
     // Every domain served now, except this project's own extras (they're being replaced).
     let others: Vec<(String, String)> = served(settings, layout)
         .into_iter()
-        .filter(|s| !s.name.starts_with(&format!("{name} › ")))
+        .filter(|s| !s.name.starts_with(&format!("{name}{EXTRA}")))
         .map(|s| (s.domain, s.name))
         .collect();
     let mut seen = BTreeSet::new();
@@ -538,8 +546,12 @@ pub fn check_domains(settings: &Settings, layout: &Layout, name: &str, domains: 
             return Err(Error::msg(format!("{host} is listed twice.")));
         }
         if let Some((_, by)) = others.iter().find(|(domain, _)| domain == host) {
-            let by = by.split(" › ").next().unwrap_or(by);
-            return Err(Error::msg(format!("{host} is already used by {by}.")));
+            let by = by.split(EXTRA).next().unwrap_or(by);
+            // Offer the first free numbered name: admin2.shop.test.
+            let sub = &host[..host.len() - suffix.len()];
+            let free = (2..100).map(|n| format!("{sub}{n}{suffix}")).find(|h| !others.iter().any(|(d, _)| d == h) && !domains.iter().any(|d| &d.host == h));
+            let hint = free.map(|h| format!(" Try {}.", &h[..h.len() - suffix.len()])).unwrap_or_default();
+            return Err(Error::msg(format!("{host} is already used by {by}.{hint}")));
         }
         check_target(settings, layout, name, host, &d.target)?;
     }

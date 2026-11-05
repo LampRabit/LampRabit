@@ -11,6 +11,7 @@ import {
   serviceLabels,
   type InstallProgress,
   type RawLogLine,
+  type Crash,
   type StatusEvent,
 } from "./lib/api";
 import { useAppStore } from "./lib/store";
@@ -25,6 +26,8 @@ import BottomNav from "./components/BottomNav";
 import Titlebar from "./components/Titlebar";
 import Diagnostics from "./components/Diagnostics";
 import NewProject from "./components/NewProject";
+import TemplateEditor from "./components/TemplateEditor";
+import FirstRunDialog from "./components/FirstRunDialog";
 import ShortcutsDialog from "./components/ShortcutsDialog";
 import { useHotkeys } from "./lib/shortcuts";
 import { useStack } from "./lib/stack";
@@ -46,6 +49,15 @@ function useBackendEvents() {
       }),
       listen("service-health", () => queryClient.invalidateQueries({ queryKey: ["services"] })),
       listen("tunnels-changed", () => queryClient.invalidateQueries({ queryKey: ["tunnels"] })),
+      // A project's process or dev server crashed: say so with its last lines, wherever you are.
+      listen<Crash>("process-crashed", ({ payload }) => {
+        const [project, process] = payload.name.split("/");
+        const who = process ? `${process} (${project})` : `${project}'s dev server`;
+        const code = payload.exitCode != null ? ` with exit code ${payload.exitCode}` : "";
+        const next = payload.gaveUp ? ". It crashed 3 times in a few minutes, so it's left stopped." : payload.restarting ? ", restarting it." : ".";
+        notify("error", `${who} crashed${code}${next}`, payload.lines);
+        record(`${who} crashed`, project, "error");
+      }),
       // A project's dev server came up or went away: its domain moved.
       listen<string[]>("routes-changed", ({ payload }) => {
         queryClient.invalidateQueries({ queryKey: ["sites"] });
@@ -158,6 +170,8 @@ export default function App() {
       <Notices />
       <Diagnostics />
       <NewProject />
+      <TemplateEditor />
+      <FirstRunDialog />
       <ShortcutsDialog />
     </div>
   );

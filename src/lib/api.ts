@@ -48,81 +48,19 @@ export type Runtime =
   | "rust"
   | "maven"
   | "gradle";
-export const coreRuntimes: Runtime[] = ["apache", "nginx", "caddy", "frankenphp", "php", "mariadb", "mysql"];
-export const toolRuntimes: Runtime[] = ["composer", "mailpit", "adminer", "phpmyadmin", "redis", "phpredisadmin", "memcached", "ngrok", "cloudflared"];
+// Labels come from the backend's catalog (catalog.rs), loaded once before the first render
+// (loadLabels), so a runtime is named in one place. An id the catalog doesn't name shows as
+// itself rather than as "undefined".
+const labels: Record<string, string> = {};
+const byId = new Proxy(labels, { get: (target, key) => (typeof key === "string" ? (target[key] ?? key) : undefined) });
+export const runtimeLabels = byId as Record<Runtime, string>;
+export const serviceLabels = byId as Record<ServiceKind, string>;
 
-export const serviceLabels: Record<ServiceKind, string> = {
-  apache: "Apache",
-  nginx: "Nginx",
-  caddy: "Caddy",
-  frankenphp: "FrankenPHP",
-  tomcat: "Tomcat",
-  postgres: "PostgreSQL",
-  pgadmin: "pgAdmin",
-  mongodb: "MongoDB",
-  clickhouse: "ClickHouse",
-  neo4j: "Neo4j",
-  meilisearch: "Meilisearch",
-  typesense: "Typesense",
-  rustfs: "RustFS",
-  ollama: "Ollama",
-  minio: "MinIO",
-  elasticsearch: "Elasticsearch",
-  opensearch: "OpenSearch",
-  n8n: "n8n",
-  rabbitmq: "RabbitMQ",
-  mariadb: "MariaDB",
-  mysql: "MySQL",
-  mailpit: "Mailpit",
-  redis: "Redis",
-  memcached: "Memcached",
-};
-
-export const runtimeLabels: Record<Runtime, string> = {
-  apache: "Apache",
-  nginx: "Nginx",
-  php: "PHP",
-  mariadb: "MariaDB",
-  mailpit: "Mailpit",
-  adminer: "Adminer",
-  phpmyadmin: "phpMyAdmin",
-  ngrok: "Ngrok",
-  cloudflared: "Cloudflare Tunnel",
-  redis: "Redis",
-  composer: "Composer",
-  mysql: "MySQL",
-  phpredisadmin: "phpRedisAdmin",
-  memcached: "Memcached",
-  caddy: "Caddy",
-  java: "Java",
-  tomcat: "Tomcat",
-  frankenphp: "FrankenPHP",
-  postgres: "PostgreSQL",
-  python: "Python",
-  phppgadmin: "phpPgAdmin",
-  pgadmin: "pgAdmin",
-  mongodb: "MongoDB",
-  mongosh: "mongosh",
-  mongotools: "MongoDB Database Tools",
-  compass: "MongoDB Compass",
-  sqlite: "SQLite",
-  clickhouse: "ClickHouse",
-  neo4j: "Neo4j",
-  meilisearch: "Meilisearch",
-  typesense: "Typesense",
-  rustfs: "RustFS",
-  ollama: "Ollama",
-  minio: "MinIO",
-  elasticsearch: "Elasticsearch",
-  opensearch: "OpenSearch",
-  n8n: "n8n",
-  rabbitmq: "RabbitMQ",
-  erlang: "Erlang",
-  go: "Go",
-  rust: "Rust",
-  maven: "Maven",
-  gradle: "Gradle",
-};
+/** Fills runtimeLabels and serviceLabels from the backend; call before rendering. */
+export async function loadLabels() {
+  const catalog = await invoke<RuntimeCatalog>("runtime_info");
+  for (const r of catalog.runtimes) labels[r.id] = r.label;
+}
 
 export interface UpdateNotice {
   runtime: Runtime;
@@ -294,6 +232,10 @@ export interface ProjectProcess {
   restart: RestartPolicy;
   /** Starts and stops with the project's app. */
   withApp: boolean;
+  /** Starts when LampRabit starts. */
+  atLaunch: boolean;
+  /** A crontab line ("0 3 * * *"); "" for none. */
+  schedule: string;
 }
 
 export interface Site {
@@ -491,7 +433,7 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export type LogService = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "minio" | "elasticsearch" | "opensearch" | "n8n" | "rabbitmq" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system" | "project";
+export type LogService = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "minio" | "elasticsearch" | "opensearch" | "n8n" | "rabbitmq" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system" | "project" | "dumps";
 
 /** A raw log line from a service's output or one of its log files. */
 export interface RawLogLine {
@@ -562,6 +504,25 @@ export interface AppInfo {
   status: AppStatus;
 }
 
+/** A command run for a project, from its run history. */
+export interface CommandRun {
+  label: string;
+  command: string;
+  started: number;
+  durationMs: number;
+  /** null when it was stopped. */
+  exitCode: number | null;
+}
+
+/** A project's process (or dev server) that crashed: the "process-crashed" event. */
+export interface Crash {
+  name: string;
+  exitCode: number | null;
+  lines: string[];
+  restarting: boolean;
+  gaveUp: boolean;
+}
+
 export interface AppOutput {
   name: string;
   line: string;
@@ -583,6 +544,17 @@ export interface ProjectCommands {
 }
 
 /** What the Overview shows about a project beyond the site list (project_facts). */
+/** Whether a project's database can be used; from databaseStatus. */
+export interface DbStatus {
+  engine: "mariadb" | "mysql" | "postgres" | "sqlite";
+  label: string;
+  database: string;
+  installed: boolean;
+  running: boolean;
+  /** null when it can't be told (PostgreSQL while stopped). */
+  exists: boolean | null;
+}
+
 export interface ProjectFacts {
   package: string | null;
   description: string | null;
@@ -591,7 +563,8 @@ export interface ProjectFacts {
   frameworkVersion: string | null;
   phpRequirement: string | null;
   nodeRequirement: string | null;
-  dependencies: { manager: string; count: number; devCount: number; installed: boolean }[];
+  /** outdated: installed, but the lock file changed since (a pull, a branch switch). */
+  dependencies: { manager: string; count: number; devCount: number; installed: boolean; outdated: boolean }[];
   envFile: string | null;
   /** [key, value] pairs; secrets are never included. */
   env: [string, string][];
@@ -656,6 +629,8 @@ export interface Settings {
     mailUi: number;
     redis: number;
     memcached: number;
+    /** Where PHP's dump() sends dumps for Logs. */
+    dumps: number;
   };
   versions: Partial<Record<Runtime, string | null>>;
   /** The web servers that run; the first is the primary one (main ports, localhost, tools). */
@@ -670,7 +645,7 @@ export interface Settings {
   startServicesOnLaunch: boolean;
   editor: string;
   /** `worker`: FrankenPHP worker mode (the app stays in memory between requests). */
-  sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null; worker?: boolean; main?: DomainTarget | null; domains?: ExtraDomain[]; processes?: ProjectProcess[] }>;
+  sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null; worker?: boolean; main?: DomainTarget | null; domains?: ExtraDomain[]; processes?: ProjectProcess[]; phpIni?: Record<string, string>; xdebug?: boolean }>;
   profiles: StackProfile[];
   /** What `mysql`, new projects and the database tools use first. */
   defaultDatabase: Database;
@@ -678,12 +653,53 @@ export interface Settings {
   storage: Record<string, string>;
   /** Services (by id) started again when they crash, a few times in a row at most. */
   autoRestart: string[];
+  /** dump() and dd() go to Logs instead of the page. */
+  catchDumps: boolean;
+  /** Log files over logMaxMb are rotated, logKeep old copies kept, the folder under logTotalMb. */
+  logMaxMb: number;
+  logKeep: number;
+  logTotalMb: number;
+}
+
+/** One node of a caught dump's value, as dumps.rs renders VarDumper's Data. */
+export interface DumpNode {
+  kind: "string" | "int" | "float" | "bool" | "null" | "array" | "object" | "resource" | "enum" | "more";
+  class?: string;
+  value?: string;
+  count?: number;
+  cut?: number;
+  children?: { key: string; node: DumpNode }[];
+}
+
+/** A dump() caught from a project. */
+export interface Dump {
+  id: number;
+  time: string;
+  project: string | null;
+  file: string | null;
+  line: number | null;
+  /** "GET /users", or the console command. */
+  origin: string | null;
+  tree: DumpNode;
 }
 
 export type Database = "mariadb" | "mysql";
 
 /** A named set of services started and stopped together. */
+/** A project's lamprabit.toml: its setup, to commit and share. Subdomains go by their first label. */
+export interface ProjectFile {
+  php?: string;
+  server?: Server;
+  ssl?: boolean;
+  phpIni?: Record<string, string>;
+  main?: DomainTarget;
+  domains?: { name: string; target: DomainTarget }[];
+  processes?: ProjectProcess[];
+}
+
 export interface StackProfile {
+  /** Project processes it starts too, as "project/process". */
+  processes?: string[];
   name: string;
   services: ServiceKind[];
 }
@@ -758,11 +774,25 @@ export const api = {
   processesAll: (name: string, start: boolean) => invoke<void>("processes_all", { name, start }),
   projectCommands: (name: string) => invoke<ProjectCommands>("project_commands", { name }),
   projectFacts: (name: string) => invoke<ProjectFacts>("project_facts", { name }),
+  databaseStatus: (name: string) => invoke<DbStatus | null>("database_status", { name }),
+  createProjectDatabase: (name: string) => invoke<void>("create_project_database", { name }),
+  setProjectEnv: (name: string, key: string, value: string) => invoke<void>("set_project_env", { name, key, value }),
+  portsListening: (ports: number[]) => invoke<number[]>("ports_listening", { ports }),
+  setSitePhpIni: (name: string, values: Record<string, string>, xdebug: boolean) => invoke<void>("set_site_php_ini", { name, values, xdebug }),
+  renameProject: (name: string, newName: string) => invoke<void>("rename_project", { name, newName }),
+  deleteProject: (name: string, dropDatabase: boolean) => invoke<void>("delete_project", { name, dropDatabase }),
   setSiteRoute: (name: string, port: number | null) => invoke<void>("set_site_route", { name, port }),
   runProjectCommand: (name: string, label: string, command: string) => invoke<void>("run_project_command", { name, label, command }),
   stopProjectCommand: (name: string) => invoke<void>("stop_project_command", { name }),
+  commandHistory: (name: string) => invoke<CommandRun[]>("command_history", { name }),
+  /** Unix ms of each scheduled process's next run, by process name. */
+  processNextRuns: (name: string) => invoke<Record<string, number>>("process_next_runs", { name }),
   saveProjectCommands: (name: string, commands: UserCommand[]) => invoke<void>("save_project_commands", { name, commands }),
   openTemplatesFolder: () => invoke<void>("open_templates_folder"),
+  /** A template that recreates the project, as YAML. */
+  templateFromProject: (name: string) => invoke<string>("template_from_project", { name }),
+  /** Checks and saves a template; returns its id. */
+  saveTemplate: (yaml: string, replace: boolean) => invoke<string>("save_template", { yaml, replace }),
   tunnelStart: (provider: TunnelProvider, site: string | null, port: number | null) =>
     invoke<Tunnel>("tunnel_start", { provider, site, port }),
   tunnelStop: (id: string) => invoke<void>("tunnel_stop", { id }),
@@ -793,6 +823,9 @@ export const api = {
   deleteBackup: (path: string) => invoke<void>("delete_backup", { path }),
   openCompass: () => invoke<void>("open_compass"),
   ollamaElsewhere: () => invoke<string | null>("ollama_elsewhere"),
+  /** True on the first run, until the LampRabit folder's place is confirmed. */
+  firstRun: () => invoke<boolean>("first_run"),
+  finishFirstRun: () => invoke<void>("finish_first_run"),
   checkMoveTarget: (target: string) => invoke<MoveCheck>("check_move_target", { target }),
   environmentInUse: () => invoke<Holder[]>("environment_in_use"),
   stopEnvironmentHolder: (pid: number) => invoke<void>("stop_environment_holder", { pid }),
@@ -812,9 +845,15 @@ export const api = {
   diagnostics: (redact: boolean) => invoke<string>("diagnostics", { redact }),
   saveText: (path: string, contents: string) => invoke<void>("save_text", { path, contents }),
   logHistory: () => invoke<LogHistory>("log_history"),
-  clearLogs: () => invoke<void>("clear_logs"),
+  /** One source ("apache", "dumps", "project:shop"), or every log with none. */
+  clearLogs: (source?: string) => invoke<void>("clear_logs", { source: source ?? null }),
+  listDumps: () => invoke<Dump[]>("list_dumps"),
+  setCatchDumps: (enabled: boolean) => invoke<void>("set_catch_dumps", { enabled }),
   runtimeInfo: () => invoke<RuntimeCatalog>("runtime_info"),
   /** What `version` (default: the active one, else the newest download) needs. */
+  projectFile: (name: string) => invoke<{ file: ProjectFile; matches: boolean } | null>("project_file", { name }),
+  saveProjectFile: (name: string) => invoke<void>("save_project_file", { name }),
+  applyProcesses: (start: string[], stop: string[]) => invoke<string[]>("apply_processes", { start, stop }),
   runtimeRequirements: (runtime: Runtime, version?: string) => invoke<Requirement[]>("runtime_requirements", { runtime, version: version ?? null }),
   runtimeCatalog: (runtime: Runtime, fresh = false) => invoke<Release[]>("runtime_catalog", { runtime, fresh }),
   installedRuntimes: () => invoke<InstalledRuntime[]>("installed_runtimes"),

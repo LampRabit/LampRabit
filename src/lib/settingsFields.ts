@@ -47,6 +47,7 @@ export const portFields: { key: PortKey; label: string; hint: string; runtime?: 
   { key: "rabbitmq", label: "RabbitMQ", hint: "AMQP, what apps connect to", runtime: "rabbitmq" },
   { key: "rabbitmqManagement", label: "RabbitMQ console", hint: "Its management console", runtime: "rabbitmq" },
   { key: "phpFpm", label: "PHP FastCGI", hint: "First of 10 ports per PHP version", runtime: "php" },
+  { key: "dumps", label: "Dumps", hint: "Where dump() sends dumps for Logs, while catching is on", runtime: "php" },
   { key: "redis", label: "Redis", hint: "Cache and queues", runtime: "redis" },
   { key: "memcached", label: "Memcached", hint: "Memory cache", runtime: "memcached" },
 ];

@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -238,6 +238,35 @@ pub struct AppOutput {
     pub stream: &'static str,
 }
 
+/// A command run for a project, kept in its run history.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandRun {
+    pub label: String,
+    pub command: String,
+    /// Unix time in milliseconds it started.
+    pub started: u64,
+    pub duration_ms: u64,
+    /// None when it was stopped.
+    pub exit_code: Option<i32>,
+}
+
+/// A project's process (or dev server) that crashed: shown as an alert with its last lines.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Crash {
+    pub name: String,
+    pub exit_code: Option<i32>,
+    pub lines: Vec<String>,
+    /// Being restarted by its restart policy.
+    pub restarting: bool,
+    /// Crashed too often in a few minutes, so it's left stopped.
+    pub gave_up: bool,
+}
+
+/// Runs kept per project.
+const HISTORY: usize = 30;
+
 /// Log files are trimmed to their last half when they pass this size.
 const LOG_FILE_MAX: u64 = 2 * 1024 * 1024;
 
@@ -290,6 +319,24 @@ pub fn restart_requests() -> Option<tokio::sync::mpsc::UnboundedReceiver<(String
 #[derive(Default, Clone)]
 pub struct Apps {
     entries: Arc<Mutex<HashMap<String, Entry>>>,
+}
+
+fn history_file(layout: &Layout, name: &str) -> PathBuf {
+    layout.logs().join("apps").join(format!("{name}.runs.json"))
+}
+
+/// A project's recent command runs, newest first.
+pub fn history(layout: &Layout, name: &str) -> Vec<CommandRun> {
+    std::fs::read_to_string(history_file(layout, name)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+fn remember(layout: &Layout, name: &str, run: CommandRun) {
+    let mut runs = history(layout, name);
+    runs.insert(0, run);
+    runs.truncate(HISTORY);
+    if let Ok(text) = serde_json::to_string(&runs) {
+        let _ = std::fs::write(history_file(layout, name), text);
+    }
 }
 
 fn log_file(layout: &Layout, name: &str) -> PathBuf {
@@ -360,6 +407,16 @@ impl Apps {
         }
         let _ = app.emit("app-output", AppOutput { name: name.to_string(), line: stamped.clone(), stream });
         logs::push_project(app, name, stream, stamped);
+    }
+
+    /// Tells the UI a process crashed, with its last few lines of output.
+    async fn report_crash(&self, app: &AppHandle, name: &str, exit_code: Option<i32>, restarting: bool, gave_up: bool) {
+        let lines: Vec<String> = {
+            let entries = self.entries.lock().await;
+            let log = entries.get(name).map(|e| e.log.iter().filter(|l| !l.contains("] command: ")).cloned().collect::<Vec<_>>()).unwrap_or_default();
+            log[log.len().saturating_sub(4)..].iter().map(|l| l.split_once(": ").map_or(l.as_str(), |(_, rest)| rest).to_string()).collect()
+        };
+        let _ = app.emit("process-crashed", Crash { name: name.to_string(), exit_code, lines, restarting, gave_up });
     }
 
     /// Streams a process's stdout or stderr into the project's output.
@@ -487,16 +544,21 @@ impl Apps {
                 Some(c) => format!("The app exited with code {c}"),
             };
             apps.record(&handle, &layout_c, &n, "command", note).await;
+            let mut crashed = false;
             apps.update(&handle, &n, |e| {
                 if e.run != run {
                     return;
                 }
                 e.group = None;
                 e.status.state = if e.stopping || code == Some(0) { "stopped" } else { "crashed" };
+                crashed = e.status.state == "crashed";
                 e.status.exit_code = code;
                 e.status.pid = None;
             })
             .await;
+            if crashed {
+                apps.report_crash(&handle, &n, code, false, false).await;
+            }
         });
         // Ready: the port answers. A process that isn't served (an asset dev server) may
         // listen elsewhere, so it counts as running once started.
@@ -635,15 +697,23 @@ impl Apps {
                 Some(c) => format!("{process_c} exited with code {c}"),
                 None => format!("{process_c} stopped"),
             };
+            let crashed = !stopping && code != Some(0);
             if !again {
                 apps.record(&handle, &layout_c, &k, "command", note).await;
+                if crashed {
+                    apps.report_crash(&handle, &k, code, false, false).await;
+                }
                 return;
             }
             if !allowed {
                 apps.record(&handle, &layout_c, &k, "error", format!("{note}; it exited {RESTARTS_IN_WINDOW} times in a few minutes, so it isn't restarted again. Check its output, then start it yourself.")).await;
+                apps.report_crash(&handle, &k, code, false, true).await;
                 return;
             }
             apps.record(&handle, &layout_c, &k, "command", format!("{note}; restarting it")).await;
+            if crashed {
+                apps.report_crash(&handle, &k, code, true, false).await;
+            }
             tokio::time::sleep(Duration::from_secs(2)).await;
             // Stopped (or started by hand) during the pause: leave it be.
             if apps.entries.lock().await.get(&k).is_some_and(|e| e.run != run || e.stopping) {
@@ -798,9 +868,11 @@ impl Apps {
         if let Some(err) = child.stderr.take() {
             self.pipe(app, layout, name, "error", err);
         }
-        let (apps, handle, n, layout, label) = (self.clone(), app.clone(), name.to_string(), layout.clone(), label.to_string());
+        let (apps, handle, n, layout, label, command) = (self.clone(), app.clone(), name.to_string(), layout.clone(), label.to_string(), command.to_string());
+        let started = diagnose::now_ms();
         tauri::async_runtime::spawn(async move {
             let code = child.wait().await.ok().and_then(|s| s.code());
+            remember(&layout, &n, CommandRun { label: label.clone(), command, started, duration_ms: diagnose::now_ms().saturating_sub(started), exit_code: code });
             // Let the last output lines land before the summary.
             tokio::time::sleep(Duration::from_millis(150)).await;
             let summary = match code {

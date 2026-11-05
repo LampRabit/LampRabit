@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FolderOpen, Hexagon, Puzzle, RefreshCw, Share2, Trash2 } from "lucide-react";
+import { ExternalLink, FolderOpen, Hexagon, Play, Puzzle, RefreshCw, RotateCw, Share2, Square, Trash2 } from "lucide-react";
 import ExtensionsDialog from "../components/ExtensionsDialog";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import clsx from "clsx";
@@ -246,6 +246,25 @@ function RuntimeCard({
     onError,
   });
 
+  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
+  const service = services.data?.find((s) => s.kind === runtime);
+  const startService = useMutation({
+    mutationFn: () => api.startService(service!.kind),
+    onSuccess: refresh,
+    onError: (e) => notify("error", String(e)),
+  });
+  const stopService = useMutation({
+    mutationFn: () => api.stopService(service!.kind),
+    onSuccess: refresh,
+    onError: (e) => notify("error", String(e)),
+  });
+  const restartService = useMutation({
+    mutationFn: () => api.restartService(service!.kind),
+    onSuccess: refresh,
+    onError: (e) => notify("error", String(e)),
+  });
+  const serviceBusy = startService.isPending || stopService.isPending || restartService.isPending;
+
   const have = [...(installed?.versions ?? [])].sort(newestFirst);
   const active = installed?.active ?? null;
   const others = have.filter((v) => v !== active);
@@ -269,6 +288,32 @@ function RuntimeCard({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {action}
+          {service && service.installed && (
+            service.state === "running" ? (
+              <div className="flex items-center gap-1.5">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-xs font-semibold text-accent-text">
+                  <span className="size-1.5 rounded-full bg-ok" />
+                  Running{service.port ? ` :${service.port}` : ""}
+                </span>
+                <Button size="sm" onClick={() => stopService.mutate()} disabled={serviceBusy} aria-label={`Stop ${label}`} title="Stop service">
+                  <Square size={11} className="fill-current" /> Stop
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => restartService.mutate()} disabled={serviceBusy} aria-label={`Restart ${label}`} title="Restart service">
+                  <RotateCw size={14} className={clsx(restartService.isPending && "animate-spin")} />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-medium text-muted">
+                  <span className="size-1.5 rounded-full bg-muted/60" />
+                  Stopped
+                </span>
+                <Button size="sm" variant="primary" onClick={() => startService.mutate()} disabled={serviceBusy} aria-label={`Start ${label}`} title="Start service">
+                  <Play size={12} /> Start
+                </Button>
+              </div>
+            )
+          )}
           {runtime === "php" && active && os === "windows" && (
             <Button size="sm" variant="soft" onClick={() => setExtOpen(true)}>
               <Puzzle size={14} /> Extensions

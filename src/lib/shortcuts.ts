@@ -38,6 +38,13 @@ export const SHORTCUTS: { group: string; items: { keys: string[]; label: string 
       { keys: ["L"], label: "Its logs" },
     ],
   },
+  {
+    group: "Sites: a project",
+    items: [
+      { keys: ["["], label: "Previous tab (Overview, Commands, Domains, Settings)" },
+      { keys: ["]"], label: "Next tab" },
+    ],
+  },
 
 ];
 

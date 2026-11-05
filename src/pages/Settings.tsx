@@ -12,6 +12,7 @@ import {
   Layers,
   LifeBuoy,
   Mail,
+  ScrollText,
   Monitor,
   Moon,
   Palette,
@@ -55,6 +56,7 @@ const sections = [
   { id: "versions", label: "Active versions", icon: Layers },
   { id: "ports", label: "Ports", icon: Plug },
   { id: "email", label: "Email", icon: Mail },
+  { id: "logs", label: "Logs", icon: ScrollText },
   { id: "sharing", label: "Sharing", icon: Share2 },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "updates", label: "Updates", icon: Sparkles },
@@ -121,17 +123,18 @@ export default function Settings() {
   const dirty =
     !!draft &&
     !!settings.data &&
-    (JSON.stringify({ ...draft, versions: null, sites: null, profiles: null }) !==
-      JSON.stringify({ ...settings.data, versions: null, sites: null, profiles: null }) ||
+    (JSON.stringify({ ...draft, versions: null, sites: null, profiles: null, catchDumps: null }) !==
+      JSON.stringify({ ...settings.data, versions: null, sites: null, profiles: null, catchDumps: null }) ||
       JSON.stringify(versions) !== JSON.stringify(activeVersions));
 
   const save = useMutation({
     mutationFn: async () => {
       if (!draft || !settings.data) return;
       // Versions are switched separately so running services restart onto them; per-site
-      // options and profiles are owned by other screens, so they come from the latest copy.
+      // options, profiles and the dump catcher (it restarts PHP) are owned by their own
+      // controls, so they come from the latest copy.
       const latest = await api.getSettings();
-      await api.saveSettings({ ...draft, versions: latest.versions, sites: latest.sites, profiles: latest.profiles });
+      await api.saveSettings({ ...draft, versions: latest.versions, sites: latest.sites, profiles: latest.profiles, catchDumps: latest.catchDumps });
       for (const runtime of Object.keys(versions ?? {}) as Runtime[]) {
         const version = versions?.[runtime];
         if (version && version !== activeVersions?.[runtime]) await api.setActiveVersion(runtime, version);
@@ -477,6 +480,38 @@ export default function Settings() {
                 onChange={(e) => setPort("mailUi", Number(e.target.value))}
                 aria-label="Mailpit inbox port"
               />
+            </Row>
+          </Section>
+
+          <Section id="logs" title="Logs" subtitle="How big log files may grow, and what PHP's dump() does.">
+            <ToggleRow
+              label="Catch dump() and dd()"
+              hint="Laravel and Symfony dumps from web requests show in Logs (as a tree you can fold) instead of in the page. Console commands like tinker still print in the terminal. Applies right away; PHP restarts."
+              checked={draft.catchDumps}
+              onChange={(v) =>
+                api.setCatchDumps(v).then(
+                  () => {
+                    setDraft({ ...draft, catchDumps: v });
+                    queryClient.invalidateQueries({ queryKey: ["settings"] });
+                  },
+                  (e) => notify("error", String(e)),
+                )
+              }
+            />
+            <Row label="Rotate a log at" hint="A bigger file is copied aside and started afresh; checked about once a minute.">
+              <span className="flex items-center gap-2 text-sm text-muted">
+                <input type="number" min={1} max={2048} className={numberInput} value={draft.logMaxMb} onChange={(e) => set({ logMaxMb: Math.max(1, Number(e.target.value)) })} aria-label="Rotate a log at (MB)" />
+                MB
+              </span>
+            </Row>
+            <Row label="Old copies to keep" hint="Per log file, as name.1.log, name.2.log…; 0 keeps none.">
+              <input type="number" min={0} max={20} className={numberInput} value={draft.logKeep} onChange={(e) => set({ logKeep: Math.min(20, Math.max(0, Number(e.target.value))) })} aria-label="Old copies to keep" />
+            </Row>
+            <Row label="Logs folder limit" hint="Over this, the oldest copies are deleted first.">
+              <span className="flex items-center gap-2 text-sm text-muted">
+                <input type="number" min={10} max={100000} className={numberInput} value={draft.logTotalMb} onChange={(e) => set({ logTotalMb: Math.max(10, Number(e.target.value)) })} aria-label="Logs folder limit (MB)" />
+                MB
+              </span>
             </Row>
           </Section>
 

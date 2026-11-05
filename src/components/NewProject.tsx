@@ -18,12 +18,14 @@ import {
   Flame,
   FlameKindling,
   FolderCog,
+  Plus,
   FolderOpen,
   FolderPlus,
   Layers,
   Leaf,
   Loader2,
   Newspaper,
+  Search,
   SquareTerminal,
   X,
   Zap,
@@ -133,9 +135,24 @@ export default function NewProject() {
   const [steps, setSteps] = useState<string[]>([]);
   const [output, setOutput] = useState<string[]>([]);
   const outputEnd = useRef<HTMLDivElement>(null);
+  const [templateFilter, setTemplateFilter] = useState<"all" | "php" | "node" | "python" | "go" | "java" | "other">("all");
+  const [templateSearch, setTemplateSearch] = useState("");
 
   const templates = catalog.data?.templates ?? [];
   const template: ProjectTemplate | undefined = templates.find((t) => t.id === templateId) ?? templates[0];
+  const filteredTemplates = useMemo(() => {
+    const q = templateSearch.trim().toLowerCase();
+    return templates.filter((t) => {
+      if (templateFilter === "php" && !t.usesPhp) return false;
+      if (templateFilter === "node" && !t.usesNode) return false;
+      if (templateFilter === "python" && !t.python) return false;
+      if (templateFilter === "go" && !t.go) return false;
+      if (templateFilter === "java" && !t.java) return false;
+      if (templateFilter === "other" && (t.usesPhp || t.usesNode || t.python || t.go || t.java)) return false;
+      if (q && ![t.name, t.description ?? "", t.id].some((f) => f.toLowerCase().includes(q))) return false;
+      return true;
+    });
+  }, [templates, templateFilter, templateSearch]);
   const phpVersions = installed.data?.find((i) => i.runtime === "php")?.versions ?? [];
   // The installed servers this template can use, the default database first.
   const engines = (template?.engines ?? ["mariadb", "mysql"])
@@ -245,22 +262,27 @@ export default function NewProject() {
     [template, name, taken, needsPhp, needsNode, languageMissing, phpTooOld, dbMissing, missingRequired, usesDb, db, risks.length, approved],
   );
 
-  // The wizard's steps; Options and Database only when the template has any.
+  // Streamlined 3-step wizard: 1. Template, 2. Configuration, 3. Review
   const wizardSteps = [
-    { id: "template", label: "Template" },
-    { id: "project", label: "Project" },
-    ...(shownVariables.length > 0 || shownOptional.length > 0 ? [{ id: "options", label: "Options" }] : []),
-    ...(dbUse !== "none" ? [{ id: "database", label: "Database" }] : []),
-    { id: "review", label: "Review" },
+    { id: "template", label: "1. Template" },
+    { id: "configure", label: "2. Configuration" },
+    { id: "review", label: "3. Review" },
   ] as const;
   const stepIndex = Math.min(stepAt, wizardSteps.length - 1);
   const stepId = wizardSteps[stepIndex].id;
   // What each step needs before Next.
   const stepReady: Record<(typeof wizardSteps)[number]["id"], boolean> = {
     template: !!template,
-    project: validName(name) && !taken && !needsPhp && !needsNode && !languageMissing && !phpTooOld,
-    options: !missingRequired,
-    database: !dbMissing && (!usesDb || chosenEngine === "sqlite" || /^[A-Za-z0-9_]{1,64}$/.test(db)),
+    configure:
+      validName(name) &&
+      !taken &&
+      !needsPhp &&
+      !needsNode &&
+      !languageMissing &&
+      !phpTooOld &&
+      !missingRequired &&
+      !dbMissing &&
+      (!usesDb || chosenEngine === "sqlite" || /^[A-Za-z0-9_]{1,64}$/.test(db)),
     review: canCreate,
   };
   const review: [string, string][] = template
@@ -371,38 +393,76 @@ export default function NewProject() {
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
             {stepId === "template" && (
               <div className="space-y-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="max-w-full overflow-x-auto pb-1 sm:pb-0">
+                    <Segmented
+                      value={templateFilter}
+                      onChange={(v: "all" | "php" | "node" | "python" | "go" | "java" | "other") => setTemplateFilter(v)}
+                      className="p-0.5 text-xs shrink-0"
+                      options={[
+                        { value: "all", label: "All" },
+                        { value: "php", label: "PHP" },
+                        { value: "node", label: "Node.js" },
+                        { value: "python", label: "Python" },
+                        { value: "go", label: "Go" },
+                        { value: "java", label: "Java" },
+                        { value: "other", label: "Other" },
+                      ]}
+                    />
+                  </div>
+                  <div className="relative w-full sm:w-64">
+                    <Search size={14} className="pointer-events-none absolute top-2.5 left-3 text-muted" />
+                    <input
+                      type="text"
+                      placeholder="Search templates…"
+                      value={templateSearch}
+                      onChange={(e) => setTemplateSearch(e.target.value)}
+                      className={clsx(inputClass, "h-8 pl-8 text-xs")}
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <span className="mb-2 block text-sm font-semibold">Start from</span>
                   {catalog.isLoading && <p className="text-sm text-muted">Loading templates…</p>}
                   {catalog.error && <p className="text-sm text-danger-text">{String(catalog.error)}</p>}
+                  {filteredTemplates.length === 0 && !catalog.isLoading && (
+                    <p className="py-8 text-center text-sm text-muted">No templates match your search.</p>
+                  )}
                   <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                    {templates.map((t) => {
+                    {filteredTemplates.map((t) => {
                       const Icon = icons[t.icon ?? ""] ?? Box;
+                      const selected = template?.id === t.id;
                       return (
                         <button
                           key={t.id}
                           onClick={() => setTemplateId(t.id)}
-                          aria-pressed={template?.id === t.id}
+                          onDoubleClick={() => setStepAt(1)}
+                          aria-pressed={selected}
                           className={clsx(
                             "flex items-start gap-3 rounded-xl border p-3 text-left transition-colors",
-                            template?.id === t.id ? "border-accent bg-accent-soft" : "border-line hover:border-accent/40",
+                            selected ? "border-accent bg-accent-soft shadow-card ring-1 ring-accent" : "border-line bg-surface hover:border-accent/40",
                           )}
                         >
                           <div className={clsx("flex size-9 shrink-0 items-center justify-center rounded-lg", tiles[t.color ?? ""] ?? "bg-surface-2 text-fg")}>
                             <Icon size={18} />
                           </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 font-semibold">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1 font-semibold">
                               <span className="truncate">{t.name}</span>
                               {t.source === "user" && <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-muted uppercase">Yours</span>}
                             </div>
-                            <div className="text-xs text-muted">{t.description}</div>
-                            {t.duration && <div className="mt-1 text-[11px] text-muted/80">{t.duration}</div>}
+                            <div className="mt-0.5 line-clamp-2 text-xs text-muted">{t.description}</div>
+                            <div className="mt-2 flex flex-wrap items-center gap-1">
+                              {t.usesPhp && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted">PHP</span>}
+                              {t.usesNode && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted">Node</span>}
+                              {t.database && t.database !== "none" && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted">DB</span>}
+                              {t.duration && <span className="ml-auto text-[10px] text-muted/70">{t.duration}</span>}
+                            </div>
                           </div>
                         </button>
                       );
                     })}
-                </div>
+                  </div>
                   {(catalog.data?.broken.length ?? 0) > 0 && (
                     <div className="mt-3 rounded-xl border border-warn/40 bg-warn/10 p-3 text-xs">
                       <p className="font-semibold text-fg">Some of your templates couldn't be read</p>
@@ -419,227 +479,245 @@ export default function NewProject() {
               </div>
             )}
 
-            {stepId === "project" && (
+            {stepId === "configure" && (
               <div className="space-y-6">
-                <label className="block">
-                  <span className="mb-1.5 block text-sm font-semibold">Project name</span>
-                  <input autoFocus className={inputClass} placeholder="my-project" value={name} onChange={(e) => setName(e.target.value.trim())} />
-                  {nameError ? (
-                    <span className="mt-1.5 block text-xs text-danger-text">{nameError}</span>
-                  ) : (
-                    <span className="mt-1.5 block font-mono text-xs text-muted">
-                      www/{name || "my-project"} → {ssl ? "https" : "http"}://{domain}
-                    </span>
-                  )}
-                </label>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {template && languageMissing && (
-                    <p className="flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger-text">
-                      <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden />
-                      {template.name} runs on {runtimeLabels[languageMissing]} {template[languageMissing]} or newer. Install it on the Services page (Languages → {runtimeLabels[languageMissing]}) first.
-                    </p>
-                  )}
-                  {template?.usesPhp && (
+                {/* 1. Project & Domain */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold tracking-wider text-muted uppercase">1. Project & Domain</h3>
+                  <div className="space-y-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
                     <label className="block">
-                      <span className="mb-1.5 block text-sm font-semibold">PHP version</span>
-                      <select className={inputClass} value={php ?? ""} onChange={(e) => setPhp(e.target.value || null)}>
-                        <option value="">Default ({settings.data?.versions.php ?? "not installed"})</option>
-                        {phpVersions.map((v) => (
-                          <option key={v} value={v}>
-                            {v}
-                          </option>
-                        ))}
-                      </select>
-                      {needsPhp ? (
-                        <span className="mt-1.5 block text-xs text-danger-text">Install PHP on the Services page first.</span>
-                      ) : phpTooOld ? (
-                        <span className="mt-1.5 block text-xs text-danger-text">
-                          {template.name} needs PHP {template.minPhp} or newer. Pick another version, or install one from Services → PHP.
-                        </span>
+                      <span className="mb-1.5 block text-sm font-semibold">Project name</span>
+                      <input autoFocus className={inputClass} placeholder="my-project" value={name} onChange={(e) => setName(e.target.value.trim())} />
+                      {nameError ? (
+                        <span className="mt-1.5 block text-xs text-danger-text">{nameError}</span>
                       ) : (
-                        template.minPhp && <span className="mt-1.5 block text-xs text-muted">Needs PHP {template.minPhp} or newer.</span>
+                        <span className="mt-1.5 block font-mono text-xs text-muted">
+                          www/{name || "my-project"} → {ssl ? "https" : "http"}://{domain}
+                        </span>
                       )}
                     </label>
-                  )}
-                  {template?.usesNode && (
-                    <>
-                      <label className="block">
-                        <span className="mb-1.5 block text-sm font-semibold">Node.js version</span>
-                        <select className={inputClass} value={nodeVersion ?? ""} onChange={(e) => setNodeVersion(e.target.value || null)}>
-                          <option value="">NVM's default ({nodeStatus.data?.current ?? "none"})</option>
-                          {nodeVersions.map((v) => (
-                            <option key={v} value={v}>
-                              {v}
-                            </option>
-                          ))}
-                        </select>
-                        {needsNode ? (
-                          <span className="mt-1.5 block text-xs text-danger-text">Install Node.js on the Services page first (Node.js, through NVM).</span>
-                        ) : (
-                          <span className="mt-1.5 block text-xs text-muted">The project runs on this version; NVM's own default doesn't change.</span>
-                        )}
-                      </label>
-                      <label className="block">
-                        <span className="mb-1.5 block text-sm font-semibold">Package manager</span>
-                        <select className={inputClass} value={packageManager} onChange={(e) => setPackageManager(e.target.value as PackageManager)}>
-                          <option value="npm">npm</option>
-                          <option value="pnpm">pnpm</option>
-                          <option value="yarn">Yarn</option>
-                          <option value="bun">Bun</option>
-                        </select>
-                        <span className="mt-1.5 block text-xs text-muted">pnpm and Yarn run through npx when they aren't installed; Bun has to be.</span>
-                      </label>
-                    </>
-                  )}
-                  {settings.data && settings.data.webServers.length > 1 && (
-                    <label className="block">
-                      <span className="mb-1.5 block text-sm font-semibold">Web server</span>
-                      <select className={inputClass} value={server ?? ""} onChange={(e) => setServer((e.target.value || null) as Server | null)}>
-                        <option value="">Default ({runtimeLabels[settings.data.webServers[0]]})</option>
-                        {settings.data.webServers.map((s) => (
-                          <option key={s} value={s}>
-                            {runtimeLabels[s]}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                </div>
-                <div className="divide-y divide-line rounded-xl bg-surface-2">
-                  <div className="flex items-center justify-between gap-4 px-4 py-3">
-                    <div>
-                      <div className="text-sm font-semibold">HTTPS</div>
-                      <div className="text-xs text-muted">A trusted local certificate for {domain}.</div>
+                    <div className="flex items-center justify-between gap-4 rounded-xl bg-surface-2 px-4 py-3">
+                      <div>
+                        <div className="text-sm font-semibold">HTTPS</div>
+                        <div className="text-xs text-muted">A trusted local certificate for {domain}</div>
+                      </div>
+                      <Switch checked={ssl} onChange={setSsl} label="HTTPS" />
                     </div>
-                    <Switch checked={ssl} onChange={setSsl} label="HTTPS" />
                   </div>
                 </div>
-              </div>
-            )}
 
-            {stepId === "options" && (
-              <div className="space-y-6">
-                {shownVariables.length > 0 && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                  {shownVariables.map((v) => {
-                    // A label would forward clicks on its text to the first chip of a multi field.
-                    const Field = v.type === "multi" ? "div" : "label";
-                    return (
-                    <Field key={v.id} className={clsx("block", (v.type === "bool" || v.type === "multi") && "sm:col-span-2")}>
-                      {v.type === "bool" ? (
-                        <span className="flex items-center justify-between gap-4">
-                          <span>
-                            <span className="block text-sm font-semibold">{v.label}</span>
-                            {v.help && <span className="block text-xs text-muted">{v.help}</span>}
-                          </span>
-                          <Switch checked={variables[v.id] === "true"} onChange={(on) => setVariables((cur) => ({ ...cur, [v.id]: String(on) }))} label={v.label} />
-                        </span>
-                      ) : (
-                        <>
-                          <span className="mb-1.5 block text-sm font-semibold">
-                            {v.label}
-                            {v.required && <span className="text-danger-text"> *</span>}
-                          </span>
-                          {v.type === "choice" ? (
-                            <select className={inputClass} value={variables[v.id] ?? ""} onChange={(e) => setVariables((cur) => ({ ...cur, [v.id]: e.target.value }))}>
-                              {shownOptions(v).map((o) => (
-                                <option key={o.value} value={o.value}>
-                                  {o.label}
+                {/* 2. Stack & Runtime */}
+                {(template?.usesPhp || template?.usesNode || languageMissing || (settings.data && settings.data.webServers.length > 1)) && (
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold tracking-wider text-muted uppercase">2. Stack & Runtime</h3>
+                    <div className="space-y-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
+                      {template && languageMissing && (
+                        <p className="flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger-text">
+                          <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden />
+                          {template.name} runs on {runtimeLabels[languageMissing]} {template[languageMissing]} or newer. Install it on the Services page first.
+                        </p>
+                      )}
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        {template?.usesPhp && (
+                          <label className="block">
+                            <span className="mb-1.5 block text-sm font-semibold">PHP version</span>
+                            <select className={inputClass} value={php ?? ""} onChange={(e) => setPhp(e.target.value || null)}>
+                              <option value="">Default ({settings.data?.versions.php ?? "not installed"})</option>
+                              {phpVersions.map((v) => (
+                                <option key={v} value={v}>
+                                  {v}
                                 </option>
                               ))}
                             </select>
-                          ) : v.type === "multi" ? (
-                            <span className="flex flex-wrap gap-1.5" role="group" aria-label={v.label}>
-                              {shownOptions(v).map((o) => {
-                                const picked = (variables[v.id] ?? "").split(",").filter(Boolean);
-                                const on = picked.includes(o.value);
-                                return (
-                                  <button
-                                    key={o.value}
-                                    type="button"
-                                    aria-pressed={on}
-                                    onClick={() =>
-                                      setVariables((cur) => ({ ...cur, [v.id]: (on ? picked.filter((x) => x !== o.value) : [...picked, o.value]).join(",") }))
-                                    }
-                                    className={clsx(
-                                      "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
-                                      on ? "border-accent bg-accent-soft text-accent-text" : "border-line text-muted hover:border-accent/40 hover:text-fg",
-                                    )}
-                                  >
-                                    {on && <Check size={12} />}
-                                    {o.label}
-                                  </button>
-                                );
-                              })}
-                        </span>
-                      ) : (
-                        <input className={inputClass} value={variables[v.id] ?? ""} onChange={(e) => setVariables((cur) => ({ ...cur, [v.id]: e.target.value }))} />
-                      )}
-                      {v.help && <span className="mt-1.5 block text-xs text-muted">{v.help}</span>}
-                    </>
-                  )}
-                </Field>
-                );
-              })}
-                  </div>
-                )}
-                {shownOptional.length > 0 && (
-                  <div className="divide-y divide-line rounded-xl bg-surface-2">
-                  {shownOptional.map((o) => (
-                    <label key={o.id} className="flex cursor-pointer items-center gap-3 px-4 py-3">
-                      <input
-                        type="checkbox"
-                        className="size-4 accent-(--accent)"
-                        checked={optional[o.id] ?? o.default}
-                        onChange={(e) => setOptional((cur) => ({ ...cur, [o.id]: e.target.checked }))}
-                      />
-                      <span className="text-sm">{o.label}</span>
-                    </label>
-                  ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {stepId === "database" && (
-              <div className="divide-y divide-line rounded-xl bg-surface-2">
-                <div className="px-4 py-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <div className="text-sm font-semibold">{dbUse === "required" ? "Database" : "Create a database"}</div>
-                      <div className={clsx("text-xs", dbMissing ? "text-danger-text" : "text-muted")}>
-                        {hasDatabase
-                          ? `${dbLabel}, user root without a password. It starts if it isn't running.`
-                          : dbUse === "required"
-                            ? `${template?.name} needs a database: install ${engineNames} on the Services page first.`
-                            : `Install ${engineNames} on the Services page to create one.`}
+                            {needsPhp ? (
+                              <span className="mt-1.5 block text-xs text-danger-text">Install PHP on the Services page first.</span>
+                            ) : phpTooOld ? (
+                              <span className="mt-1.5 block text-xs text-danger-text">
+                                {template.name} needs PHP {template.minPhp} or newer.
+                              </span>
+                            ) : (
+                              template.minPhp && <span className="mt-1.5 block text-xs text-muted">Needs PHP {template.minPhp} or newer.</span>
+                            )}
+                          </label>
+                        )}
+                        {template?.usesNode && (
+                          <>
+                            <label className="block">
+                              <span className="mb-1.5 block text-sm font-semibold">Node.js version</span>
+                              <select className={inputClass} value={nodeVersion ?? ""} onChange={(e) => setNodeVersion(e.target.value || null)}>
+                                <option value="">NVM's default ({nodeStatus.data?.current ?? "none"})</option>
+                                {nodeVersions.map((v) => (
+                                  <option key={v} value={v}>
+                                    {v}
+                                  </option>
+                                ))}
+                              </select>
+                              {needsNode && (
+                                <span className="mt-1.5 block text-xs text-danger-text">Install Node.js on the Services page first.</span>
+                              )}
+                            </label>
+                            <label className="block">
+                              <span className="mb-1.5 block text-sm font-semibold">Package manager</span>
+                              <select className={inputClass} value={packageManager} onChange={(e) => setPackageManager(e.target.value as PackageManager)}>
+                                <option value="npm">npm</option>
+                                <option value="pnpm">pnpm</option>
+                                <option value="yarn">Yarn</option>
+                                <option value="bun">Bun</option>
+                              </select>
+                            </label>
+                          </>
+                        )}
+                        {settings.data && settings.data.webServers.length > 1 && (
+                          <label className="block sm:col-span-2">
+                            <span className="mb-1.5 block text-sm font-semibold">Web server</span>
+                            <select className={inputClass} value={server ?? ""} onChange={(e) => setServer((e.target.value || null) as Server | null)}>
+                              <option value="">Default ({runtimeLabels[settings.data.webServers[0]]})</option>
+                              {settings.data.webServers.map((s) => (
+                                <option key={s} value={s}>
+                                  {runtimeLabels[s]}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                       </div>
                     </div>
-                    {dbUse === "optional" && <Switch checked={withDb} onChange={(v) => hasDatabase && setWithDb(v)} label="Create a database" />}
                   </div>
-                  {usesDb && engines.length > 1 && (
-                    <Segmented
-                      className="mt-3"
-                      value={chosenEngine ?? engines[0]}
-                      onChange={(e: DbEngine) => setEngine(e)}
-                      options={engines.map((e) => ({ value: e, label: runtimeLabels[e] }))}
-                    />
-                  )}
-                  {usesDb && hasDatabase && chosenEngine === "sqlite" && (
-                    <p className="mt-3 text-xs text-muted">A file at database/database.sqlite in the project; nothing to install or start.</p>
-                  )}
-                  {usesDb && hasDatabase && chosenEngine !== "sqlite" && (
-                    <input
-                      className={clsx(inputClass, "mt-3 font-mono")}
-                      value={db}
-                      onChange={(e) => {
-                        setDb(e.target.value);
-                        setDbEdited(true);
-                      }}
-                      aria-label="Database name"
-                    />
-                  )}
-                </div>
+                )}
+
+                {/* 3. Database */}
+                {dbUse !== "none" && (
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold tracking-wider text-muted uppercase">3. Database</h3>
+                    <div className="space-y-3 rounded-2xl border border-line bg-surface p-4 shadow-card">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-sm font-semibold">{dbUse === "required" ? "Database required" : "Create a database"}</div>
+                          <div className={clsx("text-xs", dbMissing ? "text-danger-text" : "text-muted")}>
+                            {hasDatabase
+                              ? `${dbLabel}, user root without password`
+                              : dbUse === "required"
+                                ? `${template?.name} needs a database: install ${engineNames} on the Services page first.`
+                                : `Install ${engineNames} on the Services page to create one.`}
+                          </div>
+                        </div>
+                        {dbUse === "optional" && <Switch checked={withDb} onChange={(v) => hasDatabase && setWithDb(v)} label="Create a database" />}
+                      </div>
+                      {usesDb && engines.length > 1 && (
+                        <Segmented
+                          className="mt-2"
+                          value={chosenEngine ?? engines[0]}
+                          onChange={(e: DbEngine) => setEngine(e)}
+                          options={engines.map((e) => ({ value: e, label: runtimeLabels[e] }))}
+                        />
+                      )}
+                      {usesDb && hasDatabase && chosenEngine === "sqlite" && (
+                        <p className="text-xs text-muted">A file at database/database.sqlite in the project; nothing to install or start.</p>
+                      )}
+                      {usesDb && hasDatabase && chosenEngine !== "sqlite" && (
+                        <label className="block mt-2">
+                          <span className="mb-1.5 block text-xs font-semibold text-muted">Database name</span>
+                          <input
+                            className={clsx(inputClass, "font-mono")}
+                            value={db}
+                            onChange={(e) => {
+                              setDb(e.target.value);
+                              setDbEdited(true);
+                            }}
+                            aria-label="Database name"
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Template Options */}
+                {(shownVariables.length > 0 || shownOptional.length > 0) && (
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold tracking-wider text-muted uppercase">4. Template Options</h3>
+                    <div className="space-y-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
+                      {shownVariables.length > 0 && (
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          {shownVariables.map((v) => {
+                            const Field = v.type === "multi" ? "div" : "label";
+                            return (
+                              <Field key={v.id} className={clsx("block", (v.type === "bool" || v.type === "multi") && "sm:col-span-2")}>
+                                {v.type === "bool" ? (
+                                  <span className="flex items-center justify-between gap-4">
+                                    <span>
+                                      <span className="block text-sm font-semibold">{v.label}</span>
+                                      {v.help && <span className="block text-xs text-muted">{v.help}</span>}
+                                    </span>
+                                    <Switch checked={variables[v.id] === "true"} onChange={(on) => setVariables((cur) => ({ ...cur, [v.id]: String(on) }))} label={v.label} />
+                                  </span>
+                                ) : (
+                                  <>
+                                    <span className="mb-1.5 block text-sm font-semibold">
+                                      {v.label}
+                                      {v.required && <span className="text-danger-text"> *</span>}
+                                    </span>
+                                    {v.type === "choice" ? (
+                                      <select className={inputClass} value={variables[v.id] ?? ""} onChange={(e) => setVariables((cur) => ({ ...cur, [v.id]: e.target.value }))}>
+                                        {shownOptions(v).map((o) => (
+                                          <option key={o.value} value={o.value}>
+                                            {o.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    ) : v.type === "multi" ? (
+                                      <span className="flex flex-wrap gap-1.5" role="group" aria-label={v.label}>
+                                        {shownOptions(v).map((o) => {
+                                          const picked = (variables[v.id] ?? "").split(",").filter(Boolean);
+                                          const on = picked.includes(o.value);
+                                          return (
+                                            <button
+                                              key={o.value}
+                                              type="button"
+                                              aria-pressed={on}
+                                              onClick={() =>
+                                                setVariables((cur) => ({ ...cur, [v.id]: (on ? picked.filter((x) => x !== o.value) : [...picked, o.value]).join(",") }))
+                                              }
+                                              className={clsx(
+                                                "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
+                                                on ? "border-accent bg-accent-soft text-accent-text" : "border-line text-muted hover:border-accent/40 hover:text-fg",
+                                              )}
+                                            >
+                                              {on && <Check size={12} />}
+                                              {o.label}
+                                            </button>
+                                          );
+                                        })}
+                                      </span>
+                                    ) : (
+                                      <input className={inputClass} value={variables[v.id] ?? ""} onChange={(e) => setVariables((cur) => ({ ...cur, [v.id]: e.target.value }))} />
+                                    )}
+                                    {v.help && <span className="mt-1.5 block text-xs text-muted">{v.help}</span>}
+                                  </>
+                                )}
+                              </Field>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {shownOptional.length > 0 && (
+                        <div className="divide-y divide-line rounded-xl bg-surface-2">
+                          {shownOptional.map((o) => (
+                            <label key={o.id} className="flex cursor-pointer items-center gap-3 px-4 py-3">
+                              <input
+                                type="checkbox"
+                                className="size-4 accent-(--accent)"
+                                checked={optional[o.id] ?? o.default}
+                                onChange={(e) => setOptional((cur) => ({ ...cur, [o.id]: e.target.checked }))}
+                              />
+                              <span className="text-sm">{o.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -731,11 +809,26 @@ export default function NewProject() {
               >
                 <FolderCog size={15} /> Your templates
               </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setOpen(false);
+                  useAppStore.getState().openTemplateEditor({ fromWizard: true });
+                }}
+                title="Make a template with a guided form"
+              >
+                <Plus size={15} /> New template
+              </Button>
               {stepIndex === 0 ? (
                 <Button onClick={() => setOpen(false)}>Cancel</Button>
               ) : (
                 <Button onClick={() => setStepAt(stepIndex - 1)}>
                   <ArrowLeft size={16} /> Back
+                </Button>
+              )}
+              {stepId === "configure" && canCreate && (
+                <Button variant="secondary" onClick={create} title="Create directly without review">
+                  <FolderPlus size={16} /> Create now
                 </Button>
               )}
               {stepId === "review" ? (

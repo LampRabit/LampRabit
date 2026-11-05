@@ -5,17 +5,21 @@ mod comfort;
 mod commands;
 mod config;
 mod configs;
+mod cron;
 mod diagnose;
+mod dumps;
 mod error;
 mod extensions;
 mod facts;
 mod langver;
 mod layout;
 mod logs;
+mod manage;
 mod node;
 mod php;
 mod ports;
 mod procgroup;
+mod projectfile;
 mod projects;
 mod relocate;
 mod runtimes;
@@ -24,6 +28,7 @@ mod shims;
 mod sites;
 mod smoke;
 mod ssl;
+mod templategen;
 mod templates;
 mod tunnels;
 mod uninstall;
@@ -459,6 +464,25 @@ async fn restore_backup(app: AppHandle, state: State<'_, AppState>, engine: temp
     Ok(())
 }
 
+/// Set on the first run, until the LampRabit folder's place is confirmed.
+struct FirstRun(std::sync::atomic::AtomicBool);
+
+/// Whether this is the first run, when the app asks where the LampRabit folder goes.
+#[tauri::command]
+fn first_run(flag: State<'_, FirstRun>) -> bool {
+    flag.0.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The LampRabit folder's place is settled: the settings are written, so later runs
+/// don't ask again.
+#[tauri::command]
+async fn finish_first_run(app: AppHandle, state: State<'_, AppState>, flag: State<'_, FirstRun>) -> Result<()> {
+    flag.0.store(false, std::sync::atomic::Ordering::Relaxed);
+    let settings = state.update_settings(|_| {}).await?;
+    logs::system(&app, logs::Level::Info, format!("LampRabit's folder is {}", settings.root_dir.display()));
+    Ok(())
+}
+
 /// Whether a folder can hold the LampRabit folder, and what moving there involves.
 #[tauri::command]
 async fn check_move_target(state: State<'_, AppState>, target: PathBuf) -> Result<relocate::MoveCheck> {
@@ -785,6 +809,29 @@ async fn stop_all(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     Ok(())
 }
 
+/// Stops the project processes in `stop`, then starts those in `start` ("project/process"),
+/// for stack profiles. Returns one message per process that failed to start; a process
+/// that no longer exists is skipped.
+#[tauri::command]
+async fn apply_processes(app: AppHandle, state: State<'_, AppState>, start: Vec<String>, stop: Vec<String>) -> Result<Vec<String>> {
+    for key in &stop {
+        state.apps.stop(&app, key).await;
+    }
+    let (settings, layout) = state.snapshot().await;
+    let mut errors = Vec::new();
+    for key in &start {
+        let Some((project, process)) = key.split_once('/') else { continue };
+        let exists = settings.sites.get(project).is_some_and(|s| s.processes.iter().any(|p| p.name == process));
+        if !exists {
+            continue;
+        }
+        if let Err(e) = state.apps.start_process(&app, &settings, &layout, project, process).await {
+            errors.push(format!("{key}: {e}"));
+        }
+    }
+    Ok(errors)
+}
+
 /// Stops `stop`, then starts `start` (installed and enabled ones only), in one go: what
 /// selection actions, stack profiles and Start/Stop all run. Returns one message per
 /// service that failed to start.
@@ -937,6 +984,9 @@ async fn list_sites(state: State<'_, AppState>) -> Result<SitesInfo> {
     }
     let hosts_ok = !sites::needs_hosts_file(&settings) || sites::hosts_in_sync(&served);
     let (tools, sites): (Vec<_>, Vec<_>) = served.into_iter().partition(|s| s.tool.is_some());
+    // A project's subdomains are served as copies of it (for configs, certificates and the
+    // hosts file); the app shows them on their project, not as projects of their own.
+    let sites: Vec<_> = sites.into_iter().filter(|s| !sites::is_extra(s)).collect();
     let ca_trusted = if sites.iter().any(|s| s.ssl) && ssl::ca_thumbprint(&layout).is_some() {
         let mut cached = state.ca_trusted.lock().await;
         if cached.is_none() {
@@ -967,8 +1017,15 @@ async fn list_sites(state: State<'_, AppState>) -> Result<SitesInfo> {
 #[tauri::command]
 async fn apply_sites(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     let _op = state.ops.lock().await;
-    let (settings, layout) = state.snapshot().await;
     logs::system(&app, logs::Level::Info, "Applying site changes");
+    sync_sites(&app, &state).await
+}
+
+/// Restarts the running web servers (vhosts, certificates) or, with none running, syncs
+/// the hosts file; for changes to the list of projects.
+async fn sync_sites(app: &AppHandle, state: &AppState) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    let app = app.clone();
     let mut any_running = false;
     for kind in ServiceKind::WEB {
         any_running |= state.supervisor.is_running(kind).await;
@@ -1133,6 +1190,26 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
         app_config.port = apps::free_port(&*state.settings.read().await);
         state.update_settings(|s| s.sites.entry(name.clone()).or_default().app = Some(app_config)).await?;
     }
+    // The template's processes ("auto" ports picked one by one, so they differ) and subdomains.
+    if !built.processes.is_empty() || !built.domains.is_empty() {
+        let mut scratch = state.settings.read().await.clone();
+        let mut processes = built.processes;
+        for i in 0..processes.len() {
+            if processes[i].port == Some(0) {
+                processes[i].port = Some(apps::free_port(&scratch));
+            }
+            scratch.sites.entry(name.clone()).or_default().processes = processes[..=i].to_vec();
+        }
+        let parent = format!("{}.{}", sites::label(&name).unwrap_or_default(), scratch.tld);
+        let domains: Vec<config::ExtraDomain> = built.domains.into_iter().map(|(sub, target)| config::ExtraDomain { host: format!("{sub}.{parent}"), target }).collect();
+        state
+            .update_settings(|s| {
+                let own = s.sites.entry(name.clone()).or_default();
+                own.processes = processes;
+                own.domains = domains;
+            })
+            .await?;
+    }
     // Composer may have just been installed; this makes it the active version and adds its shim.
     state.update_settings(reconcile_versions).await?;
     ctx.step("Setting up HTTPS and the hosts file");
@@ -1155,6 +1232,44 @@ struct CreatedProject {
 async fn list_templates(state: State<'_, AppState>) -> Result<templates::Catalog> {
     let (_, layout) = state.snapshot().await;
     Ok(templates::catalog(&layout))
+}
+
+/// A template that recreates the project, as YAML for the template editor.
+#[tauri::command]
+async fn template_from_project(state: State<'_, AppState>, name: String) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let site = sites::scan(&settings, &layout).into_iter().find(|s| s.name == name);
+    let facts = facts::read(&dir, site.as_ref().and_then(|s| s.framework.as_deref()), "npm").await;
+    let php = site.as_ref().filter(|s| s.language == sites::Language::Php).and_then(|s| s.php.clone().or_else(|| settings.versions.php.clone()));
+    let has_database = site.as_ref().is_some_and(|s| s.database.is_some());
+    Ok(templategen::generate(&templategen::Setup {
+        name: &name,
+        dir: &dir,
+        remote: facts.git.and_then(|g| g.remote),
+        php,
+        engine: has_database.then(|| manage::engine(&settings, &dir)).flatten(),
+        has_database,
+        own: settings.sites.get(&name),
+        parent: format!("{}.{}", sites::label(&name).unwrap_or_default(), settings.tld),
+    }))
+}
+
+/// Saves a template's YAML into the templates folder after the same checks loading does.
+/// An existing template with its id is replaced only when `replace` says so.
+#[tauri::command]
+async fn save_template(app: AppHandle, state: State<'_, AppState>, yaml: String, replace: bool) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    let template = templates::parse_text(&yaml).map_err(|e| Error::msg(format!("The template isn't valid yet: {e}")))?;
+    let dir = templates::folder(&layout);
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{}.yaml", template.id));
+    if path.exists() && !replace {
+        return Err(Error::msg(format!("You already have a template with the id {}. Change the id, or replace it.", template.id)));
+    }
+    std::fs::write(&path, yaml)?;
+    logs::system(&app, logs::Level::Info, format!("Saved template {} ({})", template.name, path.display()));
+    Ok(template.id)
 }
 
 /// Opens the folder for your own templates, creating it with an example the first time.
@@ -1276,6 +1391,40 @@ fn server_kind(server: config::Server) -> ServiceKind {
 /// Keeps every project's domain pointed at what it's serving: the port its processes
 /// listen on (a dev server from LampRabit or your own terminal), or its files when nothing
 /// listens. Runs every few seconds, and straight away when an app starts or stops.
+/// Processes set to start with LampRabit, then, once a minute, the ones whose schedule
+/// fires (a scheduled process already running is left alone).
+fn spawn_process_schedules(handle: &AppHandle) {
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = handle.state::<AppState>();
+        let (settings, layout) = state.snapshot().await;
+        for (project, own) in &settings.sites {
+            for p in own.processes.iter().filter(|p| p.at_launch) {
+                if let Err(e) = state.apps.start_process(&handle, &settings, &layout, project, &p.name).await {
+                    logs::system(&handle, logs::Level::Warn, &format!("{project}/{}: couldn't start on launch: {e}", p.name));
+                }
+            }
+        }
+        loop {
+            // Wake just after each minute turns, so a "0 3 * * *" job runs at 3:00, not 3:00:59.
+            let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+            tokio::time::sleep(std::time::Duration::from_secs(61 - u64::from(now.second()))).await;
+            let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+            let (settings, layout) = state.snapshot().await;
+            for (project, own) in &settings.sites {
+                for p in &own.processes {
+                    let Ok(schedule) = cron::Schedule::parse(p.schedule.trim()) else { continue };
+                    if schedule.matches(now) {
+                        if let Err(e) = state.apps.start_process(&handle, &settings, &layout, project, &p.name).await {
+                            logs::system(&handle, logs::Level::Warn, &format!("{project}/{}: the scheduled start failed: {e}", p.name));
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
 async fn watch_ports(handle: AppHandle) {
     let mut system = sysinfo::System::new();
     // A route is dropped only after its port has been gone for two scans, so a dev server
@@ -1517,6 +1666,9 @@ async fn set_site_processes(app: AppHandle, state: State<'_, AppState>, name: St
         if !plain || !layout.www().join(&name).join(&p.cwd).is_dir() {
             return Err(Error::msg(format!("{}: \"{}\" isn't a folder in {name}.", p.name, p.cwd)));
         }
+        if !p.schedule.trim().is_empty() {
+            cron::Schedule::parse(p.schedule.trim()).map_err(|e| Error::msg(format!("{}: {e}", p.name)))?;
+        }
         if let Some(port) = p.port {
             if port < 1024 || Some(port) == app_port || !ports.insert(port) {
                 return Err(Error::msg(format!("{}: port {port} is taken (below 1024, the app's, or another process's). Pick another one.", p.name)));
@@ -1679,6 +1831,221 @@ async fn run_project_command(app: AppHandle, state: State<'_, AppState>, name: S
         return Err(Error::msg("Enter a command to run."));
     }
     state.apps.run_command(&app, &settings, &layout, &name, &label, &command).await
+}
+
+/// The project's recent command runs, newest first.
+#[tauri::command]
+async fn command_history(state: State<'_, AppState>, name: String) -> Result<Vec<apps::CommandRun>> {
+    let (_, layout) = state.snapshot().await;
+    Ok(apps::history(&layout, &name))
+}
+
+/// When each of the project's scheduled processes runs next (Unix ms).
+#[tauri::command]
+async fn process_next_runs(state: State<'_, AppState>, name: String) -> Result<std::collections::BTreeMap<String, u64>> {
+    let (settings, _) = state.snapshot().await;
+    let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    Ok(settings
+        .sites
+        .get(&name)
+        .map(|own| {
+            own.processes
+                .iter()
+                .filter_map(|p| {
+                    let next = cron::Schedule::parse(p.schedule.trim()).ok()?.next(now)?;
+                    Some((p.name.clone(), u64::try_from(next.unix_timestamp_nanos() / 1_000_000).ok()?))
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// Whether the project's database exists, and its server runs.
+#[tauri::command]
+async fn database_status(state: State<'_, AppState>, name: String) -> Result<Option<manage::DbStatus>> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let Some(database) = sites::scan(&settings, &layout).into_iter().find(|s| s.name == name).and_then(|s| s.database) else { return Ok(None) };
+    let Some(engine) = manage::engine(&settings, &dir) else { return Ok(None) };
+    let running = match engine.service() {
+        Some(kind) => state.supervisor.is_running(kind).await,
+        None => true,
+    };
+    Ok(manage::status(&settings, &layout, &dir, &database, running).await)
+}
+
+/// Creates the database the project's config names.
+#[tauri::command]
+async fn create_project_database(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let database = sites::scan(&settings, &layout).into_iter().find(|s| s.name == name).and_then(|s| s.database).ok_or_else(|| Error::msg(format!("{name} doesn't name a database in its config.")))?;
+    let engine = manage::engine(&settings, &dir).ok_or_else(|| Error::msg("Install MariaDB, MySQL or PostgreSQL first (Services)."))?;
+    if let Some(kind) = engine.service() {
+        if !state.supervisor.is_running(kind).await {
+            return Err(Error::msg(format!("Start {} first, then create the database.", engine.label())));
+        }
+    }
+    manage::create(&settings, &layout, &dir, engine, &database).await?;
+    logs::system(&app, logs::Level::Info, format!("Created database {database} in {} for {name}", engine.label()));
+    Ok(())
+}
+
+/// Changes one of the .env settings the Overview shows (APP_URL…).
+#[tauri::command]
+async fn set_project_env(state: State<'_, AppState>, name: String, key: String, value: String) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    manage::set_env_value(&project_dir(&layout, &name)?, &key, &value)
+}
+
+/// Which of the given ports something listens on.
+#[tauri::command]
+async fn ports_listening(ports: Vec<u16>) -> Result<Vec<u16>> {
+    tauri::async_runtime::spawn_blocking(move || manage::listening(&ports)).await.map_err(|e| Error::msg(e.to_string()))
+}
+
+/// A site's own php.ini settings and Xdebug choice; PHP restarts with the web servers.
+#[tauri::command]
+async fn set_site_php_ini(app: AppHandle, state: State<'_, AppState>, name: String, values: std::collections::BTreeMap<String, String>, xdebug: bool) -> Result<()> {
+    let _op = state.ops.lock().await;
+    let (_, layout) = state.snapshot().await;
+    project_dir(&layout, &name)?;
+    for (key, value) in &values {
+        if !configs::site_ini_ok(key, value) {
+            return Err(Error::msg(format!("{key} = {value} isn't valid: use a size like 512M (or -1), whole seconds, or On/Off.")));
+        }
+    }
+    state
+        .update_settings(|s| {
+            let own = s.sites.entry(name.clone()).or_default();
+            own.php_ini = values;
+            own.xdebug = xdebug;
+        })
+        .await?;
+    logs::system(&app, logs::Level::Info, format!("Saved {name}'s PHP settings"));
+    restart_web_servers(&app, &state).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectFileInfo {
+    file: projectfile::ProjectFile,
+    /// The project's setup is already what the file says.
+    matches: bool,
+}
+
+/// The project's lamprabit.toml, if it has one, and whether its setup already matches it.
+#[tauri::command]
+async fn project_file(state: State<'_, AppState>, name: String) -> Result<Option<ProjectFileInfo>> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let Some(file) = projectfile::read(&dir)? else { return Ok(None) };
+    let parent = format!("{}.{}", sites::label(&name).unwrap_or_default(), settings.tld);
+    let current = projectfile::ProjectFile::from_settings(&settings.sites.get(&name).cloned().unwrap_or_default(), &parent);
+    Ok(Some(ProjectFileInfo { matches: current == file, file }))
+}
+
+/// Writes the project's setup to lamprabit.toml in its folder.
+#[tauri::command]
+async fn save_project_file(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let parent = format!("{}.{}", sites::label(&name).unwrap_or_default(), settings.tld);
+    let file = projectfile::ProjectFile::from_settings(&settings.sites.get(&name).cloned().unwrap_or_default(), &parent);
+    projectfile::write(&dir, &file)?;
+    logs::system(&app, logs::Level::Info, format!("Saved {name}'s setup to {}", projectfile::FILE));
+    Ok(())
+}
+
+/// Stops everything running for a project: its app, processes, command and tunnels.
+async fn stop_project(app: &AppHandle, state: &AppState, name: &str) {
+    let (settings, _) = state.snapshot().await;
+    state.apps.stop_processes(app, &settings, name, false).await;
+    state.apps.stop_command(name).await;
+    state.apps.stop(app, name).await;
+    for tunnel in state.tunnels.list().await.into_iter().filter(|t| t.site.as_deref() == Some(name)) {
+        state.tunnels.stop(app, &tunnel.id).await;
+    }
+}
+
+/// Renames a project's folder, moving its settings and subdomains along. Its database
+/// keeps its name (MySQL can't rename one); the .env still points at it.
+#[tauri::command]
+async fn rename_project(app: AppHandle, state: State<'_, AppState>, name: String, new_name: String) -> Result<()> {
+    let _op = state.ops.lock().await;
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let new_name = new_name.trim().to_string();
+    if new_name == name {
+        return Ok(());
+    }
+    // Only the case changes: Windows sees the same folder, so skip the "taken" check.
+    if !new_name.eq_ignore_ascii_case(&name) {
+        manage::check_project_name(&layout, &new_name)?;
+    }
+    stop_project(&app, &state, &name).await;
+    let target = layout.www().join(&new_name);
+    std::fs::rename(&dir, &target).map_err(|e| Error::msg(format!("Couldn't rename {name}: {e}. Close editors, terminals and anything else using its folder, then try again.")))?;
+    let old_suffix = format!(".{}.{}", sites::label(&name).unwrap_or_default(), settings.tld);
+    let new_suffix = format!(".{}.{}", sites::label(&new_name).unwrap_or_default(), settings.tld);
+    state
+        .update_settings(|s| {
+            if let Some(mut own) = s.sites.remove(&name) {
+                for d in &mut own.domains {
+                    if let Some(sub) = d.host.strip_suffix(&old_suffix) {
+                        d.host = format!("{sub}{new_suffix}");
+                    }
+                }
+                s.sites.insert(new_name.clone(), own);
+            }
+            // Profiles name processes as "project/process".
+            for profile in &mut s.profiles {
+                for key in &mut profile.processes {
+                    if let Some(process) = key.strip_prefix(&format!("{name}/")) {
+                        *key = format!("{new_name}/{process}");
+                    }
+                }
+            }
+        })
+        .await?;
+    logs::system(&app, logs::Level::Info, format!("Renamed {name} to {new_name}"));
+    sync_sites(&app, &state).await
+}
+
+/// Deletes a project: stops it, drops its database if asked, and moves its folder to the
+/// Recycle Bin (Trash), so it can still be brought back.
+#[tauri::command]
+async fn delete_project(app: AppHandle, state: State<'_, AppState>, name: String, drop_database: bool) -> Result<()> {
+    let _op = state.ops.lock().await;
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    stop_project(&app, &state, &name).await;
+    if drop_database {
+        let database = sites::scan(&settings, &layout).into_iter().find(|s| s.name == name).and_then(|s| s.database);
+        if let (Some(database), Some(engine)) = (database, manage::engine(&settings, &dir)) {
+            if let Some(kind) = engine.service() {
+                if !state.supervisor.is_running(kind).await {
+                    return Err(Error::msg(format!("Start {} to drop {database}, or delete the project without its database.", engine.label())));
+                }
+            }
+            manage::drop(&settings, &layout, engine, &database).await?;
+            logs::system(&app, logs::Level::Info, format!("Dropped database {database}"));
+        }
+    }
+    let folder = dir.clone();
+    tauri::async_runtime::spawn_blocking(move || trash::delete(&folder))
+        .await
+        .map_err(|e| Error::msg(e.to_string()))?
+        .map_err(|e| Error::msg(format!("Couldn't move {name} to the Recycle Bin: {e}. Close editors, terminals and anything else using its folder, then try again.")))?;
+    state.update_settings(|s| {
+        s.sites.remove(&name);
+        for profile in &mut s.profiles {
+            profile.processes.retain(|k| !k.starts_with(&format!("{name}/")));
+        }
+    })
+    .await?;
+    logs::system(&app, logs::Level::Info, format!("Deleted {name} (moved to the Recycle Bin)"));
+    sync_sites(&app, &state).await
 }
 
 #[tauri::command]
@@ -2015,11 +2382,62 @@ async fn log_history(app: AppHandle, state: State<'_, AppState>) -> Result<logs:
     Ok(logs::history(&app, &layout.logs()))
 }
 
+/// The dumps caught this session, oldest first.
 #[tauri::command]
-async fn clear_logs(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+fn list_dumps(app: AppHandle) -> Vec<dumps::Dump> {
+    app.state::<dumps::DumpStore>().all()
+}
+
+/// Turns the dump catcher on or off; PHP restarts with the web servers to pick it up.
+#[tauri::command]
+async fn set_catch_dumps(app: AppHandle, state: State<'_, AppState>, enabled: bool) -> Result<()> {
+    let _op = state.ops.lock().await;
+    state.update_settings(|s| s.catch_dumps = enabled).await?;
+    logs::system(&app, logs::Level::Info, if enabled { "Catching dump() and dd() in Logs" } else { "dump() and dd() show in the page again" });
+    restart_web_servers(&app, &state).await
+}
+
+/// Keeps the dump listener in step with the settings: listening on `ports.dumps` while
+/// "Catch dumps" is on, closed otherwise.
+fn spawn_dump_listener(handle: &AppHandle) {
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut current: Option<(u16, tauri::async_runtime::JoinHandle<()>)> = None;
+        loop {
+            let (settings, layout) = handle.state::<AppState>().snapshot().await;
+            let wanted = settings.catch_dumps.then_some(settings.ports.dumps);
+            let finished = current.as_ref().is_some_and(|(_, task)| task.inner().is_finished());
+            if current.as_ref().map(|(p, _)| *p) != wanted || finished {
+                if let Some((_, task)) = current.take() {
+                    task.abort();
+                }
+                if let Some(port) = wanted {
+                    let (app, www) = (handle.clone(), layout.www());
+                    let task = tauri::async_runtime::spawn(async move {
+                        if let Err(e) = dumps::serve(app.clone(), port, www).await {
+                            logs::system(&app, logs::Level::Warn, format!("Can't catch dumps on port {port}: {e}. Change the dumps port in Settings → Ports."));
+                        }
+                    });
+                    current = Some((port, task));
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(if finished { 30 } else { 2 })).await;
+        }
+    });
+}
+
+/// Empties the log files of one source ("apache", "dumps", "project:shop"), or all of them.
+#[tauri::command]
+async fn clear_logs(app: AppHandle, state: State<'_, AppState>, source: Option<String>) -> Result<()> {
     let (_, layout) = state.snapshot().await;
-    let failed = logs::clear(&app, &layout.logs());
-    logs::system(&app, logs::Level::Info, "Logs cleared");
+    let failed = logs::clear(&app, &layout.logs(), source.as_deref());
+    if source.is_none() || source.as_deref() == Some("dumps") {
+        app.state::<dumps::DumpStore>().clear();
+    }
+    logs::system(&app, logs::Level::Info, match &source {
+        Some(s) => format!("Logs of {} cleared", s.strip_prefix("project:").unwrap_or(s)),
+        None => "Logs cleared".to_string(),
+    });
     if failed.is_empty() {
         Ok(())
     } else {
@@ -2063,6 +2481,9 @@ async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortStatus>> {
     }
     if settings.versions.get("tomcat").is_some() {
         ports.extend([("tomcatHttp", p.tomcat_http), ("tomcatShutdown", p.tomcat_shutdown)]);
+    }
+    if settings.catch_dumps {
+        ports.push(("dumps", p.dumps));
     }
     let mut out = Vec::new();
     for (key, port) in ports {
@@ -2506,6 +2927,7 @@ fn run_smoke_test(mut context: tauri::Context<tauri::Wry>, options: smoke::Optio
             logs::set_system_file(app.handle(), Layout::new(&root).logs().join("lampRabit.log"));
             spawn_crash_restarts(app.handle());
             spawn_process_restarts(app.handle());
+            spawn_process_schedules(app.handle());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let code = smoke::run(handle, options).await;
@@ -2577,6 +2999,10 @@ pub fn run() {
             }
             let mut warnings = Vec::new();
             let (mut settings, broken) = Settings::load_or_recover(&settings_path);
+            // A first run: no settings yet, and no LampRabit folder already where they point
+            // (a reinstall keeps using its folder without asking).
+            let fresh = !settings_path.exists() && !["bin", "www", "data"].iter().any(|d| settings.root_dir.join(d).exists());
+            app.manage(FirstRun(std::sync::atomic::AtomicBool::new(fresh)));
             if let Some(aside) = broken {
                 warnings.push(format!(
                     "Your settings file was damaged, so LampRabit started with default settings. The old file was kept as {}.",
@@ -2594,6 +3020,8 @@ pub fn run() {
             }
             app.manage(AppState::new(settings, settings_path));
             app.manage(logs::LogHub::default());
+            app.manage(dumps::DumpStore::default());
+            spawn_dump_listener(app.handle());
             {
                 let root = app.state::<AppState>().settings.try_read().map(|s| s.root_dir.clone()).unwrap_or_default();
                 logs::set_system_file(app.handle(), Layout::new(root).logs().join("lampRabit.log"));
@@ -2640,9 +3068,22 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let mut tailer = logs::Tailer::default();
+                let mut polls: u32 = 0;
                 loop {
-                    let dir = Layout::new(&handle.state::<AppState>().settings.read().await.root_dir).logs();
+                    let settings = handle.state::<AppState>().settings.read().await.clone();
+                    let dir = Layout::new(&settings.root_dir).logs();
                     tailer.poll(&handle, &dir);
+                    // About once a minute: keep log files to their size (Settings → Logs).
+                    polls = polls.wrapping_add(1);
+                    if polls % 150 == 1 {
+                        let mb = |n: u32| u64::from(n.max(1)) * 1024 * 1024;
+                        let (max, keep, total) = (mb(settings.log_max_mb), settings.log_keep, mb(settings.log_total_mb));
+                        let dir2 = dir.clone();
+                        let rotated = tauri::async_runtime::spawn_blocking(move || logs::rotate(&dir2, max, keep, total)).await.unwrap_or(0);
+                        if rotated > 0 {
+                            logs::system(&handle, logs::Level::Info, format!("Rotated {rotated} log file(s) over {} MB", settings.log_max_mb));
+                        }
+                    }
                     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                 }
             });
@@ -2671,6 +3112,24 @@ pub fn run() {
             set_site_main,
             project_folders,
             set_site_processes,
+            first_run,
+            finish_first_run,
+            template_from_project,
+            save_template,
+            list_dumps,
+            set_catch_dumps,
+            apply_processes,
+            project_file,
+            save_project_file,
+            database_status,
+            create_project_database,
+            set_project_env,
+            ports_listening,
+            set_site_php_ini,
+            rename_project,
+            delete_project,
+            command_history,
+            process_next_runs,
             process_start,
             process_stop,
             process_restart,

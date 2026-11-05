@@ -5,6 +5,7 @@ import {
   Activity as Pulse,
   AlertTriangle,
   Check,
+  ChevronDown,
   ChevronRight,
   Copy,
   Database,
@@ -215,8 +216,9 @@ export default function Overview() {
   });
 
   return (
-    <div className="motion-stagger space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
+    <>
+      <div className="motion-stagger space-y-6">
+        <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
         <div>
           <h1 className="flex items-center gap-3 text-3xl font-extrabold tracking-tight">
             {greeting.text}, developer
@@ -257,7 +259,7 @@ export default function Overview() {
                   <Play size={14} /> {stack.profile ? `Start ${stack.profile.name}` : "Start all"}
                 </Button>
               )}
-              <Button onClick={stack.stopAll} disabled={stack.busy || stack.running.length === 0} title="Shift+X">
+              <Button onClick={stack.stopAll} disabled={stack.busy || stack.stoppable.length === 0} title={stack.stoppable.length === 0 ? "Nothing LampRabit runs is running" : "Shift+X"}>
                 <Square size={12} className="fill-current" /> Stop all
               </Button>
             </>
@@ -356,9 +358,10 @@ export default function Overview() {
           <RecentActivity />
         </aside>
       </div>
-
-      {profilesDialog && <ProfilesDialog initial={profilesDialog.initial} profile={profilesDialog.profile} onClose={() => setProfilesDialog(null)} />}
     </div>
+
+    {profilesDialog && <ProfilesDialog initial={profilesDialog.initial} profile={profilesDialog.profile} onClose={() => setProfilesDialog(null)} />}
+  </>
   );
 }
 
@@ -386,77 +389,145 @@ function ProfileTiles({
   isUp: (services: ServiceKind[]) => boolean;
   busy: boolean;
 }) {
+  const profileList = [{ name: null, label: "All services", services: [] as ServiceKind[] }, ...profiles.map((p) => ({ ...p, label: p.name }))];
+
   return (
     <section aria-labelledby="profiles-heading">
-      <div className="mb-2 flex items-center justify-between px-1">
+      <div className="mb-3 flex items-center justify-between px-1">
         <div>
-          <h2 id="profiles-heading" className="text-base font-bold">Profiles</h2>
-          <p className="text-xs text-muted">Choose a stack to start, or select it to focus its services.</p>
+          <h2 id="profiles-heading" className="text-base font-bold">Stack Profiles</h2>
+          <p className="text-xs text-muted">Select a profile to filter your stack, or start its services directly.</p>
         </div>
       </div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-3" role="radiogroup" aria-label="Service profiles">
-        {[{ name: null, label: "All services", services: [] as ServiceKind[] }, ...profiles.map((p) => ({ ...p, label: p.name }))].map((profile) => {
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3" role="radiogroup" aria-label="Service profiles">
+        {profileList.map((profile) => {
           const selected = profile.name === active;
           const up = isUp(profile.services);
+          const shownServices = profile.services.slice(0, 3);
+          const extraCount = profile.services.length - shownServices.length;
+
           return (
             <article
               key={profile.name ?? "all"}
+              onClick={() => onSelect(profile.name)}
               className={clsx(
-                "relative flex aspect-square flex-col rounded-2xl border p-3 transition-colors",
-                selected ? "border-accent/60 bg-accent-soft/50 shadow-card" : "border-line bg-surface hover:border-accent/30",
+                "group relative flex min-h-[142px] cursor-pointer flex-col justify-between rounded-2xl border p-4 shadow-card transition-all",
+                selected
+                  ? "border-accent/70 bg-accent-soft/30 ring-1 ring-accent/30"
+                  : "border-line bg-surface hover:border-accent/40 hover:shadow-md",
               )}
             >
-              {profile.name && (
-                <div className="absolute top-2 right-2">
-                  <Menu
-                    label={`${profile.name} profile actions`}
-                    plain
-                    items={[
-                      { label: "Edit profile", icon: <Pencil size={14} />, onSelect: () => onEdit(profile) },
-                      { label: "Delete profile", icon: <Trash2 size={14} />, onSelect: () => onDelete(profile.name) },
-                    ]}
-                  />
+              {/* Card Header: Icon + Title + Status/Menu */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span
+                    className={clsx(
+                      "flex size-8 shrink-0 items-center justify-center rounded-xl transition-colors",
+                      selected ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted group-hover:text-fg",
+                    )}
+                  >
+                    <Layers size={16} />
+                  </span>
+                  <div className="min-w-0">
+                    <span className="block truncate text-sm font-bold text-fg">
+                      {profile.name ?? profile.label}
+                    </span>
+                    <span className="block text-[11px] text-muted">
+                      {profile.name ? `${profile.services.length} ${profile.services.length === 1 ? "service" : "services"}` : "Full stack"}
+                    </span>
+                  </div>
                 </div>
-              )}
-              <button
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                onClick={() => onSelect(profile.name)}
-                className="min-h-0 flex-1 rounded-lg pr-7 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              >
-                <span className="flex items-center gap-2 text-sm font-bold"><Layers size={16} className={selected ? "text-accent-text" : "text-muted"} />{profile.name ?? profile.label}</span>
-                <span className="mt-2 line-clamp-4 block text-xs leading-relaxed text-muted">
-                  {profile.name ? profile.services.map((kind) => serviceLabels[kind]).join(" · ") : "Every installed service"}
-                </span>
-              </button>
-              <Button
-                size="sm"
-                variant={selected && !up ? "primary" : "soft"}
-                className="mt-2 w-full justify-center"
-                disabled={busy || up}
-                onClick={() => (profile.name ? onStartProfile(profile.services) : onStartAll())}
-              >
-                {up ? (
-                  <>
-                    <Check size={12} /> Running
-                  </>
+
+                <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  {up && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[11px] font-semibold text-ok">
+                      <span className="size-1.5 rounded-full bg-ok" />
+                      Running
+                    </span>
+                  )}
+                  {profile.name && (
+                    <Menu
+                      label={`${profile.name} profile actions`}
+                      plain
+                      items={[
+                        { label: "Edit profile", icon: <Pencil size={14} />, onSelect: () => onEdit(profile) },
+                        { label: "Delete profile", icon: <Trash2 size={14} />, onSelect: () => onDelete(profile.name) },
+                      ]}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Service Badges */}
+              <div className="my-2.5">
+                {profile.services.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {shownServices.map((kind) => (
+                      <span
+                        key={kind}
+                        className="rounded-md border border-line/60 bg-surface-2/80 px-1.5 py-0.5 text-[11px] font-medium text-fg"
+                      >
+                        {serviceLabels[kind]}
+                      </span>
+                    ))}
+                    {extraCount > 0 && (
+                      <span className="rounded-md border border-line/60 bg-surface-2/80 px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                        +{extraCount} more
+                      </span>
+                    )}
+                  </div>
                 ) : (
-                  <>
-                    <Play size={12} /> Start {profile.name ?? "all"}
-                  </>
+                  <span className="text-xs text-muted">Runs all installed services together</span>
                 )}
-              </Button>
+              </div>
+
+              {/* Card Footer: Selection Indicator & Action */}
+              <div className="flex items-center justify-between border-t border-line/50 pt-2.5">
+                <span className="text-xs">
+                  {selected ? (
+                    <span className="inline-flex items-center gap-1 font-semibold text-accent-text">
+                      <Check size={12} strokeWidth={2.5} /> Active
+                    </span>
+                  ) : (
+                    <span className="text-muted group-hover:text-fg">Click to select</span>
+                  )}
+                </span>
+
+                <Button
+                  size="sm"
+                  variant={selected && !up ? "primary" : "secondary"}
+                  disabled={busy || up}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (profile.name) onStartProfile(profile.services);
+                    else onStartAll();
+                  }}
+                  className="h-7 px-2.5 text-xs"
+                >
+                  {up ? (
+                    <>
+                      <Check size={12} /> Running
+                    </>
+                  ) : (
+                    <>
+                      <Play size={11} /> Start
+                    </>
+                  )}
+                </Button>
+              </div>
             </article>
           );
         })}
+
         <button
           type="button"
           onClick={onManage}
-          className="flex aspect-square flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line bg-transparent p-4 text-sm font-semibold text-muted transition-colors hover:border-accent/50 hover:bg-accent-soft/30 hover:text-accent-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="flex min-h-[142px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line bg-surface/40 p-4 text-sm font-semibold text-muted transition-all hover:border-accent/60 hover:bg-accent-soft/30 hover:text-accent-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
-          <span className="flex size-10 items-center justify-center rounded-full border border-dashed border-current"><Plus size={19} /></span>
-          Add new profile
+          <span className="flex size-9 items-center justify-center rounded-full border border-dashed border-current">
+            <Plus size={16} />
+          </span>
+          Add custom profile
         </button>
       </div>
     </section>
@@ -602,6 +673,7 @@ function ServiceRow({
   const showLogs = useAppStore((s) => s.showLogs);
   const connMode = useAppStore((s) => s.connMode);
   const usage = useUsage((s) => s.series[service.kind]);
+  const [expanded, setExpanded] = useState(false);
   // PHP's workers belong to no one service; the web servers show them, since that's
   // where a slow page's time goes.
   const php = useUsage((s) => (isServer(service.kind) ? s.latest.php : undefined));
@@ -618,6 +690,7 @@ function ServiceRow({
   const busy = service.state === "starting" || service.state === "stopping" || restart.isPending || start.isPending || stop.isPending;
   const degraded = running && service.health?.status === "degraded";
   const conflict = conflictFor(service, ports);
+  const hasIssues = !!(conflict || degraded || (service.problem && !running));
   // Re-renders the row when a different tool is picked from the menu (the choice itself
   // lives in the device's preferences).
   const [, setToolPick] = useState<string | null>(null);
@@ -636,6 +709,9 @@ function ServiceRow({
           : service.state === "starting" || service.state === "stopping"
             ? { tone: "warn" as const, text: service.state === "starting" ? "Starting" : "Stopping" }
             : { tone: "muted" as const, text: "Stopped" };
+
+  const lastCpu = usage?.cpu?.length ? usage.cpu[usage.cpu.length - 1] : undefined;
+  const lastMem = usage?.memory?.length ? usage.memory[usage.memory.length - 1] : undefined;
 
   // Every installed web tool for this database; the one picked becomes its Open button's.
   const tools = dbTools(service, sites, settings);
@@ -666,33 +742,64 @@ function ServiceRow({
       onMouseDown={onFocus}
       aria-label={`${service.label}, ${status.text}${service.installed ? `, port ${service.port}` : ""}`}
       className={clsx(
-        "rounded-2xl border bg-surface px-4 py-3.5 shadow-card transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
-        selected ? "border-accent/50 bg-accent-soft/40" : running ? "border-accent/25" : "border-line",
+        "rounded-2xl border bg-surface transition-all duration-150 outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+        selected ? "border-accent/50 bg-accent-soft/40 shadow-sm" : running ? "border-accent/25 shadow-card" : "border-line shadow-card",
         !service.installed && "border-dashed",
         profileActive && !inProfile && "opacity-75",
       )}
     >
-      <div className="flex items-start gap-3.5 mb-4">
+      {/* Compact Main Row: the name selects the service, the rest of the row opens its details. */}
+      <div
+        className={clsx("flex items-center gap-3 px-4 py-3", service.installed && "cursor-pointer")}
+        onClick={(e) => {
+          // Controls keep their own clicks, and selecting text isn't a click.
+          if ((e.target as HTMLElement).closest("button, a, input, select, label, [role=menu], [role=menuitem]")) return;
+          if (window.getSelection()?.toString()) return;
+          if (service.installed) setExpanded(!expanded);
+        }}
+      >
         <input
           type="checkbox"
-          className="mt-3.5 size-4 shrink-0 accent-(--accent) disabled:opacity-30"
+          className="size-4 shrink-0 accent-(--accent) disabled:opacity-30 cursor-pointer"
           checked={selected}
           onChange={onToggle}
           disabled={!service.installed}
           aria-label={`Select ${service.label}`}
           tabIndex={-1}
         />
-        <div className={clsx("flex size-11 shrink-0 items-center justify-center rounded-xl", meta.tile)} aria-hidden>
-          <meta.icon size={21} strokeWidth={1.75} />
+        <div className={clsx("flex size-9 shrink-0 items-center justify-center rounded-xl", meta.tile)} aria-hidden>
+          <meta.icon size={18} strokeWidth={1.75} />
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-            <h3 className="text-[15px] font-bold">{service.label}</h3>
-            <Pill tone={status.tone}>{status.text}</Pill>
-            {service.version && <span className="font-mono text-xs text-muted">v{service.version}</span>}
-          </div>
-          <p className="mt-0.5 truncate text-sm text-muted">{meta.blurb}</p>
+        <div className="min-w-0 flex-1 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggle}
+            disabled={!service.installed}
+            tabIndex={-1}
+            title={service.installed ? (selected ? `Unselect ${service.label}` : `Select ${service.label}`) : undefined}
+            className="cursor-pointer rounded text-[14px] font-bold text-fg hover:text-accent-text disabled:cursor-default disabled:hover:text-fg"
+          >
+            {service.label}
+          </button>
+          <Pill tone={status.tone}>{status.text}</Pill>
+          {service.installed && service.port > 0 && (
+            <span className="font-mono text-xs px-1.5 py-0.5 rounded-md bg-surface-2 border border-line text-muted">
+              :{service.port}
+            </span>
+          )}
+          {service.version && <span className="font-mono text-xs text-muted/80 hidden sm:inline">v{service.version}</span>}
+          {running && lastCpu !== undefined && lastMem !== undefined ? (
+            <span className="hidden md:inline-flex items-center gap-1.5 font-mono text-[11px] text-muted bg-surface-2/60 px-2 py-0.5 rounded border border-line/50">
+              <span>CPU <strong className="text-fg font-medium">{formatCpu(lastCpu)}</strong></span>
+              <span>·</span>
+              <span>RAM <strong className="text-fg font-medium">{formatBytes(lastMem)}</strong></span>
+            </span>
+          ) : (
+            <span className="hidden lg:inline text-xs text-muted truncate max-w-xs">{meta.blurb}</span>
+          )}
         </div>
+
+        {/* Action Controls */}
         <div className="flex shrink-0 items-center gap-1.5">
           {!service.installed ? (
             <Button size="sm" variant="primary" onClick={() => navigate("services")}>
@@ -716,6 +823,7 @@ function ServiceRow({
               <Play size={12} /> Start
             </Button>
           )}
+
           {action && service.installed && (
             <Button
               size="sm"
@@ -728,6 +836,19 @@ function ServiceRow({
               <action.icon size={14} />
             </Button>
           )}
+
+          {service.installed && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onCopy(connValue, `${service.label} ${connMode === "env" ? ".env" : "URL"}`)}
+              title={connMode === "env" ? envText(conn.env) : `Copy ${conn.url} (C)`}
+              aria-label={`Copy ${service.label} connection`}
+            >
+              <Copy size={13} className="text-muted" />
+            </Button>
+          )}
+
           <Menu
             items={[
               ...dbMenu,
@@ -744,65 +865,82 @@ function ServiceRow({
               { label: "View logs", icon: <ScrollText size={15} />, onSelect: () => showLogs(service.kind) },
             ]}
           />
+
+          {service.installed && (
+            <button
+              type="button"
+              onClick={() => setExpanded(!expanded)}
+              aria-expanded={expanded}
+              aria-label={expanded ? `Collapse ${service.label} details` : `Expand ${service.label} details`}
+              className={clsx(
+                "p-1.5 rounded-lg text-muted hover:text-fg hover:bg-surface-2 transition-transform duration-200 cursor-pointer",
+                (expanded || hasIssues) && "rotate-180 text-accent-text"
+              )}
+            >
+              <ChevronDown size={15} />
+            </button>
+          )}
         </div>
       </div>
 
-      {service.installed && (
-        <div className="mt-3 flex flex-wrap items-end gap-x-6 gap-y-3 pl-[4.4rem]">
-          <Stat label="Port" value={service.port} live={running} />
-          <Stat label="PID" value={service.pid ?? "—"} />
-          <Stat label="Uptime" value={running && service.startedAt ? formatUptime(now - service.startedAt) : "—"} />
-          {running && (
-            <>
-              <Sparkline label="CPU" values={usage?.cpu ?? []} format={formatCpu} floor={10} note="100% is one full CPU core" />
-              <Sparkline label="RAM" values={usage?.memory ?? []} format={formatBytes} floor={64 * 1024 ** 2} />
-              {php && (
-                <span title={`All PHP workers: ${php.processes} process${php.processes === 1 ? "" : "es"}`}>
-                  <Stat label="PHP" value={`${formatCpu(php.cpu)} · ${formatBytes(php.memory)}`} />
-                </span>
-              )}
-            </>
-          )}
-          <button
-            onClick={() => onCopy(connValue, `${service.label} ${connMode === "env" ? ".env" : "URL"}`)}
-            className="group ml-auto flex max-w-full min-w-0 items-center gap-2 rounded-lg border border-line bg-bg px-2.5 py-1.5 text-left font-mono text-xs text-fg hover:border-accent/40"
-            title={connMode === "env" ? envText(conn.env) : `Copy ${conn.url} (C)`}
-            aria-label={`Copy ${service.label} connection ${connMode === "env" ? "as .env lines" : conn.url}`}
-          >
-            <span className="truncate">
-              {/* Tools like pgAdmin have no .env lines; their URL is what there is to copy. */}
-              {connMode === "url" || conn.env.length === 0 ? conn.url : conn.env.length === 1 ? envText(conn.env) : `${conn.env[0][0]}=… +${conn.env.length - 1} more`}
-            </span>
-            <Copy size={13} className="shrink-0 text-muted group-hover:text-accent-text" />
-          </button>
-        </div>
-      )}
+      {/* Expandable Details Drawer */}
+      {service.installed && (expanded || hasIssues) && (
+        <div className="border-t border-line/60 bg-surface-2/30 px-4 py-3 rounded-b-2xl space-y-3">
+          <p className="text-xs text-muted">{meta.blurb}</p>
 
-      {conflict && (
-        <div className="mt-3 ml-[4.4rem] flex items-start gap-2.5 rounded-xl border border-warn/30 bg-warn/10 p-3 text-sm" role="status">
-          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden />
-          <div>
-            <span className="font-medium">Port {conflict.port} is in use</span>
-            <span className="text-muted">
-              {" "}
-              by {conflict.owner ? `${conflict.owner.name} (PID ${conflict.owner.pid})` : "another program"}, so {service.label} can't start on it.
-              Stop that program, or pick another port in Settings → Ports.
-            </span>
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+            <Stat label="Port" value={service.port} live={running} />
+            <Stat label="PID" value={service.pid ?? "—"} />
+            <Stat label="Uptime" value={running && service.startedAt ? formatUptime(now - service.startedAt) : "—"} />
+            {running && (
+              <>
+                <Sparkline label="CPU" values={usage?.cpu ?? []} format={formatCpu} floor={10} note="100% is one full CPU core" />
+                <Sparkline label="RAM" values={usage?.memory ?? []} format={formatBytes} floor={64 * 1024 ** 2} />
+                {php && (
+                  <span title={`All PHP workers: ${php.processes} process${php.processes === 1 ? "" : "es"}`}>
+                    <Stat label="PHP" value={`${formatCpu(php.cpu)} · ${formatBytes(php.memory)}`} />
+                  </span>
+                )}
+              </>
+            )}
+            <button
+              onClick={() => onCopy(connValue, `${service.label} ${connMode === "env" ? ".env" : "URL"}`)}
+              className="group ml-auto flex max-w-full min-w-0 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-left font-mono text-xs text-fg hover:border-accent/40 shadow-xs cursor-pointer"
+              title={connMode === "env" ? envText(conn.env) : `Copy ${conn.url} (C)`}
+              aria-label={`Copy ${service.label} connection ${connMode === "env" ? "as .env lines" : conn.url}`}
+            >
+              <span className="truncate">
+                {connMode === "url" || conn.env.length === 0 ? conn.url : conn.env.length === 1 ? envText(conn.env) : `${conn.env[0][0]}=… +${conn.env.length - 1} more`}
+              </span>
+              <Copy size={13} className="shrink-0 text-muted group-hover:text-accent-text" />
+            </button>
           </div>
-        </div>
-      )}
-      {degraded && (
-        <div className="mt-3 ml-[4.4rem] flex items-start gap-2.5 rounded-xl border border-warn/30 bg-warn/10 p-3 text-sm" role="status">
-          <Pulse size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden />
-          <div>
-            <span className="font-medium">The process is running but not answering.</span>{" "}
-            <span className="text-muted">{service.health?.detail} Try Restart, or check its logs.</span>
-          </div>
-        </div>
-      )}
-      {service.problem && !running && (
-        <div className="ml-[4.4rem]">
-          <ProblemPanel kind={service.kind} problem={service.problem} />
+
+          {conflict && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-warn/30 bg-warn/10 p-3 text-sm" role="status">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden />
+              <div>
+                <span className="font-medium">Port {conflict.port} is in use</span>
+                <span className="text-muted">
+                  {" "}
+                  by {conflict.owner ? `${conflict.owner.name} (PID ${conflict.owner.pid})` : "another program"}, so {service.label} can't start on it.
+                  Stop that program, or pick another port in Settings → Ports.
+                </span>
+              </div>
+            </div>
+          )}
+          {degraded && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-warn/30 bg-warn/10 p-3 text-sm" role="status">
+              <Pulse size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden />
+              <div>
+                <span className="font-medium">The process is running but not answering.</span>{" "}
+                <span className="text-muted">{service.health?.detail} Try Restart, or check its logs.</span>
+              </div>
+            </div>
+          )}
+          {service.problem && !running && (
+            <ProblemPanel kind={service.kind} problem={service.problem} />
+          )}
         </div>
       )}
     </article>

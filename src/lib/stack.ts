@@ -27,9 +27,20 @@ export function useStack() {
 
   const usable = (services.data ?? []).filter((s) => s.installed && serverEnabled(s.kind, settings.data?.webServers));
   const running = usable.filter((s) => s.state === "running" || s.state === "starting");
+  // What Stop all can stop: not a service another app runs (Ollama's own app).
+  const stoppable = running.filter((s) => !s.external);
+
+  // A profile's project processes, and the ones other profiles start (stopped on a switch).
+  const profileProcesses = profile?.processes ?? [];
+  const otherProcesses = (settings.data?.profiles ?? []).flatMap((p) => p.processes ?? []).filter((k) => !profileProcesses.includes(k));
 
   const apply = useMutation({
-    mutationFn: ({ start, stop }: { start: ServiceKind[]; stop: ServiceKind[] }) => api.applyServices(start, stop),
+    mutationFn: async ({ start, stop, processes }: { start: ServiceKind[]; stop: ServiceKind[]; processes?: { start: string[]; stop: string[] } }) => {
+      const errors = await api.applyServices(start, stop);
+      // Services first: a queue worker wants its database running.
+      if (processes && (processes.start.length || processes.stop.length)) errors.push(...(await api.applyProcesses(processes.start, processes.stop)));
+      return errors;
+    },
     // Home shows each failure on its service's row; elsewhere a toast says it.
     onSuccess: (errors) => useAppStore.getState().page !== "overview" && errors.forEach((e) => notify("error", e)),
     onError: (e) => notify("error", String(e)),
@@ -58,6 +69,7 @@ export function useStack() {
     profile,
     usable,
     running,
+    stoppable,
     busy: apply.isPending || restart.isPending,
     /** Everything Start would start is already running: offer Restart instead. */
     up: isUp(wanted),
@@ -69,12 +81,17 @@ export function useStack() {
     /** The active profile's services, stopping running ones outside it; otherwise everything. */
     startStack: () =>
       profile
-        ? apply.mutate({ start: profile.services, stop: kinds(running).filter((k) => !profile.services.includes(k)) })
+        ? apply.mutate({
+            start: profile.services,
+            stop: kinds(running).filter((k) => !profile.services.includes(k)),
+            processes: { start: profileProcesses, stop: otherProcesses },
+          })
         : apply.mutate({ start: kinds(usable), stop: [] }),
     /** Every installed service, whatever profile is active. */
     startAll: () => apply.mutate({ start: kinds(usable), stop: [] }),
     startProfile: (services: ServiceKind[]) =>
       apply.mutate({ start: services, stop: kinds(running).filter((k) => !services.includes(k)) }),
-    stopAll: () => apply.mutate({ start: [], stop: kinds(running) }),
+    /** Every running service, and the active profile's processes. */
+    stopAll: () => apply.mutate({ start: [], stop: kinds(stoppable), processes: { start: [], stop: profileProcesses } }),
   };
 }

@@ -280,7 +280,7 @@ The domain follows what's listening. Every few seconds LampRabit looks for ports
 - when the port goes away, the domain switches back to the files after a few seconds (a dev server restarting itself doesn't flip it);
 - PHP projects stay on PHP: their package.json dev server (Vite for assets) isn't routed unless you pick its port ("Route here", e.g. for `php artisan serve`), and "Back to PHP" undoes that.
 
-**Start** on the Sites page keeps the project's port if it's still free, or picks the next free one from 3000, and starts the site's web server if it's stopped. Projects only start from the Sites page, never with Start all or a stack profile.
+**Start** on the Sites page keeps the project's port if it's still free, or picks the next free one from 3000, and starts the site's web server if it's stopped. A project's dev server only starts from the Sites page, never with Start all or a stack profile; a profile can start project processes it lists explicitly.
 
 ### Commands
 
@@ -294,6 +294,48 @@ commands:
 ```
 
 The Commands tab lists the commands you saved, then the template's `list`, then what `discover` finds. Sources: `package.json` and `composer.json` scripts, `artisan`, `console` (Symfony's `bin/console`), `magento`, `please` (Statamic), `drush`, `cake` and `spark`. Commands run in the project folder with its PHP and Node.js versions first on PATH, one at a time per project, and their output goes to the project's log (Logs → the project). `run` takes the placeholders above.
+
+### Processes
+
+Long-running commands the project gets, listed under Sites → Commands → Keep running:
+
+```yaml
+processes:
+  - name: queue                      # lowercase letters, digits, dashes; once each
+    command: php artisan queue:work --tries=3
+    restart: always                  # on-failure (default), always or never
+    autostart: false                 # true (default): starts with the project
+  - name: api
+    cwd: api                         # a folder of the project; the project folder when absent
+    command: node server.js --port {port}
+    port: auto                       # a free port, or a number from 1024 up; also $PORT
+    env: { NODE_ENV: development }
+    if: vars.api                     # only when this holds, like a step's if:
+```
+
+`command`, `cwd` and `env` values take the placeholders above; `{port}` (single braces) is the process's port, filled in each time it starts. `port: auto` picks a different free port for every project made from the template.
+
+### Domains
+
+Subdomains of the project's own domain (Sites → Domains):
+
+```yaml
+domains:
+  - name: admin                      # admin.<project>.test
+    root: admin/public               # a folder of the project ("" for the main domain's)
+  - name: api
+    process: api                     # one of the processes above; it needs a port
+  - name: docs
+    port: 8090                       # anything listening on that port
+  - name: preview                    # none of the three: wherever the main domain goes
+    if: database
+```
+
+Give at most one of `root`, `port` and `process`. A subdomain pointing at a process that its `if:` left out is left out too.
+
+### Making templates in the app
+
+New project → **New template** opens a guided form (where the code comes from, PHP and the database, the usual install steps, processes and subdomains) with the YAML next to it, for anything the form doesn't cover. A project's Settings → **Save as a template** opens the editor on a template that recreates that project: a `git clone` of its remote, its Composer and Node installs, `.env` from `.env.example`, Laravel's key and migrations, its database, PHP version, dev server, saved commands, processes and subdomains. Either way the template is checked like one loaded from the folder before it's saved to `<root>/templates/<id>.yaml`.
 
 ## What happens when you click Create
 
