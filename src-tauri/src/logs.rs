@@ -307,7 +307,11 @@ pub fn rotate(dir: &Path, max_bytes: u64, keep: u32, total_bytes: u64) -> usize 
             }
         }
     }
-    copies.sort_by_key(|(time, _, _)| *time);
+    // Oldest first. Copies made within the same moment tie on time (a test, or a log
+    // rotated twice in quick succession), and the folder's order differs per OS, so the
+    // copy number decides then: name.2.log is older than name.1.log.
+    let number = |p: &Path| p.file_stem().and_then(|s| s.to_str()).and_then(|s| s.rsplit_once('.')).and_then(|(_, n)| n.parse::<u32>().ok()).unwrap_or(0);
+    copies.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| number(&b.2).cmp(&number(&a.2))));
     for (_, len, path) in copies {
         if total <= total_bytes {
             break;
