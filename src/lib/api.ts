@@ -133,6 +133,16 @@ export type RequirementAction =
   | { kind: "useNode"; version: string }
   | { kind: "unavailable"; reason: string };
 
+/** One component of a first-run starter stack (starterPlan). */
+export interface StarterItem {
+  runtime: Runtime;
+  label: string;
+  blurb: string;
+  action: RequirementAction;
+  /** Download size in bytes, when the server says. */
+  size: number | null;
+}
+
 export interface Requirement {
   /** A runtime id, or "node". */
   runtime: string;
@@ -851,6 +861,8 @@ export const api = {
   clearProblem: (kind: ServiceKind) => invoke<void>("clear_problem", { kind }),
   diagnostics: (redact: boolean) => invoke<string>("diagnostics", { redact }),
   saveText: (path: string, contents: string) => invoke<void>("save_text", { path, contents }),
+  readText: (path: string) => invoke<string>("read_text", { path }),
+  starterPlan: (runtimes: string[]) => invoke<StarterItem[]>("starter_plan", { runtimes }),
   logHistory: () => invoke<LogHistory>("log_history"),
   /** One source ("apache", "dumps", "project:shop"), or every log with none. */
   clearLogs: (source?: string) => invoke<void>("clear_logs", { source: source ?? null }),

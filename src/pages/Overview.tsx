@@ -74,7 +74,7 @@ import { useHotkeys } from "../lib/shortcuts";
 import { Button, Card, Pill, Segmented } from "../components/ui";
 import Menu from "../components/Menu";
 import ProblemPanel from "../components/ProblemPanel";
-import ProfilesDialog from "../components/ProfilesDialog";
+import ProfilesDialog, { ProfilesTransfer } from "../components/ProfilesDialog";
 import Sparkline from "../components/Sparkline";
 import { Kbd } from "../components/Dialog";
 
@@ -398,6 +398,7 @@ function ProfileTiles({
           <h2 id="profiles-heading" className="text-base font-bold">Stack Profiles</h2>
           <p className="text-xs text-muted">Select a profile to filter your stack, or start its services directly.</p>
         </div>
+        <ProfilesTransfer />
       </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3" role="radiogroup" aria-label="Service profiles">
         {profileList.map((profile) => {

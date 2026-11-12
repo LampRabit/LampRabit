@@ -2544,6 +2544,15 @@ fn save_text(path: PathBuf, contents: String) -> Result<()> {
     Ok(())
 }
 
+/// A small text file the user picked (an exported profile list); refuses large files.
+#[tauri::command]
+fn read_text(path: PathBuf) -> Result<String> {
+    if std::fs::metadata(&path)?.len() > 1024 * 1024 {
+        return Err(Error::msg("That file is over 1 MB; pick the file LampRabit exported."));
+    }
+    Ok(std::fs::read_to_string(path)?)
+}
+
 /// A Markdown report of everything useful for troubleshooting.
 #[tauri::command]
 async fn diagnostics(state: State<'_, AppState>, redact: bool) -> Result<String> {
@@ -2705,6 +2714,13 @@ fn runtime_info() -> catalog::Catalog {
 async fn runtime_requirements(app: AppHandle, state: State<'_, AppState>, runtime: Runtime, version: Option<String>) -> Result<Vec<catalog::Requirement>> {
     let (settings, layout) = state.snapshot().await;
     catalog::requirements(&app, &state.http, &settings, &layout, runtime, version).await
+}
+
+/// What installing a starter stack would do, for the first-run wizard.
+#[tauri::command]
+async fn starter_plan(state: State<'_, AppState>, runtimes: Vec<String>) -> Result<Vec<catalog::StarterItem>> {
+    let (settings, layout) = state.snapshot().await;
+    Ok(catalog::starter(&state.http, &settings, &layout, &runtimes).await)
 }
 
 #[tauri::command]
@@ -3179,6 +3195,7 @@ pub fn run() {
             clear_problem,
             diagnostics,
             save_text,
+            read_text,
             log_history,
             clear_logs,
             restart_service,
@@ -3226,6 +3243,7 @@ pub fn run() {
             runtime_catalog,
             installed_runtimes,
             install_runtime,
+            starter_plan,
             remove_runtime,
             set_active_version,
         ])

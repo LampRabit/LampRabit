@@ -563,6 +563,8 @@ export default function Logs() {
                         "absolute top-0 left-0 grid w-full cursor-pointer items-start px-4 py-1.5 hover:bg-white/5",
                         columns,
                         l.stream === "command" && "bg-white/3",
+                        // Errors stand out in a long scroll; warnings only by their colour.
+                        l.level === "error" && "border-l-2 border-red-400/70 bg-red-500/8",
                         l.id === selected && "bg-white/10 hover:bg-white/10",
                       )}
                       style={{ transform: `translateY(${item.start}px)` }}

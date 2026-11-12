@@ -38,6 +38,9 @@ interface AppStore {
   setDiagnosticsOpen: (open: boolean) => void;
   newProjectOpen: boolean;
   setNewProjectOpen: (open: boolean) => void;
+  /** The setup guide (starter stacks), reopened from Settings; the first run opens it itself. */
+  setupGuideOpen: boolean;
+  setSetupGuideOpen: (open: boolean) => void;
   /** The template editor: open on some YAML (a project's), and whether New project opened it. */
   templateEditor: { yaml?: string; fromWizard?: boolean } | null;
   openTemplateEditor: (editor: { yaml?: string; fromWizard?: boolean }) => void;
@@ -98,6 +101,8 @@ export const useAppStore = create<AppStore>((set) => ({
   setDiagnosticsOpen: (diagnosticsOpen) => set({ diagnosticsOpen }),
   newProjectOpen: false,
   setNewProjectOpen: (newProjectOpen) => set({ newProjectOpen }),
+  setupGuideOpen: false,
+  setSetupGuideOpen: (setupGuideOpen) => set({ setupGuideOpen }),
   templateEditor: null,
   openTemplateEditor: (templateEditor) => set({ templateEditor }),
   closeTemplateEditor: () => set({ templateEditor: null }),

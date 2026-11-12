@@ -86,6 +86,7 @@ export default function Settings() {
   const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: 5000 });
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const openDiagnostics = useAppStore((s) => s.setDiagnosticsOpen);
+  const openSetupGuide = useAppStore((s) => s.setSetupGuideOpen);
   const [uninstalling, setUninstalling] = useState(false);
   const [moving, setMoving] = useState(false);
   const [draft, setDraft] = useState<SettingsT | null>(null);
@@ -210,6 +211,11 @@ export default function Settings() {
                   <FolderInput size={15} /> Move…
                 </Button>
               </div>
+            </Row>
+            <Row label="Setup guide" hint="Install a starter stack (PHP, Laravel, WordPress, Node.js, full stack or your own pick) in one go.">
+              <Button onClick={() => openSetupGuide(true)}>
+                <Sparkles size={15} /> Open the setup guide
+              </Button>
             </Row>
             <Row label="Site domain suffix" hint={`Folders in www are served as <name>.${draft.tld || "test"}`}>
               <input

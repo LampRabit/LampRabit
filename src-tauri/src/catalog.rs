@@ -448,6 +448,42 @@ async fn node_action(app: &AppHandle, client: &reqwest::Client, need: &Need) -> 
     }
 }
 
+/// One component of a starter stack on the first run: how it gets met (like a need, with no
+/// version bounds) and the download's size when it's a download.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StarterItem {
+    pub runtime: &'static str,
+    pub label: &'static str,
+    pub blurb: &'static str,
+    pub action: Action,
+    /// Bytes, from the server's Content-Length; None when it doesn't say.
+    pub size: Option<u64>,
+}
+
+/// The plan for a starter stack: each runtime's installed version, or the download that
+/// would be used (LTS lines first, as for needs). Node.js isn't here: it comes through NVM,
+/// which the wizard sets up itself.
+pub async fn starter(client: &reqwest::Client, settings: &Settings, layout: &Layout, ids: &[String]) -> Vec<StarterItem> {
+    let plans = ids.iter().filter_map(|id| Runtime::from_id(id)).map(|runtime| async move {
+        let meta = info(runtime);
+        let need = Need { runtime: runtime.id(), min: None, max: None, prefer: None, why: "" };
+        let action = runtime_action(client, settings, layout, &need, meta.label).await;
+        let size = match &action {
+            Action::Install { release } => download_size(client, &release.url).await,
+            _ => None,
+        };
+        StarterItem { runtime: runtime.id(), label: meta.label, blurb: meta.blurb, action, size }
+    });
+    futures_util::future::join_all(plans).await
+}
+
+/// A download's size from a HEAD request (redirects followed); a few seconds at most.
+async fn download_size(client: &reqwest::Client, url: &str) -> Option<u64> {
+    let response = tokio::time::timeout(std::time::Duration::from_secs(6), client.head(url).send()).await.ok()?.ok()?;
+    response.headers().get(reqwest::header::CONTENT_LENGTH)?.to_str().ok()?.parse().ok().filter(|n| *n > 0)
+}
+
 fn newest<'a>(versions: impl Iterator<Item = &'a str>, need: &Need) -> Option<&'a str> {
     versions.filter(|v| need.fits(v)).max_by(|a, b| cmp(&parts(a), &parts(b)).then(parts(a).len().cmp(&parts(b).len())))
 }
