@@ -337,12 +337,26 @@ export default function Settings() {
             />
             <Row label="Commands" hint="Also available in the terminal that the title bar's terminal button opens." wide>
               <div className="flex flex-wrap gap-1.5">
-                {["php", "composer", "mysql", "mysqldump", "mysqladmin", "mariadb", "mariadb-dump", "redis-cli"].map((c) => (
+                {["lamprabit", "php", "composer", "mysql", "mysqldump", "mysqladmin", "mariadb", "mariadb-dump", "redis-cli"].map((c) => (
                   <code key={c} className="rounded-md bg-surface-2 px-2 py-0.5 font-mono text-xs">
                     {c}
                   </code>
                 ))}
               </div>
+            </Row>
+            <Row
+              label="Command line"
+              hint="lamprabit status, services, service start apache, projects, doctor shop, logs --follow, runtime install php 8.4… Add --json for scripts. It starts LampRabit in the background when it isn't running."
+              wide
+            >
+              <code className="block rounded-md bg-surface-2 px-3 py-2 font-mono text-xs">lamprabit help</code>
+            </Row>
+            <Row
+              label="AI assistants (MCP)"
+              hint="Lets an assistant such as Claude see your projects, services, logs and project health, and start or fix things after asking you. Add this to its MCP settings:"
+              wide
+            >
+              <McpSnippet root={settings.data?.rootDir ?? draft.rootDir} os={os} />
             </Row>
           </Section>
 
@@ -875,5 +889,26 @@ function AutostartToggle() {
         }
       }}
     />
+  );
+}
+
+/** The MCP server's entry for an assistant's config: the lamprabit shim with "mcp". */
+function McpSnippet({ root, os }: { root: string; os?: Os }) {
+  const notify = useAppStore((s) => s.notify);
+  const sep = os === "windows" ? "\\" : "/";
+  const command = `${root}${sep}shims${sep}lamprabit${os === "windows" ? ".cmd" : ""}`;
+  const text = JSON.stringify({ mcpServers: { lamprabit: { command, args: ["mcp"] } } }, null, 2);
+  return (
+    <div className="relative">
+      <pre className="selectable overflow-x-auto rounded-md bg-surface-2 px-3 py-2 font-mono text-xs">{text}</pre>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="absolute top-1.5 right-1.5"
+        onClick={() => navigator.clipboard.writeText(text).then(() => notify("info", "Copied the MCP config"), () => notify("error", "Couldn't copy"))}
+      >
+        Copy
+      </Button>
+    </div>
   );
 }

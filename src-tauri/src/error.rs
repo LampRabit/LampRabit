@@ -10,6 +10,8 @@ pub enum Error {
     TomlSer(#[from] toml::ser::Error),
     #[error("{0}")]
     Msg(String),
+    #[error("{0}")]
+    Json(#[from] serde_json::Error),
 }
 
 impl Error {
