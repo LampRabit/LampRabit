@@ -17,8 +17,9 @@ export default function BottomNav() {
   const runtimeUpdates = useRuntimeUpdates().data?.length ?? 0;
 
   return (
-    // The full-width strip lets clicks through; only the pill itself takes them.
-    <nav aria-label="Pages" className="pointer-events-none fixed inset-x-0 bottom-4 z-10 flex justify-center px-4">
+    // Docked under the page's scroll area rather than floating over it: a floating bar hid
+    // whatever scrolled under it (Settings' sections, long lists).
+    <nav aria-label="Pages" className="flex shrink-0 justify-center px-4 pt-1.5 pb-3">
       <div className="pointer-events-auto relative flex items-center gap-1 rounded-2xl border border-line bg-nav p-1.5 shadow-float backdrop-blur-md">
         {/* One highlight that glides to the active tab (button width + gap = 5.5rem). */}
         {/* Pages outside the bar leave nothing highlighted. */}

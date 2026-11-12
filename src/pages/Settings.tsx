@@ -92,6 +92,22 @@ export default function Settings() {
   const [draft, setDraft] = useState<SettingsT | null>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
   const [current, setCurrent] = useState<string>("general");
+  // "Find a setting": sections whose text doesn't match are hidden. Read from the rendered
+  // text, so every label, hint and value counts without a separate index.
+  const [find, setFind] = useState("");
+  const [matches, setMatches] = useState<string[] | null>(null);
+  useEffect(() => {
+    const q = find.trim().toLowerCase();
+    const found: string[] = [];
+    for (const { id } of sections) {
+      const el = document.getElementById(`settings-${id}`);
+      if (!el) continue;
+      const hit = !q || (el.textContent ?? "").toLowerCase().includes(q);
+      el.hidden = !hit;
+      if (hit) found.push(id);
+    }
+    setMatches(q ? found : null);
+  }, [find]);
 
   const activeVersions = useMemo<Versions | null>(
     () => (installed.data ? (Object.fromEntries(installed.data.map((i) => [i.runtime, i.active])) as Versions) : null),
@@ -179,8 +195,17 @@ export default function Settings() {
 
       <div className="grid items-start gap-8 lg:grid-cols-[12rem_minmax(0,1fr)]">
         <nav aria-label="Settings sections" className="sticky top-4 hidden lg:block">
+          <input
+            type="search"
+            value={find}
+            onChange={(e) => setFind(e.target.value)}
+            placeholder="Find a setting"
+            aria-label="Find a setting"
+            className={clsx(inputClass, "mb-2 py-1.5")}
+          />
+          {matches && <p className="mb-2 px-1 text-xs text-muted" aria-live="polite">{matches.length === 0 ? "No setting matches." : `${matches.length} of ${sections.length} sections`}</p>}
           <ul className="space-y-0.5">
-            {sections.map((s) => (
+            {sections.filter((s) => !matches || matches.includes(s.id)).map((s) => (
               <li key={s.id}>
                 <button
                   onClick={() => document.getElementById(`settings-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
@@ -198,6 +223,19 @@ export default function Settings() {
         </nav>
 
         <div className="motion-stagger min-w-0 space-y-6">
+          {/* Narrow windows hide the rail; jump between sections from here instead. */}
+          <select
+            aria-label="Go to a settings section"
+            value={current}
+            onChange={(e) => document.getElementById(`settings-${e.target.value}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className={clsx(inputClass, "lg:hidden")}
+          >
+            {sections.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
           <Section id="general" title="General" subtitle="Where your environment lives and how sites are named.">
             <Row label="LampRabit folder" hint="Runtimes, configs, your projects (www), databases and logs. Moving it takes everything along." wide>
               <div className="flex items-center gap-2">

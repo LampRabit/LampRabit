@@ -75,7 +75,7 @@
   --surface-2: #232a34;
   --line: #2d3540;
   --fg: #e7ecf1;
-  --muted: #8d98a7;
+  --muted: #9ea9b7;
   --accent: #59d1a2;
   --accent-hover: #74dcb4;
   --accent-fg: #0e1a15;
@@ -101,7 +101,7 @@
     --surface-2: #232a34;
     --line: #2d3540;
     --fg: #e7ecf1;
-    --muted: #8d98a7;
+    --muted: #9ea9b7;
     --accent: #59d1a2;
     --accent-hover: #74dcb4;
     --accent-fg: #0e1a15;
@@ -321,4 +321,13 @@ input,
 textarea,
 .selectable {
   @apply select-text;
+}
+
+/* A visible focus ring for keyboard users on every control. In the base layer, so a
+   component's own focus style (inputs' ring) still wins; mouse clicks don't show it. */
+@layer base {
+  :where(button, a, summary, [role="tab"], [role="radio"], [tabindex]:not([tabindex="-1"]), input[type="checkbox"], input[type="radio"]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
 }

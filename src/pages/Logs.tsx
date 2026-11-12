@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CaseSensitive, ChevronDown, ChevronRight, Copy, Download, EyeOff, FileCode, Pause, Play, Regex, RotateCcw, Search, Trash2, WrapText, X } from "lucide-react";
+import { AlertTriangle, SlidersHorizontal, CaseSensitive, ChevronDown, ChevronRight, Copy, Download, EyeOff, FileCode, Pause, Play, Regex, RotateCcw, Search, Trash2, WrapText, X } from "lucide-react";
 import clsx from "clsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
@@ -9,6 +9,7 @@ import { api, serviceLabels, type Dump, type DumpNode, type LogStream, type Serv
 import type { Level, LogEntry } from "../lib/logparse";
 import { useAppStore } from "../lib/store";
 import { Button, Card, PageHeader, Switch } from "../components/ui";
+import Menu from "../components/Menu";
 
 /** Badge colours for the sources that have one; the rest share a neutral one. */
 const badgeColors: Record<string, string> = {
@@ -257,6 +258,16 @@ export default function Logs() {
     });
   const solo = (id: string) => setHidden(new Set(allSources.filter((s) => s !== id)));
   const filtered = hidden.size > 0 || !!query.trim() || shownLevels.size !== levelOrder.length || shownStreams.size !== streams.length || range !== "all";
+  // Severity, stream and folding sit behind Filters; the count says when any of them narrows the view.
+  const [showFilters, setShowFilters] = useState(false);
+  const activeFilters = (shownLevels.size !== levelOrder.length ? 1 : 0) + (shownStreams.size !== streams.length ? 1 : 0) + (foldRepeats ? 0 : 1);
+  const filterSummary = [
+    ...(hidden.size > 0 ? [sourceSummary] : []),
+    ...(query.trim() ? [`${exclude ? "without" : "matching"} "${query.trim()}"`] : []),
+    ...(shownLevels.size !== levelOrder.length ? [onlyProblems ? "errors and warnings" : [...shownLevels].join(", ")] : []),
+    ...(shownStreams.size !== streams.length ? [streams.filter((x) => shownStreams.has(x.id)).map((x) => x.label).join(", ") || "no streams"] : []),
+    ...(range !== "all" ? [ranges.find((r) => r.id === range)!.label.toLowerCase()] : []),
+  ];
   const resetFilters = () => {
     setHidden(new Set());
     setQuery("");
@@ -406,15 +417,26 @@ export default function Logs() {
               </>
             )}
           </button>
-          <Button variant="ghost" onClick={() => setWrapLines((current) => !current)} aria-pressed={wrapLines} title={wrapLines ? "One line per entry (the full text is in its details)" : "Wrap long lines"}>
-            <WrapText size={15} /> {wrapLines ? "Wrap" : "No wrap"}
-          </Button>
-          <Button variant="ghost" onClick={() => copyText(asText(), `${matched.length} log ${matched.length === 1 ? "line" : "lines"}`)} disabled={matched.length === 0}>
-            <Copy size={14} /> Copy
-          </Button>
-          <Button variant="ghost" onClick={exportLogs} disabled={matched.length === 0}>
-            <Download size={14} /> Export
-          </Button>
+          <button
+            type="button"
+            onClick={() => setShowFilters((v) => !v)}
+            aria-expanded={showFilters}
+            className={clsx(
+              "flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-medium",
+              showFilters || activeFilters > 0 ? "border-accent/50 bg-accent-soft/40 text-fg" : "border-line bg-surface text-fg hover:bg-surface-2",
+            )}
+          >
+            <SlidersHorizontal size={14} /> Filters
+            {activeFilters > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] text-accent-fg tabular-nums">{activeFilters}</span>}
+          </button>
+          <Menu
+            label="More log actions"
+            items={[
+              { label: wrapLines ? "Don't wrap long lines" : "Wrap long lines", icon: <WrapText size={14} />, onSelect: () => setWrapLines((current) => !current) },
+              { label: `Copy ${matched.length} lines`, icon: <Copy size={14} />, onSelect: () => copyText(asText(), `${matched.length} log ${matched.length === 1 ? "line" : "lines"}`) },
+              { label: "Export to a file…", icon: <Download size={14} />, onSelect: exportLogs },
+            ]}
+          />
           {confirmClear ? (
             <div className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger-soft px-2 py-1">
               <span className="text-xs text-danger-text">Delete all log files?</span>
@@ -432,6 +454,20 @@ export default function Logs() {
           )}
         </div>
 
+        {!showFilters && filtered && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-line pt-2.5 text-xs text-muted" aria-live="polite">
+            <span className="font-semibold">Showing</span>
+            {filterSummary.map((f) => (
+              <span key={f} className="rounded-full bg-surface-2 px-2 py-0.5 text-fg">
+                {f}
+              </span>
+            ))}
+            <button type="button" onClick={resetFilters} className="ml-1 flex items-center gap-1 font-medium text-accent-text hover:underline">
+              <RotateCcw size={12} /> Reset
+            </button>
+          </div>
+        )}
+        {showFilters && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-2.5">
           <div className="flex items-center gap-0.5 rounded-lg border border-line bg-bg p-1" role="group" aria-label="Quick view">
             <button type="button" onClick={() => showLevels(null)} aria-pressed={shownLevels.size === levelOrder.length} className={toggleChip(shownLevels.size === levelOrder.length)}>
@@ -481,6 +517,7 @@ export default function Logs() {
             )}
           </span>
         </div>
+        )}
       </Card>
 
       <div className="flex min-h-0 flex-1 gap-3">

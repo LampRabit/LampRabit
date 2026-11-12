@@ -501,9 +501,9 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
   const activity = processStates.some((s) => s.state === "crashed") || status?.state === "crashed" ? "crashed" : status?.task || processStates.some(isActive) ? "running" : null;
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
+    { id: "git", label: "Git" },
     { id: "commands", label: "Commands" },
     { id: "domains", label: "Domains" },
-    { id: "git", label: "Git" },
     { id: "settings", label: "Settings" },
   ];
   // [ and ] step through the project's tabs (listed in SHORTCUTS).
@@ -542,7 +542,12 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
               </Chip>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted">
-              <span className="flex min-w-0 items-center gap-1.5" title={site.gitBranch ? `Git branch ${site.gitBranch}` : "This project isn't a Git repository"}>
+              <button
+                type="button"
+                onClick={() => setTab("git")}
+                className="flex min-w-0 items-center gap-1.5 rounded hover:text-accent-text"
+                title={site.gitBranch ? `Git branch ${site.gitBranch}: open the Git tab` : "This project isn't a Git repository: open the Git tab to start one"}
+              >
                 <GitBranch size={14} className="shrink-0" aria-hidden />
                 {site.gitBranch ? (
                   <>
@@ -552,7 +557,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
                 ) : (
                   <span>No Git</span>
                 )}
-              </span>
+              </button>
               <button
                 type="button"
                 onClick={() => openPath(site.path).catch(onError)}

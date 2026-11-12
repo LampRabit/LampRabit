@@ -5,12 +5,20 @@ import { useAppStore } from "../lib/store";
 export default function Notices() {
   const notices = useAppStore((s) => s.notices);
   const dismiss = useAppStore((s) => s.dismiss);
+  // The newest activity (a service started, stopped or failed; an install finished), read out
+  // by screen readers wherever focus is; the toasts below are announced as they appear.
+  const latest = useAppStore((s) => s.activity[0]);
 
   return (
-    <div className="pointer-events-none fixed right-4 bottom-4 flex w-80 flex-col gap-2">
+    <>
+      <div className="sr-only" role="status" aria-live="polite">
+        {latest?.text}
+      </div>
+      <div className="pointer-events-none fixed right-4 bottom-4 flex w-80 flex-col gap-2" aria-live="polite">
       {notices.map((n) => (
         <div
           key={n.id}
+          role={n.tone === "error" ? "alert" : "status"}
           className={clsx(
             "motion-toast pointer-events-auto flex items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-lg",
             n.tone === "error"
@@ -29,6 +37,7 @@ export default function Notices() {
           </button>
         </div>
       ))}
-    </div>
+      </div>
+    </>
   );
 }
