@@ -11,6 +11,7 @@ mod dumps;
 mod error;
 mod extensions;
 mod facts;
+mod git;
 mod langver;
 mod layout;
 mod logs;
@@ -1891,6 +1892,124 @@ async fn create_project_database(app: AppHandle, state: State<'_, AppState>, nam
     Ok(())
 }
 
+/// Git, for a project's folder (git.rs).
+#[tauri::command]
+async fn git_version() -> Option<String> {
+    git::version().await
+}
+
+#[tauri::command]
+async fn git_status(state: State<'_, AppState>, name: String) -> Result<git::Status> {
+    let (_, layout) = state.snapshot().await;
+    git::status(&project_dir(&layout, &name)?).await
+}
+
+#[tauri::command]
+async fn git_diff(state: State<'_, AppState>, name: String, path: String, staged: bool, untracked: bool) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    git::diff(&project_dir(&layout, &name)?, &path, staged, untracked).await
+}
+
+#[tauri::command]
+async fn git_stage(state: State<'_, AppState>, name: String, paths: Vec<String>, stage: bool) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    git::stage(&project_dir(&layout, &name)?, &paths, stage).await
+}
+
+#[tauri::command]
+async fn git_discard(app: AppHandle, state: State<'_, AppState>, name: String, paths: Vec<String>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    git::discard(&project_dir(&layout, &name)?, &paths).await?;
+    logs::system(&app, logs::Level::Info, format!("Discarded changes to {} in {name}", paths.join(", ")));
+    Ok(())
+}
+
+#[tauri::command]
+async fn git_commit(app: AppHandle, state: State<'_, AppState>, name: String, message: String, amend: bool) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    let out = git::commit(&project_dir(&layout, &name)?, &message, amend).await?;
+    logs::system(&app, logs::Level::Info, format!("{} in {name}: {}", if amend { "Amended the last commit" } else { "Committed" }, message.lines().next().unwrap_or_default()));
+    Ok(out)
+}
+
+#[tauri::command]
+async fn git_branches(state: State<'_, AppState>, name: String) -> Result<Vec<git::Branch>> {
+    let (_, layout) = state.snapshot().await;
+    git::branches(&project_dir(&layout, &name)?).await
+}
+
+/// Branch actions; a switch or merge changes the files, so the site's facts refresh.
+#[tauri::command]
+async fn git_branch(app: AppHandle, state: State<'_, AppState>, name: String, action: git::BranchAction) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    let what = format!("{action:?}");
+    let out = git::branch(&project_dir(&layout, &name)?, action).await?;
+    logs::system(&app, logs::Level::Info, format!("Git in {name}: {what}"));
+    Ok(out)
+}
+
+#[tauri::command]
+async fn git_abort(state: State<'_, AppState>, name: String) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    git::abort(&project_dir(&layout, &name)?).await
+}
+
+#[tauri::command]
+async fn git_continue(state: State<'_, AppState>, name: String) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    git::continue_operation(&project_dir(&layout, &name)?).await
+}
+
+#[tauri::command]
+async fn git_log(state: State<'_, AppState>, name: String, skip: u32, limit: u32, path: Option<String>) -> Result<Vec<git::Commit>> {
+    let (_, layout) = state.snapshot().await;
+    git::log(&project_dir(&layout, &name)?, skip, limit, path.as_deref()).await
+}
+
+#[tauri::command]
+async fn git_show(state: State<'_, AppState>, name: String, hash: String) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    git::show(&project_dir(&layout, &name)?, &hash).await
+}
+
+#[tauri::command]
+async fn git_sync(app: AppHandle, state: State<'_, AppState>, name: String, action: git::Sync) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    let out = git::sync(&project_dir(&layout, &name)?, action).await?;
+    logs::system(&app, logs::Level::Info, format!("Git {action:?} in {name} finished"));
+    Ok(out)
+}
+
+#[tauri::command]
+async fn git_remote(state: State<'_, AppState>, name: String, action: git::RemoteAction) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    git::remote(&project_dir(&layout, &name)?, action).await
+}
+
+#[tauri::command]
+async fn git_set_identity(state: State<'_, AppState>, name: String, user: String, email: String) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    git::set_identity(&project_dir(&layout, &name)?, &user, &email).await
+}
+
+#[tauri::command]
+async fn git_init(state: State<'_, AppState>, name: String) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    git::init(&project_dir(&layout, &name)?).await
+}
+
+/// Clones a repository into www/; the folder becomes a project like any other.
+#[tauri::command]
+async fn git_clone(app: AppHandle, state: State<'_, AppState>, url: String, folder: Option<String>) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    let folder = folder.map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).unwrap_or_else(|| git::folder_for(&url));
+    manage::check_project_name(&layout, &folder)?;
+    logs::system(&app, logs::Level::Info, format!("Cloning into www/{folder}"));
+    git::clone(&layout.www(), &url, &folder).await?;
+    logs::system(&app, logs::Level::Info, format!("Cloned www/{folder}"));
+    Ok(folder)
+}
+
 /// Points a project at the other MySQL-family server (its .env's DB_PORT).
 #[tauri::command]
 async fn switch_project_database(state: State<'_, AppState>, name: String, engine: manage::Engine) -> Result<()> {
@@ -3147,6 +3266,23 @@ pub fn run() {
             database_status,
             create_project_database,
             switch_project_database,
+            git_version,
+            git_status,
+            git_diff,
+            git_stage,
+            git_discard,
+            git_commit,
+            git_branches,
+            git_branch,
+            git_abort,
+            git_continue,
+            git_log,
+            git_show,
+            git_sync,
+            git_remote,
+            git_set_identity,
+            git_init,
+            git_clone,
             set_project_env,
             ports_listening,
             set_site_php_ini,

@@ -192,7 +192,7 @@ async fn git(dir: &Path) -> Git {
 }
 
 /// `https://user:token@host/x.git` → `https://host/x.git`, so a token never reaches the UI.
-fn without_credentials(url: &str) -> String {
+pub fn without_credentials(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else { return url.to_string() };
     let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
     match authority.rsplit_once('@') {

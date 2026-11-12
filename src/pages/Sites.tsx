@@ -32,6 +32,7 @@ import { api, runtimeLabels, serviceLabels, type AppStatus, type CommandRun, typ
 import { useAppStore } from "../lib/store";
 import Dialog from "../components/Dialog";
 import ProjectDomains from "../components/ProjectDomains";
+import ProjectGit, { CloneDialog } from "../components/ProjectGit";
 import ProjectProcesses, { processFrom } from "../components/ProjectProcesses";
 import { toolUrl } from "../lib/tools";
 import { useHotkeys } from "../lib/shortcuts";
@@ -69,7 +70,7 @@ const frameworkStyle: Record<string, string> = {
 const languageLabel: Record<Language, string> = { php: "PHP", node: "Node.js", java: "Java", python: "Python", go: "Go", rust: "Rust", static: "Static" };
 
 type Sort = "recent" | "name";
-type Tab = "overview" | "commands" | "domains" | "settings";
+type Tab = "overview" | "commands" | "domains" | "git" | "settings";
 
 export default function Sites() {
   const queryClient = useQueryClient();
@@ -85,6 +86,7 @@ export default function Sites() {
   const [sort, setSort] = useState<Sort>("recent");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
+  const [cloning, setCloning] = useState(false);
 
   const apply = useMutation({ mutationFn: api.applySites, onSuccess: refresh, onError });
   const trust = useMutation({
@@ -122,6 +124,9 @@ export default function Sites() {
           <>
             <Button onClick={() => paths.data && openPath(paths.data.www).catch(onError)}>
               <FolderOpen size={16} /> Open www
+            </Button>
+            <Button onClick={() => setCloning(true)} title="Clone a Git repository into www">
+              <GitBranch size={16} /> Clone
             </Button>
             <Button variant="primary" onClick={() => openNewProject(true)} title="New project (N)">
               <FolderPlus size={16} /> New project
@@ -283,6 +288,20 @@ export default function Sites() {
           </Card>
           <div className="min-w-0">{selectedSite ? <ProjectDetail key={selectedSite.path} site={selectedSite} info={data} status={statuses[selectedSite.name]} tab={tab} setTab={setTab} onSelect={setSelectedPath} /> : null}</div>
         </div>
+      )}
+      {cloning && (
+        <CloneDialog
+          onClose={() => setCloning(false)}
+          onCloned={async (folder) => {
+            // The new folder is a project once the list is read again; open it there.
+            const fresh = await info.refetch();
+            const site = fresh.data?.sites.find((s) => s.name === folder);
+            if (site) {
+              setSelectedPath(site.path);
+              setTab("overview");
+            }
+          }}
+        />
       )}
     </>
   );
@@ -484,6 +503,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
     { id: "overview", label: "Overview" },
     { id: "commands", label: "Commands" },
     { id: "domains", label: "Domains" },
+    { id: "git", label: "Git" },
     { id: "settings", label: "Settings" },
   ];
   // [ and ] step through the project's tabs (listed in SHORTCUTS).
@@ -602,6 +622,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
           {tab === "overview" && <Overview site={site} info={info} settings={settings.data} facts={facts.data} status={status} php={php} onCommands={() => setTab("commands")} />}
           {tab === "commands" && <CommandsTab site={site} settings={settings.data} status={status} />}
           {tab === "domains" && <ProjectDomains site={site} settings={settings.data} />}
+          {tab === "git" && <ProjectGit site={site} />}
           {tab === "settings" && <SettingsTab site={site} settings={settings.data} status={status} onRenamed={onSelect} />}
         </div>
 

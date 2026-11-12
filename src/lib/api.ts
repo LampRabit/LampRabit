@@ -133,6 +133,60 @@ export type RequirementAction =
   | { kind: "useNode"; version: string }
   | { kind: "unavailable"; reason: string };
 
+/** Git (git.rs): a project's repository through the git command. */
+export interface GitFile {
+  path: string;
+  /** The old path of a rename. */
+  from: string | null;
+  /** Index side: " " unchanged, M A D R C T, "?" untracked. */
+  staged: string;
+  /** Working-tree side. */
+  unstaged: string;
+  conflicted: boolean;
+}
+
+export interface GitStatus {
+  repo: boolean;
+  branch: string | null;
+  head: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  files: GitFile[];
+  operation: "merge" | "rebase" | "cherry-pick" | "revert" | null;
+  identity: { name: string | null; email: string | null; local: boolean };
+  remotes: { name: string; url: string }[];
+}
+
+export interface GitBranch {
+  name: string;
+  remote: boolean;
+  current: boolean;
+  upstream: string | null;
+  track: string;
+  time: number;
+  subject: string;
+}
+
+export interface GitCommit {
+  hash: string;
+  short: string;
+  author: string;
+  email: string;
+  time: number;
+  refs: string;
+  subject: string;
+}
+
+export type GitBranchAction =
+  | { kind: "create"; branch: string; from: string | null; switch: boolean }
+  | { kind: "switch"; branch: string }
+  | { kind: "rename"; from: string; to: string }
+  | { kind: "delete"; branch: string; force: boolean }
+  | { kind: "merge"; branch: string };
+
+export type GitRemoteAction = { kind: "add"; name: string; url: string } | { kind: "setUrl"; name: string; url: string } | { kind: "remove"; name: string };
+
 /** One component of a first-run starter stack (starterPlan). */
 export interface StarterItem {
   runtime: Runtime;
@@ -792,6 +846,23 @@ export const api = {
   projectFacts: (name: string) => invoke<ProjectFacts>("project_facts", { name }),
   databaseStatus: (name: string) => invoke<DbStatus | null>("database_status", { name }),
   switchProjectDatabase: (name: string, engine: "mariadb" | "mysql") => invoke<void>("switch_project_database", { name, engine }),
+  gitVersion: () => invoke<string | null>("git_version"),
+  gitStatus: (name: string) => invoke<GitStatus>("git_status", { name }),
+  gitDiff: (name: string, path: string, staged: boolean, untracked: boolean) => invoke<string>("git_diff", { name, path, staged, untracked }),
+  gitStage: (name: string, paths: string[], stage: boolean) => invoke<void>("git_stage", { name, paths, stage }),
+  gitDiscard: (name: string, paths: string[]) => invoke<void>("git_discard", { name, paths }),
+  gitCommit: (name: string, message: string, amend: boolean) => invoke<string>("git_commit", { name, message, amend }),
+  gitBranches: (name: string) => invoke<GitBranch[]>("git_branches", { name }),
+  gitBranch: (name: string, action: GitBranchAction) => invoke<string>("git_branch", { name, action }),
+  gitAbort: (name: string) => invoke<void>("git_abort", { name }),
+  gitContinue: (name: string) => invoke<string>("git_continue", { name }),
+  gitLog: (name: string, skip: number, limit: number, path?: string) => invoke<GitCommit[]>("git_log", { name, skip, limit, path: path ?? null }),
+  gitShow: (name: string, hash: string) => invoke<string>("git_show", { name, hash }),
+  gitSync: (name: string, action: "fetch" | "pull" | "push") => invoke<string>("git_sync", { name, action }),
+  gitRemote: (name: string, action: GitRemoteAction) => invoke<void>("git_remote", { name, action }),
+  gitSetIdentity: (name: string, user: string, email: string) => invoke<void>("git_set_identity", { name, user, email }),
+  gitInit: (name: string) => invoke<void>("git_init", { name }),
+  gitClone: (url: string, folder?: string) => invoke<string>("git_clone", { url, folder: folder ?? null }),
   createProjectDatabase: (name: string) => invoke<void>("create_project_database", { name }),
   setProjectEnv: (name: string, key: string, value: string) => invoke<void>("set_project_env", { name, key, value }),
   portsListening: (ports: number[]) => invoke<number[]>("ports_listening", { ports }),
