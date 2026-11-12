@@ -121,10 +121,10 @@ export default function Sites() {
   const siteToolbarActions = (
     <>
       <Button size="sm" variant="ghost" onClick={() => setCloning(true)} title="Clone a Git repository into www" aria-label="Clone repository">
-        <GitBranch size={15} /> <span className="hidden 2xl:inline">Clone</span>
+        <GitBranch size={15} /> <span className="hidden xl:inline">Clone</span>
       </Button>
       <Button size="sm" variant="primary" onClick={() => openNewProject(true)} title="New project (N)" aria-label="New project">
-        <FolderPlus size={15} /> <span className="hidden 2xl:inline">New project</span>
+        <FolderPlus size={15} /> <span className="hidden xl:inline">New project</span>
       </Button>
       <Button size="sm" variant="ghost" onClick={() => info.refetch()} disabled={info.isFetching} aria-label="Refresh sites" title="Refresh sites">
         <RefreshCw size={15} className={clsx(info.isFetching && "animate-spin")} />

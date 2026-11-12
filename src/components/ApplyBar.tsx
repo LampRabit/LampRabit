@@ -27,7 +27,9 @@ export default function ApplyBar({
     <div
       role="region"
       aria-label="Unsaved changes"
-      className="motion-toast fixed right-4 bottom-20 z-20 flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 shadow-lg"
+      className="motion-toast fixed z-20 flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 shadow-lg"
+      // Above the page bar when it's at the bottom, beside it when it's on the right.
+      style={{ right: "calc(var(--nav-right, 0px) + 1rem)", bottom: "calc(var(--nav-bottom, 0px) + 1rem)" }}
     >
       <span className="size-2 shrink-0 rounded-full bg-warn" aria-hidden />
       <span className="min-w-0">

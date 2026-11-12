@@ -175,7 +175,7 @@ export default function App() {
               </main>
             ))}
           </div>
-          <div className={clsx("flex shrink-0", nav.navFirst ? "order-1" : "order-3", nav.direction === "row" ? "items-center" : "justify-center")}>
+          <div className={clsx(nav.wrapper, nav.navFirst ? "order-1" : "order-3")}>
             <BottomNav />
           </div>
         </div>

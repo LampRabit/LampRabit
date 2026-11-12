@@ -8,7 +8,7 @@ const out = fileURLToPath(new URL("./out", import.meta.url));
 mkdirSync(out, { recursive: true });
 const browser = await webkit.launch();
 const errors = [];
-for (const edge of ["bottom", "left", "right", "top"]) {
+for (const edge of ["bottom-center", "bottom-start", "left-start", "left-end", "right-center", "top-end"]) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on("pageerror", (e) => errors.push(`${edge}: ${e.message}`));
   await page.goto(`http://localhost:1430/scripts/screenshots/index.html?page=sites&nav=${edge}`);
@@ -42,7 +42,7 @@ await page.screenshot({ path: `${out}/nav-dropping.png` });
 await page.waitForTimeout(600);
 const saved = await page.evaluate(() => localStorage.getItem("navPosition"));
 console.log("after drop, saved edge:", saved);
-if (saved !== "left") errors.push(`drag: docked at ${saved}, not left`);
+if (saved !== "left-center") errors.push(`drag: docked at ${saved}, not left-center`);
 // A click on a tab still navigates (no drag).
 await page.locator("[data-nav-bar] button", { hasText: "Logs" }).click();
 await page.waitForTimeout(300);
@@ -50,6 +50,10 @@ const navigated = await page.evaluate(() => !!document.querySelector('[aria-curr
 console.log("click navigates:", navigated);
 if (!navigated) errors.push("click: a tab click didn't navigate");
 await page.screenshot({ path: `${out}/nav-after.png` });
+// The floating notices keep clear of the bar wherever it is.
+const clear = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--nav-left"));
+console.log("room published for a left bar:", clear);
+if (!clear || clear.trim() === "0px") errors.push("the bar didn't publish its size for floating bars");
 await browser.close();
 // The very first module load can race Vite's dependency optimizer; that isn't the bar's fault.
 const real = errors.filter((e) => !e.includes("Importing a module script failed"));

@@ -311,7 +311,7 @@ export default function Logs() {
   const clearLogsAction = confirmClear ? (
     <>
       <Button size="sm" variant="danger" onClick={() => void clear()} aria-label="Confirm clear all logs" title="Delete all log files">
-        <Trash2 size={14} /> <span className="hidden 2xl:inline">Clear now</span>
+        <Trash2 size={14} /> <span className="hidden xl:inline">Clear now</span>
       </Button>
       <Button size="sm" variant="ghost" onClick={() => setConfirmClear(false)} aria-label="Cancel clearing logs" title="Cancel">
         <X size={14} />
@@ -319,7 +319,7 @@ export default function Logs() {
     </>
   ) : (
     <Button size="sm" variant="ghost" onClick={() => setConfirmClear(true)} aria-label="Clear all logs" title="Clear all logs">
-      <Trash2 size={14} /> <span className="hidden 2xl:inline">Clear</span>
+      <Trash2 size={14} /> <span className="hidden xl:inline">Clear</span>
     </Button>
   );
   usePageToolbar("logs", {
@@ -328,10 +328,10 @@ export default function Logs() {
     actions: (
       <>
         <Button size="sm" variant="ghost" onClick={() => copyText(asText(), `${matched.length} log ${matched.length === 1 ? "line" : "lines"}`)} aria-label={`Copy ${matched.length} matching log lines`} title={`Copy ${matched.length} matching lines`}>
-          <Copy size={14} /> <span className="hidden 2xl:inline">Copy</span>
+          <Copy size={14} /> <span className="hidden xl:inline">Copy</span>
         </Button>
         <Button size="sm" variant="ghost" onClick={() => void exportLogs()} aria-label="Export logs" title="Export logs">
-          <Download size={14} /> <span className="hidden 2xl:inline">Export</span>
+          <Download size={14} /> <span className="hidden xl:inline">Export</span>
         </Button>
         {clearLogsAction}
       </>

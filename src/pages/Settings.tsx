@@ -588,17 +588,36 @@ export default function Settings() {
                 ]}
               />
             </Row>
-            <Row label="Page bar" hint="Which edge the Home, Sites, Services, Logs and Settings bar sits on. You can also drag it there by its grip.">
-              <Segmented
-                value={navEdge}
-                onChange={setNavEdge}
-                options={[
-                  { value: "bottom", label: "Bottom" },
-                  { value: "top", label: "Top" },
-                  { value: "left", label: "Left" },
-                  { value: "right", label: "Right" },
-                ]}
-              />
+            <Row label="Page bar" hint="Where the Home, Sites, Services, Logs and Settings bar sits: an edge, and where along it. You can also drag it there by its grip.">
+              <div className="flex flex-wrap gap-2">
+                <Segmented
+                  value={navEdge.edge}
+                  onChange={(edge) => setNavEdge({ ...navEdge, edge })}
+                  options={[
+                    { value: "bottom", label: "Bottom" },
+                    { value: "top", label: "Top" },
+                    { value: "left", label: "Left" },
+                    { value: "right", label: "Right" },
+                  ]}
+                />
+                <Segmented
+                  value={navEdge.align}
+                  onChange={(align) => setNavEdge({ ...navEdge, align })}
+                  options={
+                    navEdge.edge === "left" || navEdge.edge === "right"
+                      ? [
+                          { value: "start", label: "Top" },
+                          { value: "center", label: "Middle" },
+                          { value: "end", label: "Bottom" },
+                        ]
+                      : [
+                          { value: "start", label: "Left" },
+                          { value: "center", label: "Center" },
+                          { value: "end", label: "Right" },
+                        ]
+                  }
+                />
+              </div>
             </Row>
           </Section>
 

@@ -37,16 +37,16 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **12. Projects: several domains, processes, Node.js serving** (2026-11-05: stack profiles list project processes; `lamprabit.toml` saved and applied from a project's Settings)
 - [x] **13. Logs redesign and dump catcher** (2026-11-05: dump catcher, source sidebar, virtualised list, line details, per-source clear, rotation)
 - [x] **14. Movable tab bar** (2026-11-12: docks to any edge in the layout, drag with animation, Settings → Appearance)
-- [ ] **15. More databases: PostgreSQL, MongoDB, SQLite, ClickHouse, Neo4j, backups**
+- [x] **15. More databases: PostgreSQL, MongoDB, SQLite, ClickHouse, Neo4j, backups** (2026-11-12: implemented; see phase details)
 - [x] **16. More services: Meilisearch, Typesense, RustFS, MinIO, OpenSearch/Elasticsearch, RabbitMQ, Ollama, n8n**
 - [x] **17. Templates and more frameworks** (2026-11-05: `processes:` and `domains:` in templates, a template editor, Save as a template)
-- [ ] **18. Onboarding**
+- [x] **18. Onboarding** (2026-11-12: first-run starter setup and reopen from Settings)
 - [ ] **19. Project doctor**
 - [ ] **20. Headless core and the `lamprabit` CLI**
 - [ ] **21. MCP server**
-- [ ] **22. Git**
+- [x] **22. Git** (2026-11-12: project Git workflow and Git runtime)
 - [ ] **23. Dependency manager** (part of 25)
-- [ ] **24. Languages: Python, Go, Rust, Java**
+- [x] **24. Languages: Python, Go, Rust, Java** (2026-11-12: runtime, project and template support)
 - [ ] **25. Package managers: npm, pnpm, Yarn, Bun, Deno, pip, conda, uv, Maven, Gradle, Cargo**
 - [x] **26. Movable environment folder** (2026-11-05: the first run asks where the folder goes)
 - [ ] **Later**: Git workflow builder, deployment checklists
@@ -196,7 +196,7 @@ restart = "on-failure"
 
 ## Phase 14: movable tab bar — done (2026-11-12)
 
-The page tab bar (`BottomNav`) docks to the bottom (default), top, left or right edge and takes its own space there (App lays the body out with `navLayout`), so it never covers a page. Drag it by its grip or anywhere on it: it floats under the pointer in the shape it will have, the target edge lights up, and on release it glides into place while the page slides over (Web Animations, skipped when Motion is reduced or off). Escape cancels a drag; on the grip, the arrow keys dock to that edge and Escape puts it back at the bottom. Settings → Appearance → Page bar sets it too; the edge is saved per device (older saved positions load as their edge). Pages put their title and actions in the title bar (`PageToolbar`).
+The page tab bar (`BottomNav`) docks to one of twelve places, an edge (top, right, bottom, left) and a position along it (start, center, end; bottom center by default), and takes its own space there (App lays the body out with `navLayout`), so it never covers a page. Drag it by its grip or anywhere on it: it floats under the pointer in the shape it will have, the target edge lights up, and on release it glides into place while the page slides over (Web Animations, skipped when Motion is reduced or off). Escape cancels a drag; on the grip, the arrow keys dock to that edge, Shift+arrows move it along the edge and Escape puts it back at the bottom center. Its size is published as `--nav-*` so the Apply bar and notices stay clear of it. Settings → Appearance → Page bar sets it too; the edge is saved per device (older saved positions load as their edge). Pages put their title and actions in the title bar (`PageToolbar`).
 
 ## Phase 15: more databases
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useQuery } from "@tanstack/react-query";
@@ -23,6 +23,15 @@ export default function Titlebar() {
   const navigate = useAppStore((s) => s.navigate);
   const page = useAppStore((s) => s.page);
   const pageToolbar = useCurrentPageToolbar(page);
+  // The narrow-window actions menu (a <details>) closes on a choice or a click outside it.
+  const menu = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const close = (e: MouseEvent) => {
+      if (menu.current?.open && !menu.current.contains(e.target as Node)) menu.current.removeAttribute("open");
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
   const update = useAppUpdate((s) => s.available);
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
@@ -50,16 +59,15 @@ export default function Titlebar() {
       ) : (
         <div className="pointer-events-none min-w-0 leading-tight">
           <h1 className="truncate text-sm font-bold tracking-tight">{pageToolbar?.title ?? pageLabel(page)}</h1>
-          {pageToolbar?.subtitle && <div className="hidden max-w-72 truncate text-[11px] text-muted 2xl:block">{pageToolbar.subtitle}</div>}
+          {pageToolbar?.subtitle && <div className="hidden max-w-96 truncate text-[11px] text-muted xl:block">{pageToolbar.subtitle}</div>}
         </div>
       )}
-      <ThemeToggle />
 
       <div className="ml-auto flex min-w-0 items-center gap-1 sm:gap-1.5">
         {pageToolbar?.actions && pageToolbar.menuActions && <div className="hidden items-center gap-1 xl:flex">{pageToolbar.actions}</div>}
         {pageToolbar?.actions && !pageToolbar.menuActions && <div className="flex min-w-0 items-center gap-1">{pageToolbar.actions}</div>}
         {pageToolbar?.menuActions && (
-          <details key={page} className="group relative xl:hidden">
+          <details key={page} ref={menu} className="group relative xl:hidden" onClick={(e) => (e.target as HTMLElement).closest("button") && menu.current?.removeAttribute("open")}>
             <summary className="flex size-9 cursor-pointer list-none items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg [&::-webkit-details-marker]:hidden" aria-label={`${pageToolbar.title} actions`} title={`${pageToolbar.title} actions`}>
               <MoreHorizontal size={18} />
             </summary>
@@ -68,7 +76,10 @@ export default function Titlebar() {
             </div>
           </details>
         )}
+        {/* The page's own actions, then LampRabit's, which are the same on every page. */}
+        {(pageToolbar?.actions || pageToolbar?.menuActions) && <span className="mx-1 h-5 w-px shrink-0 bg-line" aria-hidden />}
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+        <ThemeToggle />
         <Button size="sm" variant="ghost" className="hidden sm:inline-flex" onClick={() => useAppStore.getState().setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
           <Keyboard size={15} />
         </Button>
@@ -90,15 +101,15 @@ export default function Titlebar() {
         {/* Home has its own (profile-aware) Start, Restart and Stop in its header. */}
         {page === "overview" ? null : anyRunning ? (
           <Button size="sm" onClick={stack.stopAll} disabled={stack.busy || stack.stoppable.length === 0} title="Stop all (Shift+X)" aria-label="Stop all">
-            <Square size={12} className="fill-current" /> <span className="hidden 2xl:inline">Stop all</span>
+            <Square size={12} className="fill-current" /> <span className="hidden xl:inline">Stop all</span>
           </Button>
         ) : nothingInstalled ? (
           <Button size="sm" variant="primary" onClick={() => navigate("services")} aria-label="Set up your stack" title="Set up your stack">
-            <Download size={14} /> <span className="hidden 2xl:inline">Set up</span>
+            <Download size={14} /> <span className="hidden xl:inline">Set up</span>
           </Button>
         ) : (
           <Button size="sm" variant="primary" onClick={stack.startStack} disabled={stack.busy} title="Shift+S" aria-label={stack.profile ? `Start ${stack.profile.name}` : "Start all"}>
-            <Play size={14} /> <span className="hidden 2xl:inline">{stack.profile ? `Start ${stack.profile.name}` : "Start all"}</span>
+            <Play size={14} /> <span className="hidden xl:inline">{stack.profile ? `Start ${stack.profile.name}` : "Start all"}</span>
           </Button>
         )}
         </div>

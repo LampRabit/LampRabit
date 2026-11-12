@@ -8,21 +8,35 @@ const MAX_LOG_LINES = 10000;
 const MAX_ACTIVITY = 100;
 
 export type PageId = "overview" | "sites" | "services" | "logs" | "settings";
-/** Where the page tab bar docks; it takes its own space there (BottomNav, App). */
+/** Where the page tab bar docks: an edge, and where along it (BottomNav, App). */
 export type NavEdge = "top" | "bottom" | "left" | "right";
+export type NavAlign = "start" | "center" | "end";
+export interface NavPlacement {
+  edge: NavEdge;
+  align: NavAlign;
+}
 
-/** The saved edge; an older saved position ({ edge, x, y }, or a free-floating one) maps to its edge or the bottom. */
-function loadNavEdge(): NavEdge {
+/**
+ * The saved placement ("right-start"). Older saves load too: a bare edge ("left"), or the
+ * first version's { edge, x, y } (a free-floating one goes to the bottom), its position along
+ * the edge kept as the nearest third.
+ */
+function loadNavPlacement(): NavPlacement {
   const raw = readPref("navPosition");
-  if (!raw) return "bottom";
-  let edge: unknown = raw;
+  const fallback: NavPlacement = { edge: "bottom", align: "center" };
+  if (!raw) return fallback;
+  const isEdge = (e: unknown): e is NavEdge => e === "top" || e === "bottom" || e === "left" || e === "right";
+  const isAlign = (a: unknown): a is NavAlign => a === "start" || a === "center" || a === "end";
+  const [edge, align] = raw.split("-");
+  if (isEdge(edge)) return { edge, align: isAlign(align) ? align : "center" };
   try {
-    const parsed = JSON.parse(raw);
-    edge = typeof parsed === "string" ? parsed : parsed?.edge;
+    const old = JSON.parse(raw) as { edge?: unknown; x?: number; y?: number };
+    if (!isEdge(old?.edge)) return fallback;
+    const t = old.edge === "left" || old.edge === "right" ? old.y : old.x;
+    return { edge: old.edge, align: typeof t !== "number" ? "center" : t < 1 / 3 ? "start" : t > 2 / 3 ? "end" : "center" };
   } catch {
-    // A plain edge name, saved as text.
+    return fallback;
   }
-  return edge === "top" || edge === "left" || edge === "right" ? edge : "bottom";
 }
 
 export interface Notice {
@@ -78,8 +92,8 @@ interface AppStore {
   /** The stack profile Start acts on; null means every installed service. */
   activeProfile: string | null;
   setActiveProfile: (name: string | null) => void;
-  navPosition: NavEdge;
-  setNavPosition: (edge: NavEdge) => void;
+  navPosition: NavPlacement;
+  setNavPosition: (placement: NavPlacement) => void;
   logs: LogEntry[];
   /** Lines that fell out of the view because it keeps only the newest ones. */
   logsDropped: number;
@@ -150,9 +164,9 @@ export const useAppStore = create<AppStore>((set) => ({
     writePref("activeProfile", activeProfile);
     set({ activeProfile });
   },
-  navPosition: loadNavEdge(),
+  navPosition: loadNavPlacement(),
   setNavPosition: (navPosition) => {
-    writePref("navPosition", navPosition);
+    writePref("navPosition", `${navPosition.edge}-${navPosition.align}`);
     set({ navPosition });
   },
   logs: [],

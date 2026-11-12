@@ -14,7 +14,7 @@ export default function Notices() {
       <div className="sr-only" role="status" aria-live="polite">
         {latest?.text}
       </div>
-      <div className="pointer-events-none fixed right-4 bottom-4 flex w-80 flex-col gap-2" aria-live="polite">
+      <div className="pointer-events-none fixed flex w-80 flex-col gap-2" style={{ right: "calc(var(--nav-right, 0px) + 1rem)", bottom: "calc(var(--nav-bottom, 0px) + 1rem)" }} aria-live="polite">
       {notices.map((n) => (
         <div
           key={n.id}
