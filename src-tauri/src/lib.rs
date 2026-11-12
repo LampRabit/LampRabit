@@ -7,6 +7,7 @@ mod config;
 mod configs;
 mod cron;
 mod diagnose;
+mod doctor;
 mod dumps;
 mod error;
 mod extensions;
@@ -2114,6 +2115,98 @@ fn git_cancel(op: String) -> bool {
     git::cancel(&op)
 }
 
+/// The project doctor's issues for a project, most serious first (doctor.rs).
+#[tauri::command]
+async fn project_doctor(state: State<'_, AppState>, name: String) -> Result<Vec<doctor::Issue>> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let site = sites::scan(&settings, &layout).into_iter().find(|s| s.name == name).ok_or_else(|| Error::msg(format!("There's no project called {name} in www.")))?;
+    let own = settings.sites.get(&name);
+    let pm = own.and_then(|s| s.app.as_ref()).and_then(|a| a.package_manager).unwrap_or_else(|| apps::detect_package_manager(&dir));
+    let facts = facts::read(&dir, site.framework, pm.id()).await;
+    let database = if site.database.is_some() { database_status(state.clone(), name.clone()).await.ok().flatten() } else { None };
+    let kind = ServiceKind::WEB.into_iter().find(|k| k.web_server() == Some(site.server)).unwrap_or(ServiceKind::Apache);
+    let server_installed = settings.versions.get(kind.id()).is_some();
+    let server_running = state.supervisor.is_running(kind).await;
+    let info = list_sites(state.clone()).await?;
+    let git_identity = if dir.join(".git").exists() {
+        git::configure(&settings, &layout);
+        git::status(&dir).await.ok().map(|s| s.identity.name.is_some() && s.identity.email.is_some())
+    } else {
+        None
+    };
+    let language = serde_json::to_value(site.language).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+    let input = doctor::Input {
+        name: &name,
+        dir: &dir,
+        layout: &layout,
+        language: &language,
+        framework: site.framework,
+        url: &site.url,
+        ssl: site.ssl,
+        php: site.php.as_deref().or(settings.versions.php.as_deref()),
+        php_installed: runtimes::installed(&layout, Runtime::Php),
+        php_requirement: facts.php_requirement.as_deref(),
+        dependencies: facts.dependencies.iter().map(|d| (d.manager.clone(), d.installed, d.outdated)).collect(),
+        package_manager: pm.id(),
+        database,
+        server: (kind.id(), kind.label(), server_installed, server_running),
+        hosts_ok: info.hosts_ok,
+        needs_apply: info.needs_apply,
+        ca_trusted: info.ca_trusted,
+        git_identity,
+    };
+    Ok(doctor::check(&input).await)
+}
+
+/// Applies one doctor fix, by the issue's id. The issues are worked out again first, so a
+/// fix only runs while its problem is still there; each goes through the app's own command
+/// for it, with that command's checks.
+#[tauri::command]
+async fn doctor_fix(app: AppHandle, state: State<'_, AppState>, name: String, id: String) -> Result<String> {
+    use doctor::FixAction as A;
+    let issues = project_doctor(state.clone(), name.clone()).await?;
+    let issue = issues.into_iter().find(|i| i.id == id).ok_or_else(|| Error::msg("That problem is already gone (or changed): look at the list again."))?;
+    let fix = issue.fix.ok_or_else(|| Error::msg("LampRabit can't fix this one by itself; the description says what to do."))?;
+    logs::system(&app, logs::Level::Info, format!("Doctor, {name}: {}", fix.label));
+    match fix.action {
+        A::SetPhp { version } => set_site_php(app, state, name, Some(version)).await?,
+        A::EnableExtension { php, name: ext } => {
+            let (_, layout) = state.snapshot().await;
+            let bundled = layout.bin("php", &php).join("ext").join(format!("php_{ext}.dll")).exists();
+            if bundled {
+                set_php_extension(app, state, php, ext, true).await?
+            } else {
+                install_php_extension(app, state, php, ext).await?
+            }
+        }
+        A::RunCommand { label, command } => run_project_command(app, state, name, label, command).await?,
+        A::CopyFile { from, to } => {
+            let (_, layout) = state.snapshot().await;
+            let dir = project_dir(&layout, &name)?;
+            let target = dir.join(&to);
+            if target.exists() {
+                return Err(Error::msg(format!("{to} exists already; nothing was overwritten.")));
+            }
+            std::fs::copy(dir.join(&from), target)?;
+        }
+        A::StartService { service } => {
+            let kind: ServiceKind = serde_json::from_value(serde_json::Value::String(service.clone())).map_err(|_| Error::msg(format!("Unknown service {service}")))?;
+            start_service(app, state, kind).await?
+        }
+        A::CreateDatabase => create_project_database(app, state, name).await?,
+        A::SwitchDatabase { engine } => switch_project_database(state, name, engine).await?,
+        A::SetEnv { key, value } => set_project_env(state, name, key, value).await?,
+        A::ApplySites => apply_sites(app, state).await?,
+        A::TrustCa => {
+            if let Some(note) = trust_ca(app, state).await? {
+                return Ok(note);
+            }
+        }
+    }
+    Ok(fix.label)
+}
+
 /// Points a project at the other MySQL-family server (its .env's DB_PORT).
 #[tauri::command]
 async fn switch_project_database(state: State<'_, AppState>, name: String, engine: manage::Engine) -> Result<()> {
@@ -3440,6 +3533,8 @@ pub fn run() {
             database_status,
             create_project_database,
             switch_project_database,
+            project_doctor,
+            doctor_fix,
             git_version,
             git_status,
             git_diff,

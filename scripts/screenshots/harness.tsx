@@ -118,6 +118,14 @@ const answers: Record<string, unknown> = {
     template: "laravel@1",
   },
   database_status: { engine: "mariadb", label: "MariaDB", database: "dummy_project", installed: false, running: false, exists: null, port: 3306, reason: "The project connects to port 3306, which is MariaDB's in LampRabit (MySQL uses 3307).", alternative: { engine: "mysql", label: "MySQL", port: 3307 } },
+  project_doctor: q.get("healthy")
+    ? []
+    : [
+        { id: "php-version", severity: "error", title: "PHP 8.1.31 doesn't match the project", detail: "composer.json asks for PHP ^8.3.", fix: { label: "Use PHP 8.4.14", preview: "Sets dummy-project's PHP to 8.4.14 (other projects keep theirs) and restarts the web server.", action: { kind: "setPhp", version: "8.4.14" } } },
+        { id: "db-missing", severity: "error", title: "MariaDB isn't installed", detail: "The project connects to port 3306, which is MariaDB's in LampRabit (MySQL uses 3307).", fix: { label: "Use MySQL", preview: "Points the project at MySQL (port 3307) in its config.", action: { kind: "switchDatabase", engine: "mysql" } } },
+        { id: "deps-outdated-composer", severity: "warning", title: "Composer dependencies are out of date", detail: "The lock file changed since vendor/ was installed (a pull or a branch switch), so the code may expect packages that aren't there.", fix: { label: "Run composer install", preview: "Runs composer install in the project (its output shows under Commands).", action: { kind: "runCommand" } } },
+        { id: "git-identity", severity: "info", title: "Git doesn't know who you are", detail: "Commits will fail until Git has a name and email: set them in the Git tab.", fix: null },
+      ],
   git_version: "2.47.1",
   git_status: gitStatus,
   git_diff: (args: { path: string }) => (args.path === "README.md" ? readme : edit),

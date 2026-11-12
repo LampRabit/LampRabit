@@ -247,6 +247,15 @@ export type GitRemoteAction =
   | { kind: "rename"; from: string; to: string }
   | { kind: "remove"; name: string };
 
+/** The project doctor (doctor.rs): a problem, why it matters, and a fix to preview and run. */
+export interface DoctorIssue {
+  id: string;
+  severity: "error" | "warning" | "info";
+  title: string;
+  detail: string;
+  fix: { label: string; preview: string; action: { kind: string } & Record<string, unknown> } | null;
+}
+
 /** One component of a first-run starter stack (starterPlan). */
 export interface StarterItem {
   runtime: Runtime;
@@ -906,6 +915,8 @@ export const api = {
   projectFacts: (name: string) => invoke<ProjectFacts>("project_facts", { name }),
   databaseStatus: (name: string) => invoke<DbStatus | null>("database_status", { name }),
   switchProjectDatabase: (name: string, engine: "mariadb" | "mysql") => invoke<void>("switch_project_database", { name, engine }),
+  projectDoctor: (name: string) => invoke<DoctorIssue[]>("project_doctor", { name }),
+  doctorFix: (name: string, id: string) => invoke<string>("doctor_fix", { name, id }),
   gitVersion: () => invoke<string | null>("git_version"),
   gitStatus: (name: string) => invoke<GitStatus>("git_status", { name }),
   gitDiff: (name: string, path: string, staged: boolean, untracked: boolean) => invoke<string>("git_diff", { name, path, staged, untracked }),
