@@ -42,7 +42,8 @@ import UninstallDialog from "../components/UninstallDialog";
 import MoveEnvironmentDialog from "../components/MoveEnvironmentDialog";
 import ApplyBar from "../components/ApplyBar";
 import { portFields, portShown, serverNotes } from "../lib/settingsFields";
-import { Button, Card, PageHeader, Segmented, Switch, inputClass } from "../components/ui";
+import { Button, Card, Segmented, Switch, inputClass } from "../components/ui";
+import { usePageToolbar } from "../components/PageToolbar";
 
 type Os = EnvPaths["os"];
 
@@ -80,6 +81,8 @@ export default function Settings() {
   const navigate = useAppStore((s) => s.navigate);
   const { theme, setTheme } = useTheme();
   const { motion, setMotion } = useMotion();
+  const navEdge = useAppStore((s) => s.navPosition);
+  const setNavEdge = useAppStore((s) => s.setNavPosition);
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
@@ -136,6 +139,20 @@ export default function Settings() {
       JSON.stringify({ ...settings.data, versions: null, sites: null, profiles: null, catchDumps: null }) ||
       JSON.stringify(versions) !== JSON.stringify(activeVersions));
 
+  usePageToolbar("settings", {
+    title: "Settings",
+    subtitle: "Configure your local environment.",
+    actions: dirty ? (
+      <span className="flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-warn" role="status">
+        <span className="size-2 rounded-full bg-warn" /> Unsaved
+      </span>
+    ) : (
+      <span className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted" role="status">
+        <CheckCircle2 size={15} className="text-accent-text" /> Saved
+      </span>
+    ),
+  });
+
   const save = useMutation({
     mutationFn: async () => {
       if (!draft || !settings.data) return;
@@ -167,24 +184,6 @@ export default function Settings() {
 
   return (
     <>
-      <PageHeader
-        title="Settings"
-        subtitle="Configure your local environment."
-        actions={
-          <div className="flex items-center gap-4">
-            {dirty ? (
-              <span className="flex items-center gap-2 text-sm text-warn" role="status">
-                <span className="size-2 rounded-full bg-warn" /> Unsaved changes
-              </span>
-            ) : (
-              <span className="flex items-center gap-2 text-sm text-muted" role="status">
-                <CheckCircle2 size={17} className="text-accent-text" /> All changes saved
-              </span>
-            )}
-          </div>
-        }
-      />
-
       <FindContext.Provider value={findValue}>
       <div className="grid items-start gap-8 lg:grid-cols-[12rem_minmax(0,1fr)]">
         <nav aria-label="Settings sections" className="sticky top-4 hidden lg:block">
@@ -586,6 +585,18 @@ export default function Settings() {
                   { value: "full", label: "Full", icon: <Wind size={15} /> },
                   { value: "reduced", label: "Reduced", icon: <Feather size={15} /> },
                   { value: "off", label: "Off", icon: <CircleSlash size={15} /> },
+                ]}
+              />
+            </Row>
+            <Row label="Page bar" hint="Which edge the Home, Sites, Services, Logs and Settings bar sits on. You can also drag it there by its grip.">
+              <Segmented
+                value={navEdge}
+                onChange={setNavEdge}
+                options={[
+                  { value: "bottom", label: "Bottom" },
+                  { value: "top", label: "Top" },
+                  { value: "left", label: "Left" },
+                  { value: "right", label: "Right" },
                 ]}
               />
             </Row>

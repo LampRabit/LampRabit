@@ -8,6 +8,22 @@ const MAX_LOG_LINES = 10000;
 const MAX_ACTIVITY = 100;
 
 export type PageId = "overview" | "sites" | "services" | "logs" | "settings";
+/** Where the page tab bar docks; it takes its own space there (BottomNav, App). */
+export type NavEdge = "top" | "bottom" | "left" | "right";
+
+/** The saved edge; an older saved position ({ edge, x, y }, or a free-floating one) maps to its edge or the bottom. */
+function loadNavEdge(): NavEdge {
+  const raw = readPref("navPosition");
+  if (!raw) return "bottom";
+  let edge: unknown = raw;
+  try {
+    const parsed = JSON.parse(raw);
+    edge = typeof parsed === "string" ? parsed : parsed?.edge;
+  } catch {
+    // A plain edge name, saved as text.
+  }
+  return edge === "top" || edge === "left" || edge === "right" ? edge : "bottom";
+}
 
 export interface Notice {
   id: number;
@@ -62,6 +78,8 @@ interface AppStore {
   /** The stack profile Start acts on; null means every installed service. */
   activeProfile: string | null;
   setActiveProfile: (name: string | null) => void;
+  navPosition: NavEdge;
+  setNavPosition: (edge: NavEdge) => void;
   logs: LogEntry[];
   /** Lines that fell out of the view because it keeps only the newest ones. */
   logsDropped: number;
@@ -131,6 +149,11 @@ export const useAppStore = create<AppStore>((set) => ({
   setActiveProfile: (activeProfile) => {
     writePref("activeProfile", activeProfile);
     set({ activeProfile });
+  },
+  navPosition: loadNavEdge(),
+  setNavPosition: (navPosition) => {
+    writePref("navPosition", navPosition);
+    set({ navPosition });
   },
   logs: [],
   logsDropped: 0,

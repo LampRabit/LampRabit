@@ -34,11 +34,12 @@ import Dialog from "../components/Dialog";
 import ProjectDomains from "../components/ProjectDomains";
 import ProjectGit, { CloneDialog } from "../components/ProjectGit";
 import ProjectProcesses, { processFrom } from "../components/ProjectProcesses";
+import { usePageToolbar } from "../components/PageToolbar";
 import { toolUrl } from "../lib/tools";
 import { useHotkeys } from "../lib/shortcuts";
 import { bestMatch, satisfies } from "../lib/constraint";
 import { formatAgo, useNow } from "../lib/time";
-import { Button, Card, PageHeader, Switch, inputClass } from "../components/ui";
+import { Button, Card, Switch, inputClass } from "../components/ui";
 import { ShareButton, TunnelRow, useProjectTunnel } from "../components/Tunnels";
 import { AppControls, CommandPrompt, CommandsPanel, OutputPanel, Row, ServeSettings, appCommand, isActive, stateStyle, useAppActions, useAppInfo, useAppStatuses, useUnreadOutput } from "../components/ProjectRun";
 
@@ -117,34 +118,41 @@ export default function Sites() {
   const selectedSite = shown.find((site) => site.path === selectedPath) ?? shown[0];
   const running = all.filter((s) => isActive(statuses[s.name])).length;
 
+  const siteToolbarActions = (
+    <>
+      <Button size="sm" variant="ghost" onClick={() => setCloning(true)} title="Clone a Git repository into www" aria-label="Clone repository">
+        <GitBranch size={15} /> <span className="hidden 2xl:inline">Clone</span>
+      </Button>
+      <Button size="sm" variant="primary" onClick={() => openNewProject(true)} title="New project (N)" aria-label="New project">
+        <FolderPlus size={15} /> <span className="hidden 2xl:inline">New project</span>
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => info.refetch()} disabled={info.isFetching} aria-label="Refresh sites" title="Refresh sites">
+        <RefreshCw size={15} className={clsx(info.isFetching && "animate-spin")} />
+      </Button>
+    </>
+  );
+  const siteToolbarMenu = (
+    <>
+      <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => setCloning(true)}>
+        <GitBranch size={15} /> Clone repository
+      </Button>
+      <Button size="sm" variant="primary" className="w-full justify-start" onClick={() => openNewProject(true)}>
+        <FolderPlus size={15} /> New project
+      </Button>
+      <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => info.refetch()} disabled={info.isFetching}>
+        <RefreshCw size={15} className={clsx(info.isFetching && "animate-spin")} /> Refresh sites
+      </Button>
+    </>
+  );
+  usePageToolbar("sites", {
+    title: "Sites",
+    subtitle: <>Every folder in <span className="font-mono">www</span> is served at <span className="font-mono">&lt;folder&gt;.{data?.tld ?? "test"}</span>, sub-domains included.</>,
+    actions: siteToolbarActions,
+    menuActions: siteToolbarMenu,
+  });
+
   return (
     <>
-      <PageHeader
-        title="Sites"
-        subtitle={
-          <>
-            Every folder in <span className="font-mono">www</span> is served at{" "}
-            <span className="font-mono">&lt;folder&gt;.{data?.tld ?? "test"}</span>, sub-domains included.
-          </>
-        }
-        actions={
-          <>
-            <Button onClick={() => paths.data && openPath(paths.data.www).catch(onError)}>
-              <FolderOpen size={16} /> Open www
-            </Button>
-            <Button onClick={() => setCloning(true)} title="Clone a Git repository into www">
-              <GitBranch size={16} /> Clone
-            </Button>
-            <Button variant="primary" onClick={() => openNewProject(true)} title="New project (N)">
-              <FolderPlus size={16} /> New project
-            </Button>
-            <Button onClick={() => info.refetch()} disabled={info.isFetching} aria-label="Refresh sites">
-              <RefreshCw size={15} className={clsx(info.isFetching && "animate-spin")} />
-            </Button>
-          </>
-        }
-      />
-
       <div className="mb-5 space-y-3 empty:mb-0">
         {data?.needsApply && (
           <Banner

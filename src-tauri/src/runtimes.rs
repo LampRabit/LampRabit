@@ -1296,7 +1296,28 @@ async fn meilisearch_releases(client: &reqwest::Client) -> Result<Vec<Release>> 
         ("macos", true) => "meilisearch-macos-apple-silicon",
         _ => return Err(unsupported("Meilisearch")),
     };
-    github_latest(client, Runtime::Meilisearch, "meilisearch/meilisearch", Archive::File, |n, _| n == name).await
+    github_newest_with(client, Runtime::Meilisearch, "meilisearch/meilisearch", Archive::File, name).await
+}
+
+/// Like `github_latest`, but the newest of the recent releases that has the file: a release
+/// sometimes ships without one platform's build (Meilisearch 1.56.2 had no Apple silicon file).
+async fn github_newest_with(client: &reqwest::Client, runtime: Runtime, repo: &str, archive: Archive, name: &str) -> Result<Vec<Release>> {
+    let list = get_json(client, &format!("https://api.github.com/repos/{repo}/releases?per_page=10")).await?;
+    for release in list.as_array().into_iter().flatten().filter(|r| r["prerelease"] == false && r["draft"] == false) {
+        let Some(asset) = release["assets"].as_array().into_iter().flatten().find(|a| a["name"] == name) else { continue };
+        return Ok(vec![Release {
+            runtime,
+            version: release["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string(),
+            url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
+            sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
+            sha512: None,
+            md5: None,
+            sha3_256: None,
+            archive,
+            label: None,
+        }]);
+    }
+    Err(Error::msg(format!("No recent {repo} release has a download for this platform ({name}).")))
 }
 
 /// Typesense's server from dl.typesense.org (its GitHub releases have no files). No
@@ -2142,7 +2163,12 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
         for (expected, actual) in checks {
             if let Some(expected) = expected {
                 if !actual.eq_ignore_ascii_case(expected) {
-                    return Err(Error::msg(format!("checksum mismatch for {name}: download is corrupt")));
+                    let head = std::fs::read(&archive_path).map(|b| b.into_iter().take(512).collect::<Vec<u8>>()).unwrap_or_default();
+                    let page = String::from_utf8_lossy(&head).to_ascii_lowercase();
+                    if page.contains("<html") || page.contains("<!doctype") {
+                        return Err(Error::msg(format!("{name}: the server sent a web page instead of the file (it may block automated downloads, or be updating it). Try again in a few minutes.")));
+                    }
+                    return Err(Error::msg(format!("checksum mismatch for {name}: the download doesn't match its published checksum (the file may have been replaced upstream moments ago). Try again in a few minutes.")));
                 }
             }
         }

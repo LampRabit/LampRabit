@@ -17,7 +17,8 @@ import { installKey, readPref, useAppStore, writePref } from "../lib/store";
 import { toolUrl } from "../lib/tools";
 import { useRuntimeUpdates } from "../lib/updates";
 import { runtimeTiles, tileFor } from "../components/runtimes";
-import { Button, Card, IconTile, PageHeader } from "../components/ui";
+import { Button, Card, IconTile } from "../components/ui";
+import { usePageToolbar } from "../components/PageToolbar";
 import NodeCard from "../components/NodeCard";
 import ServiceSettings from "../components/ServiceSettings";
 import RelatedPanel from "../components/RelatedPanel";
@@ -103,6 +104,9 @@ export default function Services() {
     if (item === "tunnels") return "Public URLs";
     if (installed.isLoading) return "Checking…";
     const info = find(item);
+    // This catalog entry installs LampRabit's portable MinGit. Project Git can still
+    // use a system Git executable, so the generic status sounds more absolute than it is.
+    if (item === "git" && !info?.active && !info?.versions.length) return "MinGit not installed";
     if (!info?.active) return info?.versions.length ? `${info.versions.length} installed` : "Not installed";
     // "In use" is the version chosen; for services, whether it's running comes after it.
     const svc = services.data?.find((s) => s.kind === item);
@@ -115,12 +119,16 @@ export default function Services() {
     item === "node" ? "bg-lime-600/10 text-lime-600" : item === "tunnels" ? "bg-violet-500/10 text-violet-600" : tileFor(item).className;
   const itemLabel = (item: ServiceSelection) => (item === "tunnels" ? "Active tunnels" : labelFor(catalog.data, item));
 
+  usePageToolbar("services", {
+    title: "Services",
+    subtitle: "Choose a service to manage its versions, settings, and tools.",
+  });
+
   return (
     <>
-      <PageHeader title="Services" subtitle="Choose a service to manage its versions, settings, and tools." />
       <div className="grid items-start gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
         {/* Sized to the space under the header (title bar, page header, room for the tab bar), so the list scrolls on its own and the page only when a service's details are taller. */}
-        <nav aria-label="Services" className="scrollbar-thin hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+        <nav aria-label="Services" className="scrollbar-thin hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
           <div className="mb-4 space-y-2">
             <label className="flex h-9 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 focus-within:border-accent">
               <Search size={14} className="shrink-0 text-muted" aria-hidden />

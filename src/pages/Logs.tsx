@@ -9,8 +9,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { api, serviceLabels, type Dump, type DumpNode, type LogStream, type ServiceKind } from "../lib/api";
 import type { Level, LogEntry } from "../lib/logparse";
 import { useAppStore } from "../lib/store";
-import { Button, Card, PageHeader, Switch } from "../components/ui";
+import { Button, Card, Switch } from "../components/ui";
 import Menu from "../components/Menu";
+import { usePageToolbar } from "../components/PageToolbar";
 import { useHotkeys } from "../lib/shortcuts";
 
 /** Badge colours for the sources that have one; the rest share a neutral one. */
@@ -307,6 +308,57 @@ export default function Logs() {
     }
   };
 
+  const clearLogsAction = confirmClear ? (
+    <>
+      <Button size="sm" variant="danger" onClick={() => void clear()} aria-label="Confirm clear all logs" title="Delete all log files">
+        <Trash2 size={14} /> <span className="hidden 2xl:inline">Clear now</span>
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => setConfirmClear(false)} aria-label="Cancel clearing logs" title="Cancel">
+        <X size={14} />
+      </Button>
+    </>
+  ) : (
+    <Button size="sm" variant="ghost" onClick={() => setConfirmClear(true)} aria-label="Clear all logs" title="Clear all logs">
+      <Trash2 size={14} /> <span className="hidden 2xl:inline">Clear</span>
+    </Button>
+  );
+  usePageToolbar("logs", {
+    title: "Logs",
+    subtitle: "Live output from your services and projects, and what your code dumps.",
+    actions: (
+      <>
+        <Button size="sm" variant="ghost" onClick={() => copyText(asText(), `${matched.length} log ${matched.length === 1 ? "line" : "lines"}`)} aria-label={`Copy ${matched.length} matching log lines`} title={`Copy ${matched.length} matching lines`}>
+          <Copy size={14} /> <span className="hidden 2xl:inline">Copy</span>
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => void exportLogs()} aria-label="Export logs" title="Export logs">
+          <Download size={14} /> <span className="hidden 2xl:inline">Export</span>
+        </Button>
+        {clearLogsAction}
+      </>
+    ),
+    menuActions: (
+      <>
+        <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => copyText(asText(), `${matched.length} log ${matched.length === 1 ? "line" : "lines"}`)}>
+          <Copy size={14} /> Copy {matched.length} matching lines
+        </Button>
+        <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => void exportLogs()}>
+          <Download size={14} /> Export logs
+        </Button>
+        {confirmClear ? (
+          <div className="flex flex-col gap-2 border-t border-line pt-2">
+            <span className="px-2 text-xs text-danger-text">Delete all log files?</span>
+            <Button size="sm" variant="danger" className="w-full justify-start" onClick={() => void clear()}><Trash2 size={14} /> Clear all logs</Button>
+            <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => setConfirmClear(false)}><X size={14} /> Cancel</Button>
+          </div>
+        ) : (
+          <Button size="sm" variant="ghost" className="w-full justify-start border-t border-line pt-2" onClick={() => setConfirmClear(true)}>
+            <Trash2 size={14} /> Clear all logs
+          </Button>
+        )}
+      </>
+    ),
+  });
+
   // Only the rows in view are drawn, so thousands of lines stay quick.
   const rows = useVirtualizer({
     count: visible.length,
@@ -334,8 +386,6 @@ export default function Logs() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden motion-stagger">
-      <PageHeader title="Logs" subtitle="Live output from your services and projects, and what your code dumps." />
-
       <Card className="mb-3 shrink-0 space-y-2.5 p-3">
         <div className="flex flex-wrap items-center gap-2">
           {/* On narrow screens the sources are a menu; wider ones have the sidebar. */}
@@ -441,25 +491,8 @@ export default function Logs() {
             label="More log actions"
             items={[
               { label: wrapLines ? "Don't wrap long lines" : "Wrap long lines", icon: <WrapText size={14} />, onSelect: () => setWrapLines((current) => !current) },
-              { label: `Copy ${matched.length} lines`, icon: <Copy size={14} />, onSelect: () => copyText(asText(), `${matched.length} log ${matched.length === 1 ? "line" : "lines"}`) },
-              { label: "Export to a file…", icon: <Download size={14} />, onSelect: exportLogs },
             ]}
           />
-          {confirmClear ? (
-            <div className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger-soft px-2 py-1">
-              <span className="text-xs text-danger-text">Delete all log files?</span>
-              <Button size="sm" variant="danger" onClick={() => clear()}>
-                Clear
-              </Button>
-              <Button size="sm" onClick={() => setConfirmClear(false)}>
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <Button variant="ghost" onClick={() => setConfirmClear(true)}>
-              <Trash2 size={14} /> Clear
-            </Button>
-          )}
         </div>
 
         {!showFilters && filtered && (

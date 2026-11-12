@@ -118,7 +118,7 @@ export default function ProjectGit({ site }: { site: Site }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-1">
-        <div role="tablist" aria-label="Git" className="flex flex-wrap gap-0.5">
+        <div role="tablist" aria-label="Git" className="flex flex-wrap gap-0.5 rounded-lg border border-line bg-surface-2/60 p-1">
           {views.map(([id, label, extra]) => (
             <button key={id} role="tab" aria-selected={view === id} onClick={() => setView(id)} className={clsx("rounded-md px-2.5 py-1 text-sm", view === id ? "bg-surface font-semibold text-fg shadow-card" : "text-muted hover:text-fg")}>
               {label}
@@ -606,7 +606,6 @@ function DiffView({ text, loading, error, hunkAction }: { text?: string; loading
             ((index) => (
               <div key={i} className="group/hunk flex items-center border-y border-line/60 bg-surface-2/70 py-0.5 text-[11px] text-muted">
                 <span className={gutter}>⋯</span>
-                <span className={gutter} />
                 <span className="flex-1 px-3">{row.text}</span>
                 {hunkAction && (
                   // Sticky on the right, so it stays in reach when long lines scroll sideways.
@@ -627,8 +626,7 @@ function DiffView({ text, loading, error, hunkAction }: { text?: string; loading
             </div>
           ) : (
             <div key={i} className={clsx("flex", row.kind === "add" && "bg-ok/12", row.kind === "del" && "bg-danger/12")}>
-              <span className={clsx(gutter, row.kind === "del" && "bg-danger/10")}>{row.old ?? ""}</span>
-              <span className={clsx(gutter, row.kind === "add" && "bg-ok/10")}>{row.new ?? ""}</span>
+              <span className={clsx(gutter, row.kind === "del" ? "bg-danger/10" : row.kind === "add" ? "bg-ok/10" : "")}>{row.new ?? row.old ?? ""}</span>
               <span className="sr-only">{row.kind === "add" ? "added" : row.kind === "del" ? "removed" : ""}</span>
               <span className="pr-4 pl-3 whitespace-pre text-fg">{row.text || " "}</span>
             </div>
@@ -1321,6 +1319,11 @@ function AddRemote({ taken, busy, onAdd }: { taken: string[]; busy: boolean; onA
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-semibold text-fg">Add a remote</span>
+        {taken.includes("origin") && (
+          <p className="basis-full text-[11px] text-muted">
+            origin is already configured. Enter a different name, such as upstream, to add another remote.
+          </p>
+        )}
         <span className="flex-1" />
         <div className="flex rounded-md border border-line bg-surface p-0.5 text-xs" role="radiogroup" aria-label="Protocol">
           {(["https", "ssh"] as const).map((p) => (
@@ -1340,7 +1343,7 @@ function AddRemote({ taken, busy, onAdd }: { taken: string[]; busy: boolean; onA
         </div>
       </div>
       <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="origin" aria-label="Remote name" className={clsx(inputClass, "font-mono")} />
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={taken.includes("origin") ? "e.g. upstream" : "origin"} aria-label="Remote name" className={clsx(inputClass, "font-mono")} />
         <select value={host} onChange={(e) => setHost(e.target.value)} aria-label="Host" className={inputClass}>
           {hosts.map((h) => (
             <option key={h.id} value={h.id}>

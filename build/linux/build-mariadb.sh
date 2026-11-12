@@ -15,6 +15,10 @@ command -v cmake >/dev/null || brew install cmake
 brew list bison >/dev/null 2>&1 || brew install bison
 export PATH="$(brew --prefix bison)/bin:$PATH"
 
+# pkg-config would otherwise hand CMake Homebrew's GnuTLS for the client library, which
+# CMAKE_IGNORE_PREFIX_PATH doesn't cover.
+export PKG_CONFIG_PATH="" PKG_CONFIG_LIBDIR="/nonexistent"
+
 log "MariaDB $VERSION ($OS $ARCH): compiling"
 src="$(unpack "$(fetch "https://archive.mariadb.org/mariadb-$VERSION/source/mariadb-$VERSION.tar.gz" "${!sum_var}")")"
 stage="$WORK/stage-mariadb-$VERSION"
@@ -29,6 +33,7 @@ cmake -S "$src" -B "$WORK/build-mariadb" \
     -DCMAKE_IGNORE_PREFIX_PATH="/opt/homebrew;/usr/local" \
     -DINSTALL_LAYOUT=STANDALONE \
     -DWITH_SSL=bundled -DWITH_ZLIB=bundled -DWITH_PCRE=bundled -DWITH_LIBFMT=bundled \
+    -DCMAKE_DISABLE_FIND_PACKAGE_GnuTLS=ON \
     -DWITH_UNIT_TESTS=OFF -DWITH_EMBEDDED_SERVER=OFF -DWITH_MARIABACKUP=ON \
     -DPLUGIN_ROCKSDB=NO -DPLUGIN_MROONGA=NO -DPLUGIN_SPIDER=NO -DPLUGIN_CONNECT=NO \
     -DPLUGIN_COLUMNSTORE=NO -DPLUGIN_S3=NO -DPLUGIN_OQGRAPH=NO -DPLUGIN_TOKUDB=NO \

@@ -132,7 +132,12 @@ fn info(runtime: Runtime) -> RuntimeInfo {
             "Official OpenSearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory",
             mac.then_some("OpenSearch has no macOS build. Use Elasticsearch, which works the same for most apps."),
         ),
-        Runtime::Rustfs => ("RustFS", "S3 object storage", "RustFS from its GitHub releases (checksum checked): S3-compatible, with a web console. Access key lamprabit, secret lamprabit-secret", None),
+        Runtime::Rustfs => (
+            "RustFS",
+            "S3 object storage",
+            "RustFS from its GitHub releases (checksum checked): S3-compatible, with a web console. Access key lamprabit, secret lamprabit-secret",
+            (mac && cfg!(target_arch = "x86_64")).then_some("RustFS has no build for Intel Macs. Use MinIO for S3 storage there."),
+        ),
         Runtime::Minio => (
             "MinIO",
             "S3 object storage",

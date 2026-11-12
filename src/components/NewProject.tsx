@@ -334,7 +334,7 @@ export default function NewProject() {
   };
 
   return (
-    <div className="motion-backdrop fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-6" onMouseDown={() => !running && setOpen(false)}>
+    <div className="motion-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-6" onMouseDown={() => !running && setOpen(false)}>
       <div
         role="dialog"
         aria-label="New project"

@@ -136,7 +136,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build the app bundle
-        run: npx tauri build --debug --bundles app
+        run: npx tauri build --debug --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}' 
       - name: Open it
         run: |
           app="$(ls -d src-tauri/target/debug/bundle/macos/*.app | head -1)"

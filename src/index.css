@@ -5,6 +5,32 @@
 @custom-variant still (&:where([data-motion="reduced"] *, [data-motion="off"] *));
 
 /* Side lists that scroll on their own: a slim scrollbar that still shows there's more. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 42%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 42%, transparent);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 68%, transparent);
+  background-clip: padding-box;
+}
+
 .scrollbar-thin {
   scrollbar-width: thin;
 }

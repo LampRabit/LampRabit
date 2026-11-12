@@ -192,6 +192,7 @@ const theme = q.get("theme");
 if (theme) document.documentElement.dataset.theme = theme;
 localStorage.clear();
 if (q.get("all")) localStorage.setItem("services-scope", "all");
+if (q.get("nav")) localStorage.setItem("navPosition", q.get("nav")!);
 
 const { useAppStore } = await import("../../src/lib/store");
 const page = q.get("page");
