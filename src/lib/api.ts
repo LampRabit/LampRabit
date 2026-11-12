@@ -553,6 +553,12 @@ export interface DbStatus {
   running: boolean;
   /** null when it can't be told (PostgreSQL while stopped). */
   exists: boolean | null;
+  /** The port the project's config connects to. */
+  port: number | null;
+  /** Why this server was chosen (the port it connects to, or the default). */
+  reason: string | null;
+  /** The other MySQL-family server, installed while this one isn't; switchProjectDatabase points the .env at it. */
+  alternative: { engine: "mariadb" | "mysql"; label: string; port: number } | null;
 }
 
 export interface ProjectFacts {
@@ -775,6 +781,7 @@ export const api = {
   projectCommands: (name: string) => invoke<ProjectCommands>("project_commands", { name }),
   projectFacts: (name: string) => invoke<ProjectFacts>("project_facts", { name }),
   databaseStatus: (name: string) => invoke<DbStatus | null>("database_status", { name }),
+  switchProjectDatabase: (name: string, engine: "mariadb" | "mysql") => invoke<void>("switch_project_database", { name, engine }),
   createProjectDatabase: (name: string) => invoke<void>("create_project_database", { name }),
   setProjectEnv: (name: string, key: string, value: string) => invoke<void>("set_project_env", { name, key, value }),
   portsListening: (ports: number[]) => invoke<number[]>("ports_listening", { ports }),

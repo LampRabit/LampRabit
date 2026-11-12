@@ -889,6 +889,15 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
     },
     onError,
   });
+  const switchTo = useMutation({
+    mutationFn: (engine: "mariadb" | "mysql") => api.switchProjectDatabase(site.name, engine),
+    onSuccess: (_, engine) => {
+      notify("info", `${site.name} now connects to ${engine === "mysql" ? "MySQL" : "MariaDB"} (DB_PORT in .env).`);
+      status.refetch();
+      for (const key of ["project-facts", "sites"]) queryClient.invalidateQueries({ queryKey: [key] });
+    },
+    onError,
+  });
   const s = status.data;
   // phpMyAdmin only manages MariaDB and MySQL.
   const managed = !s || s.engine === "mariadb" || s.engine === "mysql";
@@ -900,11 +909,25 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
     </Button>
   );
   if (s && !s.installed) {
-    note = <span className="text-warn">{s.label} isn't installed</span>;
+    // Say why this server: a Laravel .env with DB_PORT=3306 means MariaDB here, which isn't
+    // obvious to someone who installed only MySQL. Offer the installed one when there is one.
+    note = (
+      <span className="text-warn" title={s.reason ?? undefined}>
+        {s.label} isn't installed{s.port ? ` (the project uses port ${s.port})` : ""}
+        {s.alternative && <span className="text-muted"> · {s.alternative.label} is installed on port {s.alternative.port}</span>}
+      </span>
+    );
     action = (
-      <Button size="sm" onClick={() => navigate("services")}>
-        Install {s.label}
-      </Button>
+      <div className="flex shrink-0 flex-wrap gap-2">
+        {s.alternative && (
+          <Button size="sm" variant="primary" onClick={() => switchTo.mutate(s.alternative!.engine)} disabled={switchTo.isPending} title={`Sets DB_PORT=${s.alternative.port} in the project's .env`}>
+            Use {s.alternative.label}
+          </Button>
+        )}
+        <Button size="sm" onClick={() => navigate("services")}>
+          Install {s.label}
+        </Button>
+      </div>
     );
   } else if (s && !s.running) {
     note = <span className="text-warn">{s.label} is stopped</span>;

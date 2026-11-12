@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{Database, Settings},
@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// The database server a project's config points at.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Engine {
     Mariadb,
@@ -70,6 +70,22 @@ pub struct DbStatus {
     pub running: bool,
     /// None when it can't be told (PostgreSQL while it's stopped).
     pub exists: Option<bool>,
+    /// The port the project's config connects to, when it names one.
+    pub port: Option<u16>,
+    /// Why this server was chosen, in words: Laravel's default DB_PORT=3306 is MariaDB's
+    /// port here, which surprised people who had only MySQL installed.
+    pub reason: Option<String>,
+    /// The other MySQL-family server, when this one isn't installed and that one is, and the
+    /// project's .env can be pointed at it (`switch_database`).
+    pub alternative: Option<Alternative>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Alternative {
+    pub engine: Engine,
+    pub label: &'static str,
+    pub port: u16,
 }
 
 fn env_text(dir: &Path) -> String {
@@ -201,6 +217,23 @@ fn family(engine: Engine) -> Option<Database> {
 pub async fn status(settings: &Settings, layout: &Layout, dir: &Path, database: &str, running: bool) -> Option<DbStatus> {
     let engine = engine(settings, dir)?;
     let installed = engine.installed(settings);
+    let env = env_text(dir);
+    let port = env_value(&env, "DB_PORT").and_then(|p| p.parse().ok()).or_else(|| env_value(&env, "DATABASE_URL").and_then(|u| port_in(&u)));
+    let reason = match (engine, port) {
+        (Engine::Mariadb, Some(p)) if p == settings.ports.mysql => Some(format!("The project connects to port {p}, which is MariaDB's in LampRabit (MySQL uses {}).", settings.ports.mysql_server)),
+        (Engine::Mysql, Some(p)) if p == settings.ports.mysql_server => Some(format!("The project connects to port {p}, which is MySQL's in LampRabit (MariaDB uses {}).", settings.ports.mysql)),
+        (Engine::Mariadb | Engine::Mysql, None) => Some(format!("The project names no port, so it uses the default database server, {}.", engine.label())),
+        _ => None,
+    };
+    let alternative = if installed || env_value(&env, "DB_CONNECTION").is_none() {
+        None
+    } else {
+        match engine {
+            Engine::Mariadb if Engine::Mysql.installed(settings) => Some(Alternative { engine: Engine::Mysql, label: "MySQL", port: settings.ports.mysql_server }),
+            Engine::Mysql if Engine::Mariadb.installed(settings) => Some(Alternative { engine: Engine::Mariadb, label: "MariaDB", port: settings.ports.mysql }),
+            _ => None,
+        }
+    };
     let exists = match engine {
         Engine::Mariadb if installed => Some(layout.data("mariadb").join(folder_name(database)).is_dir()),
         Engine::Mysql if installed => Some(configs::mysql_data(settings, layout).join(folder_name(database)).is_dir()),
@@ -212,7 +245,27 @@ pub async fn status(settings: &Settings, layout: &Layout, dir: &Path, database: 
         Engine::Sqlite => Some(sqlite_file(dir, database).is_file()),
         _ => None,
     };
-    Some(DbStatus { engine, label: engine.label(), database: database.to_string(), installed, running: running || engine == Engine::Sqlite, exists })
+    Some(DbStatus { engine, label: engine.label(), database: database.to_string(), installed, running: running || engine == Engine::Sqlite, exists, port, reason, alternative })
+}
+
+/// Points a Laravel-style project (.env with DB_CONNECTION) at the other MySQL-family
+/// server: its port, and DB_CONNECTION=mysql when it said mariadb (MySQL has no such driver
+/// name, while Laravel's mysql driver talks to both).
+pub fn switch_database(settings: &Settings, dir: &Path, to: Engine) -> Result<()> {
+    let port = match to {
+        Engine::Mysql => settings.ports.mysql_server,
+        Engine::Mariadb => settings.ports.mysql,
+        _ => return Err(Error::msg("Only MariaDB and MySQL can be switched between here.")),
+    };
+    let env = env_text(dir);
+    if env_value(&env, "DB_CONNECTION").is_none() {
+        return Err(Error::msg("The project's .env has no DB_CONNECTION; change its database settings by hand."));
+    }
+    set_env_value(dir, "DB_PORT", &port.to_string())?;
+    if to == Engine::Mysql && env_value(&env, "DB_CONNECTION").as_deref() == Some("mariadb") {
+        set_env_value(dir, "DB_CONNECTION", "mysql")?;
+    }
+    Ok(())
 }
 
 /// Creates the database a project names, on its server (which must be running).

@@ -1891,6 +1891,13 @@ async fn create_project_database(app: AppHandle, state: State<'_, AppState>, nam
     Ok(())
 }
 
+/// Points a project at the other MySQL-family server (its .env's DB_PORT).
+#[tauri::command]
+async fn switch_project_database(state: State<'_, AppState>, name: String, engine: manage::Engine) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    manage::switch_database(&settings, &project_dir(&layout, &name)?, engine)
+}
+
 /// Changes one of the .env settings the Overview shows (APP_URL…).
 #[tauri::command]
 async fn set_project_env(state: State<'_, AppState>, name: String, key: String, value: String) -> Result<()> {
@@ -3123,6 +3130,7 @@ pub fn run() {
             save_project_file,
             database_status,
             create_project_database,
+            switch_project_database,
             set_project_env,
             ports_listening,
             set_site_php_ini,
