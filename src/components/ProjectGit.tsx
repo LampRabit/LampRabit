@@ -32,7 +32,7 @@ export default function ProjectGit({ site }: { site: Site }) {
   const [view, setView] = useState<View>("changes");
   // Whatever changed the repository refreshes everything that shows it.
   const refresh = () => {
-    for (const key of ["git-status", "git-branches", "git-log", "git-commit", "project-facts", "git-repo-settings"]) queryClient.invalidateQueries({ queryKey: [key, site.name] });
+    for (const key of ["git-status", "git-branches", "git-log", "git-commit", "project-facts", "git-repo-settings", "git-stashes", "git-tags"]) queryClient.invalidateQueries({ queryKey: [key, site.name] });
     queryClient.invalidateQueries({ queryKey: ["sites"] });
   };
   const init = useMutation({ mutationFn: () => api.gitInit(site.name), onSuccess: refresh, onError });
@@ -266,6 +266,46 @@ function Changes({
     },
     onError,
   });
+  const stashes = useQuery({ queryKey: ["git-stashes", site.name], queryFn: () => api.gitStashes(site.name) });
+  const stash = useMutation({
+    mutationFn: (action: Parameters<typeof api.gitStash>[1]) => api.gitStash(site.name, action),
+    onSuccess: (_, action) => {
+      if (action.kind === "save") notify("info", "Changes stashed: the working tree is clean. Bring them back from Stashes.");
+      stashes.refetch();
+      onChanged();
+    },
+    onError: (e) => {
+      onError(e);
+      stashes.refetch();
+      onChanged();
+    },
+  });
+  const stashList = (stashes.data ?? []).length > 0 && (
+    <section>
+      <div className="sticky top-0 z-[1] border-b border-line bg-surface px-3 py-1.5 text-[11px] font-semibold tracking-wide text-muted uppercase">
+        Stashes <span className="tabular-nums">{stashes.data!.length}</span>
+      </div>
+      <ul>
+        {stashes.data!.map((st) => (
+          <li key={st.index} className="group flex items-center gap-2 px-3 py-1 hover:bg-surface-2">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] text-fg">{st.message.replace(/^On [^:]+: /, "")}</span>
+              <span className="block text-[11px] text-muted">{formatAgo(st.time * 1000)}</span>
+            </span>
+            <button type="button" onClick={() => stash.mutate({ kind: "pop", index: st.index })} disabled={stash.isPending} className="text-[11px] font-medium text-accent-text hover:underline" title="Bring the changes back and remove the stash">
+              Restore
+            </button>
+            <button type="button" onClick={() => stash.mutate({ kind: "apply", index: st.index })} disabled={stash.isPending} className="text-[11px] font-medium text-muted opacity-0 group-hover:opacity-100 hover:underline focus-visible:opacity-100" title="Bring the changes back and keep the stash">
+              Apply
+            </button>
+            <button type="button" onClick={() => stash.mutate({ kind: "drop", index: st.index })} disabled={stash.isPending} className="rounded p-0.5 text-muted opacity-0 group-hover:opacity-100 hover:text-danger-text focus-visible:opacity-100" aria-label="Delete this stash" title="Delete this stash">
+              <Trash2 size={12} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
   const hasWork = staged.length > 0 || unstaged.length > 0;
   const newFiles = unstaged.filter((f) => f.staged === "?").length;
   const sensitive = (commitAll ? unstaged : staged).filter((f) => looksSensitive(f.path)).map((f) => f.path);
@@ -352,6 +392,7 @@ function Changes({
           </label>
         )}
         {footer}
+        {stashList && <div className="basis-full overflow-hidden rounded-lg border border-line">{stashList}</div>}
       </div>
     );
   }
@@ -422,6 +463,9 @@ function Changes({
             unstaged,
             "unstaged",
             <span className="flex gap-3">
+              <button type="button" onClick={() => stash.mutate({ kind: "save", message: message.trim(), untracked: true })} disabled={stash.isPending} className={clsx(textButton, "text-muted")} title="Set all changes aside (new files too) and get a clean working tree; bring them back from Stashes">
+                Stash
+              </button>
               <button type="button" onClick={() => setDiscarding(unstaged.map((f) => f.path))} className={clsx(textButton, "text-danger-text")}>
                 Discard all
               </button>
@@ -430,11 +474,12 @@ function Changes({
               </button>
             </span>,
           )}
+          {stashList}
         </div>
       </div>
       <div className="flex min-h-64 min-w-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
         {selected && current ? (
-          <FileDiff site={site} file={current} staged={selected.staged} />
+          <FileDiff site={site} file={current} staged={selected.staged} onChanged={onChanged} />
         ) : (
           <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted">{files.length ? "Select a file to see its changes." : "No changes."}</div>
         )}
@@ -470,16 +515,56 @@ function Changes({
   );
 }
 
-function FileDiff({ site, file, staged }: { site: Site; file: GitFile; staged: boolean }) {
+function FileDiff({ site, file, staged, onChanged }: { site: Site; file: GitFile; staged: boolean; onChanged: () => void }) {
+  const notify = useAppStore((s) => s.notify);
+  const onError = (e: unknown) => notify("error", String(e));
   const untracked = file.staged === "?";
   const diff = useQuery({
     queryKey: ["git-diff", site.name, file.path, staged, file.staged, file.unstaged],
     queryFn: () => api.gitDiff(site.name, file.path, staged, untracked),
+    enabled: !file.conflicted,
   });
+  // Stage or unstage one part of the file (git add -p for one hunk).
+  const hunk = useMutation({
+    mutationFn: (index: number) => api.gitStageHunk(site.name, file.path, index, staged),
+    onSuccess: () => {
+      diff.refetch();
+      onChanged();
+    },
+    onError,
+  });
+  const resolve = useMutation({ mutationFn: (theirs: boolean) => api.gitResolve(site.name, file.path, theirs), onSuccess: onChanged, onError });
+  if (file.conflicted) {
+    return (
+      <>
+        <DiffTitle path={file.path} note="Conflict" />
+        <div className="space-y-3 p-4 text-sm">
+          <p className="text-fg">Both sides changed this file. Keep one side's version, or merge them by hand in your editor (look for the &lt;&lt;&lt;&lt;&lt;&lt;&lt; markers), then mark it resolved.</p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => resolve.mutate(false)} disabled={resolve.isPending} title="git checkout --ours, then stage">
+              Keep my version
+            </Button>
+            <Button size="sm" onClick={() => resolve.mutate(true)} disabled={resolve.isPending} title="git checkout --theirs, then stage">
+              Take the incoming version
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => api.openInEditor(`${site.path}/${file.path}`).catch(onError)}>
+              Open in editor
+            </Button>
+          </div>
+          <p className="text-xs text-muted">Merged it by hand? Use the ✓ next to the file to mark it resolved.</p>
+        </div>
+      </>
+    );
+  }
   return (
     <>
       <DiffTitle path={file.path} note={staged ? "Staged" : untracked ? "New file" : "Changes"} from={file.from} />
-      <DiffView text={diff.data} loading={diff.isLoading} error={diff.isError ? String(diff.error) : null} />
+      <DiffView
+        text={diff.data}
+        loading={diff.isLoading}
+        error={diff.isError ? String(diff.error) : null}
+        hunkAction={untracked ? undefined : { label: staged ? "Unstage this part" : "Stage this part", run: (i) => hunk.mutate(i), busy: hunk.isPending }}
+      />
     </>
   );
 }
@@ -499,8 +584,9 @@ function DiffTitle({ path, note, from, extra }: { path: string; note?: string; f
 }
 
 /** Line numbers in a gutter, added and removed lines tinted, no +/− marks in the text. */
-function DiffView({ text, loading, error }: { text?: string; loading?: boolean; error?: string | null }) {
+function DiffView({ text, loading, error, hunkAction }: { text?: string; loading?: boolean; error?: string | null; hunkAction?: { label: string; run: (hunk: number) => void; busy?: boolean } }) {
   const rows = useMemo(() => parseDiff(text ?? ""), [text]);
+  let hunkIndex = -1;
   if (loading) return <p className="p-3 text-xs text-muted">Loading…</p>;
   if (error) return <p className="p-3 text-xs text-danger-text">{error}</p>;
   if (rows.length === 0) return <p className="p-3 text-xs text-muted">No text changes (a binary file, or only its mode changed).</p>;
@@ -510,11 +596,24 @@ function DiffView({ text, loading, error }: { text?: string; loading?: boolean; 
       <div className="min-w-max">
         {rows.map((row, i) =>
           row.kind === "hunk" ? (
-            <div key={i} className="flex border-y border-line/60 bg-surface-2/70 py-0.5 text-[11px] text-muted">
-              <span className={gutter}>⋯</span>
-              <span className={gutter} />
-              <span className="px-3">{row.text}</span>
-            </div>
+            ((index) => (
+              <div key={i} className="group/hunk flex items-center border-y border-line/60 bg-surface-2/70 py-0.5 text-[11px] text-muted">
+                <span className={gutter}>⋯</span>
+                <span className={gutter} />
+                <span className="flex-1 px-3">{row.text}</span>
+                {hunkAction && (
+                  // Sticky on the right, so it stays in reach when long lines scroll sideways.
+                  <button
+                    type="button"
+                    onClick={() => hunkAction.run(index)}
+                    disabled={hunkAction.busy}
+                    className="sticky right-2 mr-2 rounded border border-line bg-surface px-1.5 font-sans text-[11px] text-fg opacity-70 group-hover/hunk:opacity-100 hover:border-accent focus-visible:opacity-100"
+                  >
+                    {hunkAction.label}
+                  </button>
+                )}
+              </div>
+            ))(++hunkIndex)
           ) : row.kind === "note" ? (
             <div key={i} className="px-3 py-0.5 text-[11px] text-muted italic">
               {row.text}
@@ -607,8 +706,31 @@ function Refs({ refs }: { refs: string }) {
 /** One commit: who and when, its full message, the files it changed with counts, and a file's diff. */
 function CommitView({ site, hash, onOpen }: { site: Site; hash: string; onOpen: (hash: string) => void }) {
   const notify = useAppStore((s) => s.notify);
+  const queryClient = useQueryClient();
   const details = useQuery({ queryKey: ["git-commit", site.name, hash], queryFn: () => api.gitCommitDetails(site.name, hash) });
   const [file, setFile] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<"revert" | "restore" | null>(null);
+  const changed = () => {
+    for (const key of ["git-status", "git-log", "project-facts"]) queryClient.invalidateQueries({ queryKey: [key, site.name] });
+  };
+  const revert = useMutation({
+    mutationFn: () => api.gitRevert(site.name, hash),
+    onSuccess: () => {
+      notify("info", "Reverted: a new commit undoes this one.");
+      setConfirm(null);
+      changed();
+    },
+    onError: (e) => notify("error", String(e)),
+  });
+  const restore = useMutation({
+    mutationFn: (path: string) => api.gitRestoreFile(site.name, hash, path),
+    onSuccess: (_, path) => {
+      notify("info", `${path} is back to this commit's version; the change is staged under Changes.`);
+      setConfirm(null);
+      changed();
+    },
+    onError: (e) => notify("error", String(e)),
+  });
   const d = details.data;
   if (details.isLoading) return <p className="p-4 text-sm text-muted">Loading the commit…</p>;
   if (!d) return <p className="p-4 text-sm text-danger-text">{String(details.error)}</p>;
@@ -625,6 +747,23 @@ function CommitView({ site, hash, onOpen }: { site: Site; hash: string; onOpen: 
           <button type="button" onClick={() => setFile(null)} className="flex min-w-0 items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-accent-text hover:bg-surface-2">
             <ChevronLeft size={13} className="shrink-0" /> <span className="truncate">{d.subject}</span>
           </button>
+          <span className="flex-1" />
+          {f?.status !== "D" &&
+            (confirm === "restore" ? (
+              <>
+                <span className="text-xs text-muted">Replace your copy of {file.split("/").pop()}?</span>
+                <Button size="sm" variant="primary" onClick={() => restore.mutate(file)} disabled={restore.isPending}>
+                  Restore
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setConfirm(null)}>
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant="ghost" onClick={() => setConfirm("restore")} title="Put this file back the way it was in this commit">
+                <Undo2 size={13} /> Restore this version
+              </Button>
+            ))}
         </div>
         <DiffTitle path={file} from={f?.from} note={f ? letters[f.status] : undefined} extra={f && <LineCounts add={f.additions} del={f.deletions} binary={f.binary} />} />
         <CommitFileDiff site={site} hash={hash} path={file} />
@@ -637,8 +776,25 @@ function CommitView({ site, hash, onOpen }: { site: Site; hash: string; onOpen: 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="space-y-3 border-b border-line p-4">
+        <div className="flex items-start gap-3">
+          <h4 className="min-w-0 flex-1 text-base font-semibold text-fg">{d.subject}</h4>
+          {confirm === "revert" ? (
+            <span className="flex shrink-0 items-center gap-2">
+              <span className="text-xs text-muted">Add a commit that undoes it?</span>
+              <Button size="sm" variant="primary" onClick={() => revert.mutate()} disabled={revert.isPending}>
+                Revert
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirm(null)}>
+                Cancel
+              </Button>
+            </span>
+          ) : (
+            <Button size="sm" variant="ghost" onClick={() => setConfirm("revert")} title="Undo this commit's changes with a new commit; history stays as it is">
+              <RotateCcw size={13} /> Revert
+            </Button>
+          )}
+        </div>
         <div>
-          <h4 className="text-base font-semibold text-fg">{d.subject}</h4>
           {d.body && <p className="selectable mt-1.5 text-sm whitespace-pre-wrap text-muted">{d.body}</p>}
           {d.refs && <Refs refs={d.refs} />}
         </div>
@@ -861,6 +1017,7 @@ function Branches({ site, current, upstream, onChanged }: { site: Site; current:
           <ul className="overflow-hidden rounded-lg border border-line bg-surface">{remote.map(row)}</ul>
         </section>
       )}
+      <Tags site={site} onChanged={onChanged} />
       {deleting && (
         <Dialog
           open
@@ -882,6 +1039,68 @@ function Branches({ site, current, upstream, onChanged }: { site: Site; current:
         </Dialog>
       )}
     </div>
+  );
+}
+
+/** Tags (release names): create one on the current commit, push it, delete it. */
+function Tags({ site, onChanged }: { site: Site; onChanged: () => void }) {
+  const notify = useAppStore((s) => s.notify);
+  const queryClient = useQueryClient();
+  const tags = useQuery({ queryKey: ["git-tags", site.name], queryFn: () => api.gitTags(site.name) });
+  const status = queryClient.getQueryData<GitStatus>(["git-status", site.name]);
+  const remote = status?.remotes.find((r) => r.name === "origin")?.name ?? status?.remotes[0]?.name;
+  const [name, setName] = useState("");
+  const [message, setMessage] = useState("");
+  const act = useMutation({
+    mutationFn: (action: Parameters<typeof api.gitTag>[1]) => api.gitTag(site.name, action),
+    onSuccess: (_, action) => {
+      if (action.kind === "create") {
+        setName("");
+        setMessage("");
+      }
+      if (action.kind === "push") notify("info", `Pushed ${action.name} to ${action.remote}`);
+      tags.refetch();
+      onChanged();
+    },
+    onError: (e) => notify("error", String(e)),
+  });
+  return (
+    <section className="space-y-2">
+      <h4 className="px-1 text-[11px] font-bold tracking-wider text-muted uppercase">Tags</h4>
+      <form
+        className="flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          act.mutate({ kind: "create", name: name.trim(), message, commit: null });
+        }}
+      >
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="v1.0.0" aria-label="Tag name" className={clsx(inputClass.replace("w-full", ""), "w-32 font-mono")} />
+        <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Release notes (optional)" aria-label="Tag message" className={clsx(inputClass.replace("w-full", ""), "min-w-48 flex-1")} />
+        <Button type="submit" disabled={!name.trim() || act.isPending} title="Tag the current commit">
+          <Plus size={14} /> Tag
+        </Button>
+      </form>
+      {(tags.data ?? []).length > 0 && (
+        <ul className="overflow-hidden rounded-lg border border-line bg-surface">
+          {tags.data!.map((t) => (
+            <li key={t.name} className="flex items-center gap-2 border-b border-line/60 px-3 py-1.5 last:border-0">
+              <span className="font-mono text-sm text-fg">{t.name}</span>
+              <span className="min-w-0 flex-1 truncate text-[11px] text-muted">
+                {t.subject} · {t.commit} · {formatAgo(t.time * 1000)}
+              </span>
+              {remote && (
+                <Button size="sm" variant="ghost" onClick={() => act.mutate({ kind: "push", name: t.name, remote })} disabled={act.isPending} title={`Push the tag to ${remote}`}>
+                  <ArrowUp size={13} /> Push
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => act.mutate({ kind: "delete", name: t.name })} disabled={act.isPending} aria-label={`Delete ${t.name}`} title="Delete the tag here (not on the remote)">
+                <Trash2 size={13} />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

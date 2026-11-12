@@ -165,6 +165,22 @@ export interface GitProgress {
   done: boolean;
 }
 
+export interface GitStash {
+  index: number;
+  message: string;
+  time: number;
+}
+
+export interface GitTag {
+  name: string;
+  commit: string;
+  subject: string;
+  time: number;
+}
+
+export type GitStashAction = { kind: "save"; message: string; untracked: boolean } | { kind: "apply"; index: number } | { kind: "pop"; index: number } | { kind: "drop"; index: number };
+export type GitTagAction = { kind: "create"; name: string; message: string; commit: string | null } | { kind: "delete"; name: string } | { kind: "push"; name: string; remote: string };
+
 export interface GitRepoSettings {
   pull: "merge" | "rebase" | "ff-only" | null;
   prune: boolean;
@@ -906,6 +922,14 @@ export const api = {
   gitSetRepoSettings: (name: string, settings: GitRepoSettings) => invoke<void>("git_set_repo_settings", { name, settings }),
   gitSync: (name: string, action: "fetch" | "pull" | "push", op?: string) => invoke<string>("git_sync", { name, action, op: op ?? null }),
   gitCancel: (op: string) => invoke<boolean>("git_cancel", { op }),
+  gitStashes: (name: string) => invoke<GitStash[]>("git_stashes", { name }),
+  gitStash: (name: string, action: GitStashAction) => invoke<string>("git_stash", { name, action }),
+  gitStageHunk: (name: string, path: string, hunk: number, unstage: boolean) => invoke<void>("git_stage_hunk", { name, path, hunk, unstage }),
+  gitResolve: (name: string, path: string, theirs: boolean) => invoke<void>("git_resolve", { name, path, theirs }),
+  gitTags: (name: string) => invoke<GitTag[]>("git_tags", { name }),
+  gitTag: (name: string, action: GitTagAction) => invoke<string>("git_tag", { name, action }),
+  gitRevert: (name: string, hash: string) => invoke<string>("git_revert", { name, hash }),
+  gitRestoreFile: (name: string, hash: string, path: string) => invoke<void>("git_restore_file", { name, hash, path }),
   gitRemote: (name: string, action: GitRemoteAction) => invoke<void>("git_remote", { name, action }),
   gitSetIdentity: (name: string, user: string, email: string) => invoke<void>("git_set_identity", { name, user, email }),
   gitInit: (name: string) => invoke<void>("git_init", { name }),

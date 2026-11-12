@@ -225,7 +225,7 @@ pub async fn status(settings: &Settings, layout: &Layout, dir: &Path, database: 
         (Engine::Mariadb | Engine::Mysql, None) => Some(format!("The project names no port, so it uses the default database server, {}.", engine.label())),
         _ => None,
     };
-    let alternative = if installed || env_value(&env, "DB_CONNECTION").is_none() {
+    let alternative = if installed || !switchable(dir) {
         None
     } else {
         match engine {
@@ -248,9 +248,43 @@ pub async fn status(settings: &Settings, layout: &Layout, dir: &Path, database: 
     Some(DbStatus { engine, label: engine.label(), database: database.to_string(), installed, running: running || engine == Engine::Sqlite, exists, port, reason, alternative })
 }
 
-/// Points a Laravel-style project (.env with DB_CONNECTION) at the other MySQL-family
-/// server: its port, and DB_CONNECTION=mysql when it said mariadb (MySQL has no such driver
-/// name, while Laravel's mysql driver talks to both).
+/// Whether `switch_database` knows where this project keeps its database settings.
+fn switchable(dir: &Path) -> bool {
+    let env = env_text(dir);
+    env_value(&env, "DB_CONNECTION").is_some() || env_value(&env, "DATABASE_URL").is_some_and(|u| !u.starts_with("postgres") && !u.starts_with("sqlite")) || wp_host(dir).is_some()
+}
+
+/// wp-config.php's DB_HOST value, with where it sits in the file.
+fn wp_host(dir: &Path) -> Option<(String, std::ops::Range<usize>)> {
+    let text = std::fs::read_to_string(dir.join("wp-config.php")).ok()?;
+    let at = text.find("'DB_HOST'").or_else(|| text.find("\"DB_HOST\""))? + 9;
+    let rest = &text[at..];
+    let open = rest.find(['\'', '"'])?;
+    let quote = rest.as_bytes()[open] as char;
+    let close = rest[open + 1..].find(quote)?;
+    let range = at + open + 1..at + open + 1 + close;
+    Some((text[range.clone()].to_string(), range))
+}
+
+/// A database URL with another port: `mysql://u:p@127.0.0.1:3306/db` → `…:3307/db`; a URL
+/// without a port gets one after the host.
+fn with_port(url: &str, port: u16) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    let (authority, path) = rest.split_at(rest.find(['/', '?']).unwrap_or(rest.len()));
+    let (userinfo, hostport) = match authority.rsplit_once('@') {
+        Some((u, h)) => (format!("{u}@"), h),
+        None => (String::new(), authority),
+    };
+    let host = match hostport.rsplit_once(':') {
+        Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => h,
+        _ => hostport,
+    };
+    Some(format!("{scheme}://{userinfo}{host}:{port}{path}"))
+}
+
+/// Points a project at the other MySQL-family server, wherever it keeps its settings:
+/// Laravel's DB_PORT (and DB_CONNECTION=mysql when it said mariadb, a driver name MySQL
+/// doesn't answer to), Symfony's DATABASE_URL port, or WordPress's DB_HOST.
 pub fn switch_database(settings: &Settings, dir: &Path, to: Engine) -> Result<()> {
     let port = match to {
         Engine::Mysql => settings.ports.mysql_server,
@@ -258,14 +292,27 @@ pub fn switch_database(settings: &Settings, dir: &Path, to: Engine) -> Result<()
         _ => return Err(Error::msg("Only MariaDB and MySQL can be switched between here.")),
     };
     let env = env_text(dir);
-    if env_value(&env, "DB_CONNECTION").is_none() {
-        return Err(Error::msg("The project's .env has no DB_CONNECTION; change its database settings by hand."));
+    if env_value(&env, "DB_CONNECTION").is_some() {
+        set_env_value(dir, "DB_PORT", &port.to_string())?;
+        if to == Engine::Mysql && env_value(&env, "DB_CONNECTION").as_deref() == Some("mariadb") {
+            set_env_value(dir, "DB_CONNECTION", "mysql")?;
+        }
+        return Ok(());
     }
-    set_env_value(dir, "DB_PORT", &port.to_string())?;
-    if to == Engine::Mysql && env_value(&env, "DB_CONNECTION").as_deref() == Some("mariadb") {
-        set_env_value(dir, "DB_CONNECTION", "mysql")?;
+    if let Some(url) = env_value(&env, "DATABASE_URL") {
+        let next = with_port(&url, port).ok_or_else(|| Error::msg("DATABASE_URL in .env isn't a URL LampRabit can read; change its port by hand."))?;
+        let file = [".env.local", ".env"].iter().map(|f| dir.join(f)).find(|p| p.is_file() && env_value(&std::fs::read_to_string(p).unwrap_or_default(), "DATABASE_URL").is_some());
+        let file = file.ok_or_else(|| Error::msg("No .env file with DATABASE_URL to change."))?;
+        return crate::projects::set_env(&file, &[("DATABASE_URL".to_string(), next)]);
     }
-    Ok(())
+    if let Some((_, range)) = wp_host(dir) {
+        let path = dir.join("wp-config.php");
+        let mut text = std::fs::read_to_string(&path)?;
+        text.replace_range(range, &format!("127.0.0.1:{port}"));
+        std::fs::write(&path, text)?;
+        return Ok(());
+    }
+    Err(Error::msg("This project keeps its database settings somewhere LampRabit doesn't know (not .env or wp-config.php); change the port by hand."))
 }
 
 /// Creates the database a project names, on its server (which must be running).
@@ -358,6 +405,30 @@ pub fn listening(ports: &[u16]) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moves_database_urls_to_another_port() {
+        assert_eq!(with_port("mysql://app:secret@127.0.0.1:3306/shop?serverVersion=8.0", 3307).as_deref(), Some("mysql://app:secret@127.0.0.1:3307/shop?serverVersion=8.0"));
+        assert_eq!(with_port("mysql://root@localhost/shop", 3307).as_deref(), Some("mysql://root@localhost:3307/shop"));
+        assert_eq!(with_port("not a url", 1), None);
+    }
+
+    #[test]
+    fn switches_wordpress_and_symfony_projects() {
+        let dir = std::env::temp_dir().join(format!("lamprabit-dbswitch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("wp-config.php"), "<?php\ndefine( 'DB_NAME', 'wp' );\ndefine( 'DB_HOST', 'localhost' );\n").unwrap();
+        let settings = Settings::default();
+        assert!(switchable(&dir));
+        switch_database(&settings, &dir, Engine::Mysql).unwrap();
+        assert!(std::fs::read_to_string(dir.join("wp-config.php")).unwrap().contains(&format!("'DB_HOST', '127.0.0.1:{}'", settings.ports.mysql_server)));
+        std::fs::remove_file(dir.join("wp-config.php")).unwrap();
+        std::fs::write(dir.join(".env"), "APP_ENV=dev\nDATABASE_URL=\"mysql://app:pw@127.0.0.1:3306/app\"\n").unwrap();
+        switch_database(&settings, &dir, Engine::Mysql).unwrap();
+        assert!(std::fs::read_to_string(dir.join(".env")).unwrap().contains(&format!("127.0.0.1:{}/app", settings.ports.mysql_server)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn database_folder_names() {

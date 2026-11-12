@@ -2029,6 +2029,56 @@ async fn git_clone(app: AppHandle, state: State<'_, AppState>, url: String, fold
     Ok(folder)
 }
 
+#[tauri::command]
+async fn git_stashes(state: State<'_, AppState>, name: String) -> Result<Vec<git::Stash>> {
+    let (_, layout) = state.snapshot().await;
+    git::stashes(&project_dir(&layout, &name)?).await
+}
+
+#[tauri::command]
+async fn git_stash(state: State<'_, AppState>, name: String, action: git::StashAction) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    git::stash(&project_dir(&layout, &name)?, action).await
+}
+
+#[tauri::command]
+async fn git_stage_hunk(state: State<'_, AppState>, name: String, path: String, hunk: usize, unstage: bool) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    git::stage_hunk(&project_dir(&layout, &name)?, &path, hunk, unstage).await
+}
+
+#[tauri::command]
+async fn git_resolve(state: State<'_, AppState>, name: String, path: String, theirs: bool) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    git::resolve(&project_dir(&layout, &name)?, &path, theirs).await
+}
+
+#[tauri::command]
+async fn git_tags(state: State<'_, AppState>, name: String) -> Result<Vec<git::Tag>> {
+    let (_, layout) = state.snapshot().await;
+    git::tags(&project_dir(&layout, &name)?).await
+}
+
+#[tauri::command]
+async fn git_tag(state: State<'_, AppState>, name: String, action: git::TagAction) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    git::tag(&project_dir(&layout, &name)?, action).await
+}
+
+#[tauri::command]
+async fn git_revert(app: AppHandle, state: State<'_, AppState>, name: String, hash: String) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    let out = git::revert(&project_dir(&layout, &name)?, &hash).await?;
+    logs::system(&app, logs::Level::Info, format!("Reverted {} in {name}", &hash[..hash.len().min(8)]));
+    Ok(out)
+}
+
+#[tauri::command]
+async fn git_restore_file(state: State<'_, AppState>, name: String, hash: String, path: String) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    git::restore_file(&project_dir(&layout, &name)?, &hash, &path).await
+}
+
 /// Stops a clone, fetch, pull or push in progress.
 #[tauri::command]
 fn git_cancel(op: String) -> bool {
@@ -3312,6 +3362,14 @@ pub fn run() {
             git_init,
             git_clone,
             git_cancel,
+            git_stashes,
+            git_stash,
+            git_stage_hunk,
+            git_resolve,
+            git_tags,
+            git_tag,
+            git_revert,
+            git_restore_file,
             set_project_env,
             ports_listening,
             set_site_php_ini,

@@ -53,6 +53,10 @@ vi.mock("../lib/api", () => ({
           }),
           gitCommitFileDiff: record("gitCommitFileDiff", "@@ -1 +1 @@\n-old\n+new\n"),
           gitBranches: record("gitBranches", []),
+          gitStashes: record("gitStashes", [{ index: 0, message: "On main: half-done cart", time: 1793500000 }]),
+          gitTags: record("gitTags", []),
+          gitStash: record("gitStash", ""),
+          gitResolve: record("gitResolve"),
         };
         return table[name] ?? record(name);
       },
@@ -148,6 +152,27 @@ describe("Changes", () => {
     const pull = await screen.findByRole("button", { name: /Pull 3/ });
     expect(pull.className).toContain("bg-accent");
     expect(screen.getByRole("button", { name: /Fetch/ }).className).not.toContain("bg-accent");
+  });
+});
+
+describe("Stash and conflicts", () => {
+  it("stashes everything and lists stashes to restore", async () => {
+    state = base({ files: [untracked("a.txt")] });
+    show();
+    await userEvent.click(await screen.findByRole("button", { name: "Stash" }));
+    await waitFor(() => expect(calls.find((c) => c.cmd === "gitStash")?.args).toEqual(["shop", { kind: "save", message: "", untracked: true }]));
+    expect(await screen.findByText("half-done cart")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(calls.filter((c) => c.cmd === "gitStash").slice(-1)[0]?.args).toEqual(["shop", { kind: "pop", index: 0 }]));
+  });
+
+  it("settles a conflict with one side's version", async () => {
+    state = base({ operation: "merge", files: [{ path: "app.php", from: null, staged: "U", unstaged: "U", conflicted: true }] });
+    show();
+    expect(await screen.findByText(/A merge is in progress/)).toBeTruthy();
+    await userEvent.click(screen.getByText("app.php"));
+    await userEvent.click(await screen.findByRole("button", { name: "Take the incoming version" }));
+    await waitFor(() => expect(calls.find((c) => c.cmd === "gitResolve")?.args).toEqual(["shop", "app.php", true]));
   });
 });
 

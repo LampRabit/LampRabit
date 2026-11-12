@@ -508,7 +508,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
   ];
   // [ and ] step through the project's tabs (listed in SHORTCUTS).
   const step = (by: number) => setTab(tabs[(tabs.findIndex((t) => t.id === tab) + by + tabs.length) % tabs.length].id);
-  useHotkeys({ "[": () => step(-1), "]": () => step(1) });
+  useHotkeys({ "[": () => step(-1), "]": () => step(1), g: () => setTab("git") });
 
   const now = useNow();
   // The one chip next to the name: the framework, else the language.

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, CheckCircle2, Circle, FolderInput, FolderOpen, Loader2, RotateCw, Sparkles } from "lucide-react";
+import { AlertCircle, CheckCircle2, Circle, FolderInput, FolderOpen, Loader2, Play, RotateCw, Sparkles } from "lucide-react";
 import clsx from "clsx";
-import { api, type NodeRelease, type StarterItem } from "../lib/api";
+import { api, serviceLabels, type NodeRelease, type ServiceKind, type StarterItem } from "../lib/api";
 import { installKey, useAppStore } from "../lib/store";
 import { formatBytes } from "../lib/usage";
 import Dialog from "./Dialog";
@@ -60,6 +60,14 @@ function Guide({ firstRun = false, onDone }: { firstRun?: boolean; onDone: () =>
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const chosen = starter === "custom" ? custom : starters.find((s) => s.id === starter)!.runtimes;
 
+  const startNow = useMutation({
+    mutationFn: () => api.applyServices(chosen.filter((r) => !skipped.has(r) && r in serviceLabels) as ServiceKind[], []),
+    onSuccess: (problems) => {
+      for (const p of problems) notify("error", p);
+      queryClient.invalidateQueries({ queryKey: ["services"] });
+    },
+    onError: (e) => notify("error", String(e)),
+  });
   const finishFolder = useMutation({
     mutationFn: api.finishFirstRun,
     onSuccess: () => setStep("starter"),
@@ -134,6 +142,8 @@ function Guide({ firstRun = false, onDone }: { firstRun?: boolean; onDone: () =>
   }
   if (step === "install") return <InstallStep runtimes={chosen.filter((r) => !skipped.has(r))} onClose={close} onNext={() => setStep("project")} />;
 
+  // The components that run as services (not PHP, Composer or Node), to start in one go.
+  const startable = chosen.filter((r) => !skipped.has(r) && r in serviceLabels) as ServiceKind[];
   const examples = starter === "wordpress" ? "WordPress" : starter === "laravel" ? "Laravel" : starter === "node" ? "Vite, Next.js, Express…" : "Laravel, Symfony, WordPress…";
   return (
     <Dialog
@@ -161,9 +171,20 @@ function Guide({ firstRun = false, onDone }: { firstRun?: boolean; onDone: () =>
       }
     >
       <div className="space-y-3 text-sm text-muted">
+        {startable.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface-2/50 px-3 py-2">
+            <span className="min-w-0 flex-1 text-fg">
+              {startNow.isSuccess ? "Started. Their status is on Home." : `Start ${startable.map((k) => serviceLabels[k]).join(", ")} now?`}
+            </span>
+            {!startNow.isSuccess && (
+              <Button size="sm" variant="primary" onClick={() => startNow.mutate()} disabled={startNow.isPending}>
+                <Play size={12} className="fill-current" /> {startNow.isPending ? "Starting…" : "Start them now"}
+              </Button>
+            )}
+          </div>
+        )}
         <p>
-          Start the services from Home (or all of them with <span className="font-semibold text-fg">Start all</span>). Every folder in <span className="font-mono">www</span> is served as{" "}
-          <span className="font-mono">https://&lt;folder&gt;.test</span>.
+          Every folder in <span className="font-mono">www</span> is served as <span className="font-mono">https://&lt;folder&gt;.test</span> while the web server runs; Home starts and stops the services.
         </p>
         <p>A new project can come from a template ({examples}), with its database created for you.</p>
         <p className="text-xs">This guide is in Settings → General whenever you want another starter.</p>

@@ -11,6 +11,7 @@ import type { Level, LogEntry } from "../lib/logparse";
 import { useAppStore } from "../lib/store";
 import { Button, Card, PageHeader, Switch } from "../components/ui";
 import Menu from "../components/Menu";
+import { useHotkeys } from "../lib/shortcuts";
 
 /** Badge colours for the sources that have one; the rest share a neutral one. */
 const badgeColors: Record<string, string> = {
@@ -251,6 +252,9 @@ export default function Logs() {
   }, [matched]);
   const onlyProblems = shownLevels.size === 2 && shownLevels.has("error") && shownLevels.has("warn");
   const showLevels = (only: Level[] | null) => setShownLevels(new Set(only ?? levelOrder));
+  // Listed in SHORTCUTS under Logs.
+  const searchBox = useRef<HTMLInputElement>(null);
+  useHotkeys({ "/": () => searchBox.current?.focus(), p: () => showLevels(onlyProblems ? null : ["error", "warn"]) });
 
   const toggleIn = <T,>(set: (f: (s: Set<T>) => Set<T>) => void, value: T) =>
     set((current) => {
@@ -368,6 +372,7 @@ export default function Logs() {
               onChange={(e) => setQuery(e.target.value)}
               placeholder={useRegex ? "Regular expression, e.g. error|fail" : "Search log messages"}
               aria-label="Search log messages"
+              ref={searchBox}
               className={clsx("w-full bg-transparent text-sm outline-none placeholder:text-muted", useRegex && "font-mono")}
             />
             {query && (

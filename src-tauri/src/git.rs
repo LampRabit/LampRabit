@@ -804,6 +804,187 @@ pub async fn commit_file_diff(dir: &Path, hash: &str, path: &str) -> Result<Stri
     Ok(cut(git(dir, &["show", "--format=", "--no-color", "-M", "--diff-merges=first-parent", hash, "--", path], QUICK).await?))
 }
 
+/// A stash entry: work set aside with `git stash`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Stash {
+    /// stash@{0}, newest first.
+    pub index: u32,
+    pub message: String,
+    pub time: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum StashAction {
+    /// Sets the working tree's changes aside (new files too when `untracked`).
+    Save { message: String, untracked: bool },
+    /// Brings a stash back and keeps it in the list.
+    Apply { index: u32 },
+    /// Brings a stash back and removes it.
+    Pop { index: u32 },
+    Drop { index: u32 },
+}
+
+pub async fn stashes(dir: &Path) -> Result<Vec<Stash>> {
+    let out = git(dir, &["stash", "list", "--format=%gd%x1f%ct%x1f%gs"], QUICK).await?;
+    Ok(out
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.splitn(3, '\u{1f}').collect();
+            let index = f.first()?.trim_start_matches("stash@{").trim_end_matches('}').parse().ok()?;
+            Some(Stash { index, time: f.get(1)?.parse().unwrap_or(0), message: f.get(2)?.to_string() })
+        })
+        .collect())
+}
+
+pub async fn stash(dir: &Path, action: StashAction) -> Result<String> {
+    match action {
+        StashAction::Save { message, untracked } => {
+            let mut args = vec!["stash", "push"];
+            if untracked {
+                args.push("--include-untracked");
+            }
+            let message = message.trim().to_string();
+            if !message.is_empty() {
+                args.extend(["-m", message.as_str()]);
+            }
+            git(dir, &args, QUICK).await
+        }
+        StashAction::Apply { index } => git(dir, &["stash", "apply", &format!("stash@{{{index}}}")], QUICK).await,
+        StashAction::Pop { index } => git(dir, &["stash", "pop", &format!("stash@{{{index}}}")], QUICK).await,
+        StashAction::Drop { index } => git(dir, &["stash", "drop", &format!("stash@{{{index}}}")], QUICK).await,
+    }
+}
+
+/// Stages (or unstages) one hunk of a file: the hunk is cut from the file's current diff and
+/// applied to the index alone, like `git add -p` choosing just that part.
+pub async fn stage_hunk(dir: &Path, path: &str, hunk: usize, unstage: bool) -> Result<()> {
+    check_paths(&[path.to_string()])?;
+    let mut args = vec!["diff", "--no-color", "--no-ext-diff", "-U3"];
+    if unstage {
+        args.push("--cached");
+    }
+    args.extend(["--", path]);
+    let diff = git(dir, &args, QUICK).await?;
+    let patch = hunk_patch(&diff, hunk).ok_or_else(|| Error::msg("That part of the file changed meanwhile; look at the diff again."))?;
+    let file = std::env::temp_dir().join(format!("lamprabit-hunk-{}-{hunk}.patch", std::process::id()));
+    std::fs::write(&file, patch)?;
+    let file_arg = file.to_string_lossy().to_string();
+    let mut apply = vec!["apply", "--cached", "--recount", "--whitespace=nowarn"];
+    if unstage {
+        apply.push("--reverse");
+    }
+    apply.push(&file_arg);
+    let result = git(dir, &apply, QUICK).await;
+    let _ = std::fs::remove_file(&file);
+    result.map(drop)
+}
+
+/// The file header plus one hunk of a single-file diff, as a patch `git apply` takes.
+fn hunk_patch(diff: &str, index: usize) -> Option<String> {
+    let first = diff.find("\n@@")? + 1;
+    let header = &diff[..first];
+    let hunks: Vec<&str> = {
+        let body = &diff[first..];
+        let mut starts: Vec<usize> = body.match_indices("\n@@").map(|(i, _)| i + 1).collect();
+        starts.insert(0, 0);
+        starts.iter().enumerate().map(|(i, &s)| &body[s..*starts.get(i + 1).unwrap_or(&body.len())]).collect()
+    };
+    let hunk = hunks.get(index)?;
+    let mut patch = format!("{header}{hunk}");
+    if !patch.ends_with('\n') {
+        patch.push('\n');
+    }
+    Some(patch)
+}
+
+/// Settles a conflicted file with one side's version (`ours` is the branch you're on,
+/// `theirs` the one coming in), then marks it resolved.
+pub async fn resolve(dir: &Path, path: &str, theirs: bool) -> Result<()> {
+    check_paths(&[path.to_string()])?;
+    git(dir, &["checkout", if theirs { "--theirs" } else { "--ours" }, "--", path], QUICK).await?;
+    git(dir, &["add", "--", path], QUICK).await?;
+    Ok(())
+}
+
+/// A tag: a name for a commit, usually a release.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tag {
+    pub name: String,
+    pub commit: String,
+    pub subject: String,
+    pub time: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum TagAction {
+    /// An annotated tag when there's a message, a lightweight one otherwise; on HEAD unless `commit`.
+    Create { name: String, message: String, commit: Option<String> },
+    Delete { name: String },
+    /// Sends one tag to a remote (pushes don't carry tags by default).
+    Push { name: String, remote: String },
+}
+
+pub async fn tags(dir: &Path) -> Result<Vec<Tag>> {
+    let out = git(dir, &["for-each-ref", "--sort=-creatordate", "--format=%(refname:short)%1f%(objectname:short)%1f%(contents:subject)%1f%(creatordate:unix)", "refs/tags"], QUICK).await?;
+    Ok(out
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\u{1f}').collect();
+            (f.len() >= 4).then(|| Tag { name: f[0].to_string(), commit: f[1].to_string(), subject: f[2].to_string(), time: f[3].parse().unwrap_or(0) })
+        })
+        .collect())
+}
+
+pub async fn tag(dir: &Path, action: TagAction) -> Result<String> {
+    match action {
+        TagAction::Create { name, message, commit } => {
+            if name.starts_with('-') || git(dir, &["check-ref-format", &format!("refs/tags/{name}")], QUICK).await.is_err() {
+                return Err(Error::msg(format!("\"{name}\" isn't a valid tag name (like v1.2.0).")));
+            }
+            let mut args = vec!["tag"];
+            let message = message.trim().to_string();
+            if !message.is_empty() {
+                args.extend(["-a", "-m", message.as_str()]);
+            }
+            args.push(&name);
+            if let Some(c) = commit.as_deref() {
+                check_hash(c)?;
+                args.push(c);
+            }
+            git(dir, &args, QUICK).await
+        }
+        TagAction::Delete { name } => {
+            if name.starts_with('-') {
+                return Err(Error::msg("That isn't a tag."));
+            }
+            git(dir, &["tag", "-d", &name], QUICK).await
+        }
+        TagAction::Push { name, remote } => {
+            if name.starts_with('-') || remote.starts_with('-') {
+                return Err(Error::msg("That isn't a tag."));
+            }
+            git(dir, &["push", &remote, &format!("refs/tags/{name}")], NETWORK).await
+        }
+    }
+}
+
+/// Undoes a commit with a new commit that reverses it (history stays as it is).
+pub async fn revert(dir: &Path, hash: &str) -> Result<String> {
+    check_hash(hash)?;
+    git(dir, &["revert", "--no-edit", hash], Duration::from_secs(120)).await
+}
+
+/// Puts a file back the way it was in a commit; the change shows under Changes, staged.
+pub async fn restore_file(dir: &Path, hash: &str, path: &str) -> Result<()> {
+    check_hash(hash)?;
+    check_paths(&[path.to_string()])?;
+    git(dir, &["checkout", hash, "--", path], QUICK).await.map(drop)
+}
+
 /// The repository's sync settings, from its own config.
 pub async fn repo_settings(dir: &Path) -> RepoSettings {
     let get = |key: &'static str| async move { git(dir, &["config", "--local", "--get", key], QUICK).await.ok().map(|v| v.trim().to_lowercase()) };
@@ -1000,6 +1181,14 @@ u UU N... 100644 100644 100644 100644 f1 f2 f3 conflict.txt\0\
     }
 
     #[test]
+    fn cuts_one_hunk_out_of_a_diff() {
+        let diff = "diff --git a/x b/x\nindex 1..2 100644\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-a\n+A\n b\n@@ -10,2 +10,2 @@\n c\n-d\n+D\n";
+        assert_eq!(hunk_patch(diff, 1).unwrap(), "diff --git a/x b/x\nindex 1..2 100644\n--- a/x\n+++ b/x\n@@ -10,2 +10,2 @@\n c\n-d\n+D\n");
+        assert!(hunk_patch(diff, 0).unwrap().contains("+A\n b\n") && !hunk_patch(diff, 0).unwrap().contains("+D"));
+        assert!(hunk_patch(diff, 2).is_none());
+    }
+
+    #[test]
     fn reads_commit_files() {
         let numstat = "3\t1\tsrc/a.rs\0-\t-\tlogo.png\0\n5\t0\t\0old/b.rs\0new/b.rs\0";
         let names = "M\0src/a.rs\0A\0logo.png\0R090\0old/b.rs\0new/b.rs\0";
@@ -1062,7 +1251,40 @@ u UU N... 100644 100644 100644 100644 f1 f2 f3 conflict.txt\0\
         branch(&dir, BranchAction::Merge { branch: "feature".into() }).await.unwrap();
         branch(&dir, BranchAction::Delete { branch: "feature".into(), force: false }).await.unwrap();
 
+        // One hunk of two staged on its own, then unstaged again.
+        let lines: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(dir.join("long.txt"), &lines).unwrap();
+        stage(&dir, &["long.txt".into()], true).await.unwrap();
+        commit(&dir, "Long", false, false).await.unwrap();
+        std::fs::write(dir.join("long.txt"), lines.replace("line 2\n", "line two\n").replace("line 29\n", "line twenty-nine\n")).unwrap();
+        stage_hunk(&dir, "long.txt", 1, false).await.unwrap();
+        let staged_diff = diff(&dir, "long.txt", true, false).await.unwrap();
+        assert!(staged_diff.contains("+line twenty-nine") && !staged_diff.contains("+line two"));
+        stage_hunk(&dir, "long.txt", 0, true).await.unwrap();
+        assert!(diff(&dir, "long.txt", true, false).await.unwrap().is_empty());
+        // Stash it away and back.
+        stash(&dir, StashAction::Save { message: "wip".into(), untracked: true }).await.unwrap();
+        assert!(status(&dir).await.unwrap().files.is_empty());
+        assert_eq!(stashes(&dir).await.unwrap()[0].index, 0);
+        stash(&dir, StashAction::Pop { index: 0 }).await.unwrap();
+        assert!(stashes(&dir).await.unwrap().is_empty());
+        discard(&dir, &["long.txt".into()]).await.unwrap();
+        // Tags.
+        tag(&dir, TagAction::Create { name: "v1.0".into(), message: "First".into(), commit: None }).await.unwrap();
+        assert!(tag(&dir, TagAction::Create { name: "bad..name".into(), message: String::new(), commit: None }).await.is_err());
+        assert_eq!(tags(&dir).await.unwrap()[0].name, "v1.0");
+        tag(&dir, TagAction::Delete { name: "v1.0".into() }).await.unwrap();
+        // Revert the last commit, and restore a file from an older one.
+        let before = log(&dir, 0, 1, None).await.unwrap()[0].hash.clone();
+        revert(&dir, &before).await.unwrap();
+        assert!(!dir.join("long.txt").exists());
+        restore_file(&dir, &before, "long.txt").await.unwrap();
+        assert!(dir.join("long.txt").exists());
+        commit(&dir, "Back", false, false).await.unwrap();
+
         let history = log(&dir, 0, 10, None).await.unwrap();
+        assert_eq!(history.iter().map(|c| c.subject.as_str()).take(1).collect::<Vec<_>>(), ["Back"]);
+        let history: Vec<_> = history.into_iter().filter(|c| c.subject == "Second" || c.subject == "First").collect();
         assert_eq!(history.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), ["Second", "First"]);
         let second = details(&dir, &history[0].hash).await.unwrap();
         assert_eq!(second.subject, "Second");
