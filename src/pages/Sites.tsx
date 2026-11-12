@@ -85,6 +85,13 @@ export default function Sites() {
   const [language, setLanguage] = useState<Language | null>(null);
   const [sort, setSort] = useState<Sort>("recent");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const siteFocus = useAppStore((s) => s.siteFocus);
+  const openSite = useAppStore((s) => s.openSite);
+  useEffect(() => {
+    if (!siteFocus) return;
+    setSelectedPath(siteFocus);
+    openSite(null);
+  }, [siteFocus, openSite]);
   const [tab, setTab] = useState<Tab>("overview");
   const [cloning, setCloning] = useState(false);
 
@@ -612,6 +619,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
               className={clsx("-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors", tab === t.id ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg")}
             >
               {t.label}
+              {t.id === "git" && !!facts.data?.git?.changes && <span className="size-1.5 rounded-full bg-warn" title={`${facts.data.git.changes} uncommitted`} aria-label="Uncommitted changes" />}
               {t.id === "commands" && activity && (
                 <span
                   className={clsx("size-1.5 rounded-full", activity === "crashed" ? "bg-danger" : "animate-pulse bg-accent")}

@@ -15,7 +15,6 @@ import {
   FileCog,
   FileText,
   FolderOpen,
-  Globe,
   Keyboard,
   Layers,
   Layers3,
@@ -271,6 +270,7 @@ export default function Overview() {
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <section aria-labelledby="services-heading">
+          <ProjectStrip sites={sites.data?.sites ?? []} onNew={() => openNewProject(true)} />
           <div className="mb-6">
             {installedCount > 0 && (
             <ProfileTiles
@@ -352,7 +352,6 @@ export default function Overview() {
         </section>
 
         <aside className="space-y-4" aria-label="Shortcuts and connections">
-          <RecentProjects sites={sites.data?.sites ?? []} onNew={() => openNewProject(true)} />
           <QuickShortcuts sites={sites.data} services={services.data ?? []} settings={settings.data} />
           <ConnectPanel services={stack.usable} onCopy={copy} />
           <RecentActivity />
@@ -1141,55 +1140,64 @@ function ConnectPanel({ services, onCopy }: { services: ServiceInfo[]; onCopy: (
   );
 }
 
-function RecentProjects({ sites, onNew }: { sites: Site[]; onNew: () => void }) {
+/**
+ * Projects first: the most recent ones as cards at the top of Home, each opening its site or
+ * its card on Sites. Services come after, since most visits are about a project.
+ */
+function ProjectStrip({ sites, onNew }: { sites: Site[]; onNew: () => void }) {
   const navigate = useAppStore((s) => s.navigate);
+  const openSite = useAppStore((s) => s.openSite);
   const notify = useAppStore((s) => s.notify);
   const onError = (e: unknown) => notify("error", String(e));
-  const recent = [...sites].sort((a, b) => b.modified - a.modified).slice(0, 4);
-
+  const recent = [...sites].sort((a, b) => b.modified - a.modified).slice(0, 3);
   return (
-    <FoldCard id="home-recent" defaultOpen={true}
-        title="Recent projects"
-        extra={
+    <section aria-labelledby="projects-heading" className="mb-6">
+      <div className="mb-3 flex items-center justify-between px-1">
+        <h2 id="projects-heading" className="text-base font-bold">
+          Projects <span className="text-sm font-normal text-muted">{sites.length}</span>
+        </h2>
+        {sites.length > recent.length && (
           <button onClick={() => navigate("sites")} className="text-xs font-semibold text-accent-text hover:underline">
-            View all ›
+            All projects ›
           </button>
-        }
-      >
-      {recent.length === 0 && <p className="px-1 py-2 text-sm text-muted">Each folder in www becomes a site.</p>}
-      <ul className="space-y-0.5">
+        )}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {recent.map((site) => (
-          <li key={site.path} className="group flex items-center gap-1">
-            <button
-              onClick={() => openUrl(site.url).catch(onError)}
-              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-surface-2/60"
-              title={`Open ${site.url}`}
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent-text" aria-hidden>
-                <Globe size={16} />
+          <article key={site.path} className="group flex flex-col rounded-2xl border border-line bg-surface p-4 shadow-card transition-colors hover:border-accent/40">
+            <button type="button" onClick={() => openSite(site.path)} className="flex min-w-0 items-start gap-3 text-left" title={`${site.name}: open its card on Sites`}>
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-sm font-bold text-accent-text uppercase" aria-hidden>
+                {site.name.slice(0, 1)}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{site.domain}</span>
-                <span className="selectable block truncate font-mono text-xs text-muted">{site.path}</span>
-              </span>
-              <span className="shrink-0 rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-muted">
-                {serviceLabels[site.server]}
+                <span className="block truncate font-semibold text-fg">{site.name}</span>
+                <span className="block truncate text-xs text-muted">
+                  {site.framework ?? site.language}
+                  {site.gitBranch && ` · ${site.gitBranch}`}
+                </span>
               </span>
             </button>
-            <Button size="sm" variant="ghost" onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`}>
-              <FolderOpen size={14} />
-            </Button>
-          </li>
+            <div className="mt-3 flex items-center gap-1 border-t border-line/60 pt-2.5">
+              <button type="button" onClick={() => openUrl(site.url).catch(onError)} className="min-w-0 flex-1 truncate text-left font-mono text-xs text-accent-text hover:underline" title={`Open ${site.url}`}>
+                {site.domain}
+              </button>
+              <Button size="sm" variant="ghost" onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`} title="Open the folder">
+                <FolderOpen size={14} />
+              </Button>
+            </div>
+          </article>
         ))}
-      </ul>
-      <button
-        onClick={onNew}
-        className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-line py-2 text-sm font-medium text-muted hover:border-accent/50 hover:bg-accent-soft/40 hover:text-accent-text"
-        title="New project (N)"
-      >
-        <Plus size={14} /> New project
-      </button>
-    </FoldCard>
+        <button
+          type="button"
+          onClick={onNew}
+          className="flex min-h-28 flex-col items-center justify-center gap-1.5 rounded-2xl border border-dashed border-line text-sm font-medium text-muted hover:border-accent/50 hover:bg-accent-soft/30 hover:text-accent-text"
+          title="New project (N)"
+        >
+          <Plus size={16} /> New project
+          {sites.length === 0 && <span className="px-4 text-center text-xs font-normal">Or put a folder in www: each one becomes a site.</span>}
+        </button>
+      </div>
+    </section>
   );
 }
 

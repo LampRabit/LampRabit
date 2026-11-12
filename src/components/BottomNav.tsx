@@ -2,6 +2,8 @@ import { FileText, Globe, House, Layers, Settings } from "lucide-react";
 import clsx from "clsx";
 import { useAppStore, type PageId } from "../lib/store";
 import { useRuntimeUpdates } from "../lib/updates";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../lib/api";
 
 const items: { id: PageId; label: string; icon: typeof House }[] = [
   { id: "overview", label: "Home", icon: House },
@@ -15,6 +17,23 @@ export default function BottomNav() {
   const page = useAppStore((s) => s.page);
   const navigate = useAppStore((s) => s.navigate);
   const runtimeUpdates = useRuntimeUpdates().data?.length ?? 0;
+  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
+  const failed = (services.data ?? []).some((s) => s.state === "error");
+  // Newest lines are last; stop at the first one older than the last visit.
+  const newErrors = useAppStore((s) => {
+    if (s.page === "logs") return false;
+    for (let i = s.logs.length - 1; i >= 0; i--) {
+      const l = s.logs[i];
+      if (l.time.getTime() <= s.logsSeenAt) return false;
+      if (l.level === "error") return true;
+    }
+    return false;
+  });
+  const dot: Partial<Record<PageId, { label: string; tone: string }>> = {
+    ...(failed && { overview: { label: "A service failed", tone: "bg-danger" } }),
+    ...(runtimeUpdates > 0 && { services: { label: "Updates available", tone: "bg-accent" } }),
+    ...(newErrors && { logs: { label: "New errors", tone: "bg-danger" } }),
+  };
 
   return (
     // Docked under the page's scroll area rather than floating over it: a floating bar hid
@@ -44,9 +63,7 @@ export default function BottomNav() {
           >
             <span className="relative transition-transform duration-200 ease-(--ease-spring) group-hover:-translate-y-0.5 group-active:scale-90 still:translate-none still:scale-100">
               <Icon size={21} strokeWidth={page === id ? 2 : 1.6} />
-              {id === "services" && runtimeUpdates > 0 && (
-                <span className="absolute -top-0.5 -right-1 size-2 rounded-full bg-accent ring-2 ring-surface" aria-label="Updates available" />
-              )}
+              {dot[id] && <span className={clsx("absolute -top-0.5 -right-1 size-2 rounded-full ring-2 ring-surface", dot[id]!.tone)} aria-label={dot[id]!.label} />}
             </span>
             {label}
           </button>

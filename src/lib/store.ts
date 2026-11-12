@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { InstallProgress, LogHistory, LogService, RawLogLine } from "./api";
 import { parseLog, type LogEntry } from "./logparse";
+import { explain } from "./explain";
 
 // The Logs page draws only the rows in view, so it can keep this many.
 const MAX_LOG_LINES = 10000;
@@ -14,6 +15,8 @@ export interface Notice {
   text: string;
   /** Output lines shown under the text (a crash's last lines). */
   detail?: string[];
+  /** What to do about it, in plain words (lib/explain). */
+  hint?: string | null;
 }
 
 export interface Activity {
@@ -29,6 +32,11 @@ export const installKey = (runtime: string, version: string) => `${runtime}@${ve
 interface AppStore {
   page: PageId;
   navigate: (page: PageId) => void;
+  /** Opens a project on the Sites page (from Home); Sites picks it up and clears it. */
+  siteFocus: string | null;
+  openSite: (path: string | null) => void;
+  /** When Logs was last on screen, for the "new errors" dot on its tab. */
+  logsSeenAt: number;
   /** Service the Logs page opens filtered to, set by "View logs" on a service. */
   /** A service, or "project:<name>". */
   logFilter: string | null;
@@ -96,7 +104,11 @@ let logCursor = 0;
 
 export const useAppStore = create<AppStore>((set) => ({
   page: "overview",
-  navigate: (page) => set({ page }),
+  // Leaving or entering Logs counts as having seen its errors.
+  navigate: (page) => set((s) => ({ page, logsSeenAt: page === "logs" || s.page === "logs" ? Date.now() : s.logsSeenAt })),
+  siteFocus: null,
+  openSite: (siteFocus) => set(siteFocus ? { siteFocus, page: "sites" } : { siteFocus }),
+  logsSeenAt: Date.now(),
   logFilter: null,
   showLogs: (logFilter) => set({ page: "logs", logFilter }),
   diagnosticsOpen: false,
@@ -172,9 +184,10 @@ export const useAppStore = create<AppStore>((set) => ({
     })),
   notify: (tone, text, detail) => {
     const id = nextId++;
-    set((s) => ({ notices: [...s.notices, { id, tone, text, detail }] }));
-    // Ones with output stay longer, to be read.
-    setTimeout(() => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })), detail?.length ? 15000 : 6000);
+    const hint = tone === "error" ? explain([text, ...(detail ?? [])].join("\n")) : null;
+    set((s) => ({ notices: [...s.notices, { id, tone, text, detail, hint }] }));
+    // Ones with output or advice stay longer, to be read.
+    setTimeout(() => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })), detail?.length || hint ? 15000 : 6000);
   },
   dismiss: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
 }));
