@@ -123,7 +123,9 @@ describe("Changes", () => {
     state = base({ ahead: 2 });
     show();
     await userEvent.click(await screen.findByRole("button", { name: /Push 2 commits/ }));
-    await waitFor(() => expect(calls.find((c) => c.cmd === "gitSync")?.args).toEqual(["shop", "push"]));
+    // The third argument is the run's id, for its progress events and Cancel.
+    await waitFor(() => expect(calls.find((c) => c.cmd === "gitSync")?.args.slice(0, 2)).toEqual(["shop", "push"]));
+    expect(String(calls.find((c) => c.cmd === "gitSync")?.args[2])).toMatch(/^shop:push:\d+$/);
   });
 
   it("offers to publish a branch that has no upstream", async () => {
