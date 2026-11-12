@@ -155,7 +155,37 @@ export interface GitStatus {
   files: GitFile[];
   operation: "merge" | "rebase" | "cherry-pick" | "revert" | null;
   identity: { name: string | null; email: string | null; local: boolean };
-  remotes: { name: string; url: string }[];
+  remotes: { name: string; url: string; pushUrl: string | null }[];
+}
+
+export interface GitRepoSettings {
+  pull: "merge" | "rebase" | "ff-only" | null;
+  prune: boolean;
+  autoSetupRemote: boolean;
+}
+
+export interface GitCommitFile {
+  path: string;
+  from: string | null;
+  status: string;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
+
+export interface GitCommitDetails {
+  hash: string;
+  parents: string[];
+  author: string;
+  authorEmail: string;
+  authorTime: number;
+  committer: string;
+  committerEmail: string;
+  committerTime: number;
+  refs: string;
+  subject: string;
+  body: string;
+  files: GitCommitFile[];
 }
 
 export interface GitBranch {
@@ -183,9 +213,15 @@ export type GitBranchAction =
   | { kind: "switch"; branch: string }
   | { kind: "rename"; from: string; to: string }
   | { kind: "delete"; branch: string; force: boolean }
-  | { kind: "merge"; branch: string };
+  | { kind: "merge"; branch: string }
+  | { kind: "setUpstream"; upstream: string };
 
-export type GitRemoteAction = { kind: "add"; name: string; url: string } | { kind: "setUrl"; name: string; url: string } | { kind: "remove"; name: string };
+export type GitRemoteAction =
+  | { kind: "add"; name: string; url: string }
+  | { kind: "setUrl"; name: string; url: string }
+  | { kind: "setPushUrl"; name: string; url: string | null }
+  | { kind: "rename"; from: string; to: string }
+  | { kind: "remove"; name: string };
 
 /** One component of a first-run starter stack (starterPlan). */
 export interface StarterItem {
@@ -851,13 +887,16 @@ export const api = {
   gitDiff: (name: string, path: string, staged: boolean, untracked: boolean) => invoke<string>("git_diff", { name, path, staged, untracked }),
   gitStage: (name: string, paths: string[], stage: boolean) => invoke<void>("git_stage", { name, paths, stage }),
   gitDiscard: (name: string, paths: string[]) => invoke<void>("git_discard", { name, paths }),
-  gitCommit: (name: string, message: string, amend: boolean) => invoke<string>("git_commit", { name, message, amend }),
+  gitCommit: (name: string, message: string, amend: boolean, all = false) => invoke<string>("git_commit", { name, message, amend, all }),
   gitBranches: (name: string) => invoke<GitBranch[]>("git_branches", { name }),
   gitBranch: (name: string, action: GitBranchAction) => invoke<string>("git_branch", { name, action }),
   gitAbort: (name: string) => invoke<void>("git_abort", { name }),
   gitContinue: (name: string) => invoke<string>("git_continue", { name }),
   gitLog: (name: string, skip: number, limit: number, path?: string) => invoke<GitCommit[]>("git_log", { name, skip, limit, path: path ?? null }),
-  gitShow: (name: string, hash: string) => invoke<string>("git_show", { name, hash }),
+  gitCommitDetails: (name: string, hash: string) => invoke<GitCommitDetails>("git_commit_details", { name, hash }),
+  gitCommitFileDiff: (name: string, hash: string, path: string) => invoke<string>("git_commit_file_diff", { name, hash, path }),
+  gitRepoSettings: (name: string) => invoke<GitRepoSettings>("git_repo_settings", { name }),
+  gitSetRepoSettings: (name: string, settings: GitRepoSettings) => invoke<void>("git_set_repo_settings", { name, settings }),
   gitSync: (name: string, action: "fetch" | "pull" | "push") => invoke<string>("git_sync", { name, action }),
   gitRemote: (name: string, action: GitRemoteAction) => invoke<void>("git_remote", { name, action }),
   gitSetIdentity: (name: string, user: string, email: string) => invoke<void>("git_set_identity", { name, user, email }),

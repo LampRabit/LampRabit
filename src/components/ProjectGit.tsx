@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Check, GitBranch, GitCommitHorizontal, GitMerge, Minus, Pencil, Plus, RefreshCw, RotateCcw, Trash2, Undo2, UserRound, X } from "lucide-react";
+import { ArrowDown, ArrowLeftRight, ArrowUp, Check, ChevronLeft, Copy, GitBranch, GitCommitHorizontal, GitMerge, KeyRound, Link2, Minus, Pencil, Plus, RefreshCw, RotateCcw, Trash2, Undo2, UserRound, X } from "lucide-react";
 import clsx from "clsx";
-import { api, type GitBranch as Branch, type GitFile, type Site } from "../lib/api";
+import { api, type GitBranch as Branch, type GitFile, type GitRepoSettings, type GitStatus, type Site } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { formatAgo } from "../lib/time";
 import Dialog from "./Dialog";
@@ -10,11 +10,26 @@ import { Button, inputClass } from "./ui";
 
 /**
  * A project's Git: changes with diffs, staging and commits, history, branches, remotes and
- * the repository's own identity. Everything goes through the git command, so the user's
+ * the repository's own settings. Everything goes through the git command, so the user's
  * credential helpers and SSH keys work; fetch, pull and push never prompt on a terminal.
+ *
+ * The view leads with what the repository needs next (commit, push, publish, pull, add a
+ * remote, finish a merge): that action is the one highlighted, the others stay quiet.
  */
 
 type View = "changes" | "history" | "branches" | "remotes";
+type SyncAction = "fetch" | "pull" | "push";
+
+/** What the repository needs next, in order of urgency. */
+function nextStep(s: GitStatus): "resolve" | "commit" | "pull" | "push" | "publish" | "remote" | null {
+  if (s.operation) return "resolve";
+  if (s.files.length > 0) return "commit";
+  if (s.behind > 0) return "pull";
+  if (s.remotes.length === 0) return s.head ? "remote" : null;
+  if (s.branch && !s.upstream && s.head) return "publish";
+  if (s.ahead > 0) return "push";
+  return null;
+}
 
 export default function ProjectGit({ site }: { site: Site }) {
   const queryClient = useQueryClient();
@@ -25,12 +40,12 @@ export default function ProjectGit({ site }: { site: Site }) {
   const [view, setView] = useState<View>("changes");
   // Whatever changed the repository refreshes everything that shows it.
   const refresh = () => {
-    for (const key of ["git-status", "git-branches", "git-log", "project-facts"]) queryClient.invalidateQueries({ queryKey: [key, site.name] });
+    for (const key of ["git-status", "git-branches", "git-log", "git-commit", "project-facts", "git-repo-settings"]) queryClient.invalidateQueries({ queryKey: [key, site.name] });
     queryClient.invalidateQueries({ queryKey: ["sites"] });
   };
   const init = useMutation({ mutationFn: () => api.gitInit(site.name), onSuccess: refresh, onError });
   const sync = useMutation({
-    mutationFn: (action: "fetch" | "pull" | "push") => api.gitSync(site.name, action),
+    mutationFn: (action: SyncAction) => api.gitSync(site.name, action),
     onSuccess: (out, action) => {
       notify("info", action === "fetch" ? "Fetched" : action === "pull" ? "Pulled" : "Pushed", out.trim() ? out.trim().split("\n").slice(-6) : undefined);
       refresh();
@@ -43,20 +58,20 @@ export default function ProjectGit({ site }: { site: Site }) {
   const abort = useMutation({ mutationFn: () => api.gitAbort(site.name), onSuccess: refresh, onError });
   const carryOn = useMutation({ mutationFn: () => api.gitContinue(site.name), onSuccess: refresh, onError });
 
-  if (version.isLoading) return <p className="p-5 text-sm text-muted">Looking for Git…</p>;
+  if (version.isLoading) return <p className="text-sm text-muted">Looking for Git…</p>;
   if (!version.data) {
     return (
-      <div className="p-5 text-sm">
+      <div className="text-sm">
         <p className="font-semibold text-fg">Git isn't installed</p>
         <p className="mt-1 text-muted">Install Git from git-scm.com (or your package manager), then reopen this tab. LampRabit uses your own Git, with your credentials and SSH keys.</p>
       </div>
     );
   }
   const s = status.data;
-  if (!s) return <p className="p-5 text-sm text-muted">{status.isError ? String(status.error) : "Reading the repository…"}</p>;
+  if (!s) return <p className="text-sm text-muted">{status.isError ? String(status.error) : "Reading the repository…"}</p>;
   if (!s.repo) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-3 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm">
           <p className="font-semibold text-fg">This project isn't a Git repository</p>
           <p className="text-muted">Start one to track changes, branch and push to GitHub, GitLab or any remote.</p>
@@ -68,57 +83,61 @@ export default function ProjectGit({ site }: { site: Site }) {
     );
   }
 
+  const step = nextStep(s);
   const conflicts = s.files.filter((f) => f.conflicted).length;
-  // Where the branch stands against its remote, in a few characters (the branch itself is in the card's header).
-  const where = s.remotes.length === 0 ? "No remote" : !s.branch ? `Detached at ${s.head ?? "?"}` : !s.upstream ? "Not pushed yet" : s.ahead || s.behind ? null : "Up to date";
-  const views: [View, string, number?][] = [
-    ["changes", "Changes", s.files.length],
+  const views: [View, string, ReactNode?][] = [
+    ["changes", "Changes", s.files.length ? <Count n={s.files.length} on={view === "changes"} /> : null],
     ["history", "History"],
     ["branches", "Branches"],
-    ["remotes", "Remotes"],
+    ["remotes", "Remotes", step === "remote" ? <span className="ml-1.5 inline-block size-1.5 rounded-full bg-accent align-middle" aria-label="Needs a remote" /> : null],
   ];
-  const syncButton = (action: "fetch" | "pull" | "push", icon: ReactNode, label: string, disabled: boolean, title: string) => (
+  // Sync buttons: the one the repository needs is filled; the others are quiet; ones that
+  // can't work yet aren't shown at all.
+  const syncButton = (action: SyncAction, icon: ReactNode, label: string, title: string, primary: boolean) => (
     <button
       type="button"
       onClick={() => sync.mutate(action)}
-      disabled={sync.isPending || disabled}
+      disabled={sync.isPending}
       title={title}
-      className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent"
+      className={clsx(
+        "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium disabled:opacity-50",
+        primary ? "bg-accent text-accent-fg hover:bg-accent-hover" : "text-muted hover:bg-surface-2 hover:text-fg",
+      )}
     >
       {sync.isPending && sync.variables === action ? <RefreshCw size={12} className="animate-spin" /> : icon} {label}
     </button>
   );
 
   return (
-    <div className="space-y-3 p-4">
-      <div className="flex flex-wrap items-center gap-1 border-b border-line pb-2">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-1">
         <div role="tablist" aria-label="Git" className="flex flex-wrap gap-0.5">
-          {views.map(([id, label, count]) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={view === id}
-              onClick={() => setView(id)}
-              className={clsx("rounded-md px-2.5 py-1 text-sm", view === id ? "bg-surface-2 font-semibold text-fg" : "text-muted hover:text-fg")}
-            >
+          {views.map(([id, label, extra]) => (
+            <button key={id} role="tab" aria-selected={view === id} onClick={() => setView(id)} className={clsx("rounded-md px-2.5 py-1 text-sm", view === id ? "bg-surface font-semibold text-fg shadow-card" : "text-muted hover:text-fg")}>
               {label}
-              {!!count && <span className={clsx("ml-1.5 rounded-full px-1.5 text-[11px] tabular-nums", view === id ? "bg-accent-soft text-accent-text" : "bg-surface-2")}>{count}</span>}
+              {extra}
             </button>
           ))}
         </div>
         <span className="flex-1" />
-        <span className="mr-1 text-xs text-muted" title={s.upstream ? `Tracks ${s.upstream}` : undefined}>
-          {where ?? (
-            <>
-              {s.ahead > 0 && <span className="text-accent-text">{s.ahead} to push</span>}
-              {s.ahead > 0 && s.behind > 0 && " · "}
-              {s.behind > 0 && <span className="text-warn">{s.behind} to pull</span>}
-            </>
-          )}
-        </span>
-        {syncButton("fetch", <RefreshCw size={12} />, "Fetch", s.remotes.length === 0, "Get the remotes' new commits and branches without changing your files")}
-        {syncButton("pull", <ArrowDown size={12} />, "Pull", !s.upstream, s.upstream ? `Merge ${s.upstream} into ${s.branch}` : "The branch doesn't track a remote branch yet")}
-        {syncButton("push", <ArrowUp size={12} />, "Push", s.remotes.length === 0 || !s.branch, s.remotes.length === 0 ? "Add a remote first (Remotes)" : s.upstream ? `Send your commits to ${s.upstream}` : "Push this branch and track it on the remote")}
+        {s.remotes.length === 0 ? (
+          s.head && (
+            <button type="button" onClick={() => setView("remotes")} className="flex items-center gap-1 rounded-md bg-accent px-2 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover" title="Add a remote (GitHub, GitLab…) to push this repository">
+              <Link2 size={12} /> Add a remote
+            </button>
+          )
+        ) : (
+          <>
+            {s.upstream && (
+              <span className="mr-1 text-xs text-muted" title={`Tracks ${s.upstream}`}>
+                {s.ahead === 0 && s.behind === 0 ? "Up to date" : [s.ahead && `${s.ahead} to push`, s.behind && `${s.behind} to pull`].filter(Boolean).join(" · ")}
+              </span>
+            )}
+            {syncButton("fetch", <RefreshCw size={12} />, "Fetch", "Get the remotes' new commits and branches without changing your files", false)}
+            {s.upstream && syncButton("pull", <ArrowDown size={12} />, s.behind ? `Pull ${s.behind}` : "Pull", `Bring ${s.upstream}'s commits into ${s.branch}`, step === "pull")}
+            {s.branch && s.head && (s.upstream ? syncButton("push", <ArrowUp size={12} />, s.ahead ? `Push ${s.ahead}` : "Push", `Send your commits to ${s.upstream}`, step === "push") : syncButton("push", <ArrowUp size={12} />, "Publish branch", `Push ${s.branch} and track it on the remote`, step === "publish"))}
+          </>
+        )}
       </div>
 
       {s.operation && (
@@ -137,36 +156,57 @@ export default function ProjectGit({ site }: { site: Site }) {
         </div>
       )}
 
-      {view === "changes" && <Changes site={site} files={s.files} firstCommit={!s.head} identityMissing={!s.identity.name || !s.identity.email} onChanged={refresh} onIdentity={() => setView("remotes")} />}
+      {view === "changes" && <Changes site={site} status={s} onChanged={refresh} onIdentity={() => setView("remotes")} onRemotes={() => setView("remotes")} onPush={() => sync.mutate("push")} pushing={sync.isPending && sync.variables === "push"} />}
       {view === "history" && <History site={site} />}
-      {view === "branches" && <Branches site={site} current={s.branch} onChanged={refresh} />}
-      {view === "remotes" && <RemotesAndIdentity site={site} remotes={s.remotes} identity={s.identity} onChanged={refresh} />}
+      {view === "branches" && <Branches site={site} current={s.branch} upstream={s.upstream} onChanged={refresh} />}
+      {view === "remotes" && <RemotesAndSettings site={site} status={s} onChanged={refresh} />}
     </div>
   );
 }
 
+function Count({ n, on }: { n: number; on: boolean }) {
+  return <span className={clsx("ml-1.5 rounded-full px-1.5 text-[11px] tabular-nums", on ? "bg-accent-soft text-accent-text" : "bg-surface-2")}>{n}</span>;
+}
+
 const letters: Record<string, string> = { M: "Modified", A: "Added", D: "Deleted", R: "Renamed", C: "Copied", T: "Type changed", U: "Conflict", "?": "New, not tracked yet" };
+const letterColor = (code: string) => (code === "D" ? "text-danger-text" : code === "?" || code === "A" ? "text-ok" : code === "U" ? "text-warn" : "text-accent-text");
 
 /** The two panes (list, diff) share one height, so the diff gets the room and the page doesn't grow. */
-const panes = "grid gap-3 lg:h-[min(64vh,40rem)] lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]";
+const panes = "grid gap-3 lg:h-[min(66vh,42rem)] lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]";
+
+/** A file's name first, its folder after in grey: the name is what people scan for. */
+function FileName({ path }: { path: string }) {
+  const slash = path.lastIndexOf("/");
+  return (
+    <>
+      <span className="truncate text-[13px] text-fg">{path.slice(slash + 1)}</span>
+      {slash > 0 && <span className="min-w-0 truncate text-[11px] text-muted">{path.slice(0, slash)}</span>}
+    </>
+  );
+}
 
 function Changes({
   site,
-  files,
-  firstCommit,
-  identityMissing,
+  status,
   onChanged,
   onIdentity,
+  onRemotes,
+  onPush,
+  pushing,
 }: {
   site: Site;
-  files: GitFile[];
-  firstCommit: boolean;
-  identityMissing: boolean;
+  status: GitStatus;
   onChanged: () => void;
   onIdentity: () => void;
+  onRemotes: () => void;
+  onPush: () => void;
+  pushing: boolean;
 }) {
   const notify = useAppStore((s) => s.notify);
   const onError = (e: unknown) => notify("error", String(e));
+  const files = status.files;
+  const firstCommit = !status.head;
+  const identityMissing = !status.identity.name || !status.identity.email;
   const staged = files.filter((f) => !f.conflicted && f.staged !== " " && f.staged !== "?");
   const unstaged = files.filter((f) => !f.conflicted && (f.unstaged !== " " || f.staged === "?"));
   const conflicted = files.filter((f) => f.conflicted);
@@ -190,8 +230,11 @@ function Changes({
     },
     onError,
   });
+  // Nothing staged but changes there: the commit takes all of them (git add --all first),
+  // like VS Code's "commit all" when nothing is staged.
+  const commitAll = staged.length === 0 && unstaged.length > 0 && !amend;
   const commit = useMutation({
-    mutationFn: () => api.gitCommit(site.name, message, amend),
+    mutationFn: () => api.gitCommit(site.name, message, amend, commitAll),
     onSuccess: () => {
       notify("info", amend ? "Amended the last commit" : "Committed");
       setMessage("");
@@ -200,7 +243,9 @@ function Changes({
     },
     onError,
   });
-  const canCommit = (staged.length > 0 || amend) && (!!message.trim() || amend) && conflicted.length === 0;
+  const hasWork = staged.length > 0 || unstaged.length > 0;
+  const canCommit = conflicted.length === 0 && (amend || (hasWork && !!message.trim()));
+  const commitLabel = amend ? "Amend" : commitAll ? `Commit all ${unstaged.length}` : `Commit ${staged.length}`;
 
   const group = (title: string, list: GitFile[], kind: "staged" | "unstaged" | "conflict", action?: ReactNode) =>
     list.length > 0 && (
@@ -216,30 +261,16 @@ function Changes({
             const isStaged = kind === "staged";
             const code = kind === "conflict" ? "U" : isStaged ? f.staged : f.staged === "?" ? "?" : f.unstaged;
             const active = selected?.path === f.path && selected.staged === isStaged;
-            const slash = f.path.lastIndexOf("/");
-            const name = f.path.slice(slash + 1);
-            const folder = slash > 0 ? f.path.slice(0, slash) : "";
             return (
               <li key={`${kind}:${f.path}`} className={clsx("group flex items-center gap-1 pr-1.5 pl-3", active ? "bg-accent-soft/50" : "hover:bg-surface-2")}>
                 <button type="button" onClick={() => setSelected({ path: f.path, staged: isStaged })} className="flex min-w-0 flex-1 items-baseline gap-2 py-1 text-left" title={f.from ? `${f.from} → ${f.path}` : f.path}>
-                  <span
-                    className={clsx("w-3 shrink-0 font-mono text-[11px] font-bold", code === "D" ? "text-danger-text" : code === "?" || code === "A" ? "text-ok" : code === "U" ? "text-warn" : "text-accent-text")}
-                    title={letters[code] ?? code}
-                    aria-label={letters[code] ?? code}
-                  >
-                    {code === "?" ? "+" : code}
+                  <span className={clsx("w-3 shrink-0 font-mono text-[11px] font-bold", letterColor(code))} title={letters[code] ?? code} aria-label={letters[code] ?? code}>
+                    {code === "?" ? "U" : code}
                   </span>
-                  <span className="truncate text-[13px] text-fg">{name}</span>
-                  {folder && <span className="min-w-0 truncate text-[11px] text-muted">{folder}</span>}
+                  <FileName path={f.path} />
                 </button>
                 {kind !== "staged" && (
-                  <button
-                    type="button"
-                    onClick={() => setDiscarding([f.path])}
-                    className="rounded p-1 text-muted opacity-0 group-hover:opacity-100 hover:text-danger-text focus-visible:opacity-100"
-                    title="Discard these changes"
-                    aria-label={`Discard changes to ${f.path}`}
-                  >
+                  <button type="button" onClick={() => setDiscarding([f.path])} className="rounded p-1 text-muted opacity-0 group-hover:opacity-100 hover:text-danger-text focus-visible:opacity-100" title="Discard these changes" aria-label={`Discard changes to ${f.path}`}>
                     <Undo2 size={13} />
                   </button>
                 )}
@@ -247,8 +278,8 @@ function Changes({
                   type="button"
                   onClick={() => stage.mutate({ paths: [f.path], on: !isStaged })}
                   disabled={stage.isPending}
-                  className="rounded p-1 text-muted opacity-60 group-hover:opacity-100 hover:text-fg focus-visible:opacity-100"
-                  title={isStaged ? "Unstage: leave it out of the commit" : kind === "conflict" ? "Mark as resolved" : "Stage: include it in the commit"}
+                  className="rounded p-1 text-muted opacity-0 group-hover:opacity-100 hover:text-fg focus-visible:opacity-100"
+                  title={isStaged ? "Unstage: leave it out of the commit" : kind === "conflict" ? "Mark as resolved" : "Stage: commit only staged files"}
                   aria-label={`${isStaged ? "Unstage" : "Stage"} ${f.path}`}
                 >
                   {isStaged ? <Minus size={13} /> : kind === "conflict" ? <Check size={13} /> : <Plus size={13} />}
@@ -261,11 +292,69 @@ function Changes({
     );
 
   const textButton = "text-[11px] font-medium hover:underline";
+  // Under the message: commit when there's something to commit, else what comes next.
+  const footer =
+    hasWork || amend ? (
+      <Button size="sm" variant={canCommit ? "primary" : "secondary"} onClick={() => commit.mutate()} disabled={!canCommit || commit.isPending} title={commitAll ? "Stages every change, then commits (Ctrl+Enter)" : "Commit the staged files (Ctrl+Enter)"}>
+        <GitCommitHorizontal size={13} /> {commit.isPending ? "Committing…" : commitLabel}
+      </Button>
+    ) : status.remotes.length === 0 ? (
+      status.head && (
+        <Button size="sm" variant="primary" onClick={onRemotes}>
+          <Link2 size={13} /> Add a remote to push
+        </Button>
+      )
+    ) : status.branch && status.head && (!status.upstream || status.ahead > 0) ? (
+      <Button size="sm" variant="primary" onClick={onPush} disabled={pushing}>
+        <ArrowUp size={13} /> {pushing ? "Pushing…" : !status.upstream ? "Publish branch" : `Push ${status.ahead} ${status.ahead === 1 ? "commit" : "commits"}`}
+      </Button>
+    ) : null;
+
   return (
     <div className={panes}>
-      <div className="flex min-h-64 flex-col overflow-hidden rounded-lg border border-line">
+      <div className="flex min-h-64 flex-col overflow-hidden rounded-lg border border-line bg-surface">
+        <div className="space-y-2 border-b border-line p-2.5">
+          {identityMissing && (
+            <p className="text-[11px] text-warn">
+              Git doesn't know your name and email yet.{" "}
+              <button type="button" onClick={onIdentity} className="font-medium underline">
+                Set them
+              </button>
+            </p>
+          )}
+          {firstCommit && staged.length > 0 && <p className="text-[11px] text-muted">No commits yet: the project's files are staged for the first one. Unstage any you want to leave out.</p>}
+          {hasWork || amend ? (
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && canCommit) commit.mutate();
+              }}
+              rows={2}
+              placeholder={amend ? "New message (empty keeps the last one)" : firstCommit ? "Initial commit" : `Message (Ctrl+Enter to commit${commitAll ? " all" : ""})`}
+              aria-label="Commit message"
+              className={clsx(inputClass, "resize-none py-1.5 font-sans")}
+            />
+          ) : (
+            <p className="py-1 text-xs text-muted">
+              {status.remotes.length === 0
+                ? "Everything is committed. Add a remote to back it up."
+                : status.ahead > 0 || (!status.upstream && status.head)
+                  ? "Everything is committed; your commits aren't on the remote yet."
+                  : "Everything is committed and pushed."}
+            </p>
+          )}
+          <div className="flex items-center gap-2">
+            {!firstCommit && hasWork && (
+              <label className="flex items-center gap-1.5 text-[11px] text-muted" title="Add the changes to the last commit instead of making a new one">
+                <input type="checkbox" checked={amend} onChange={(e) => setAmend(e.target.checked)} className="size-3.5 accent-[var(--accent)]" /> Amend
+              </label>
+            )}
+            <span className="flex-1" />
+            {footer}
+          </div>
+        </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {files.length === 0 && <p className="p-6 text-center text-sm text-muted">No changes. Everything is committed.</p>}
           {group("Conflicts", conflicted, "conflict")}
           {group(
             "Staged",
@@ -276,7 +365,7 @@ function Changes({
             </button>,
           )}
           {group(
-            "Not staged",
+            "Changes",
             unstaged,
             "unstaged",
             <span className="flex gap-3">
@@ -289,49 +378,12 @@ function Changes({
             </span>,
           )}
         </div>
-        <div className="space-y-2 border-t border-line bg-surface-2/40 p-2.5">
-          {/* A new project's template stages its files; say so before the first commit, so a big
-              number on the button isn't a surprise. */}
-          {firstCommit && staged.length > 0 && (
-            <p className="text-[11px] text-muted">No commits yet. The project's files are staged for a first commit; unstage any you want to leave out.</p>
-          )}
-          {identityMissing && (
-            <p className="text-[11px] text-warn">
-              Git doesn't know your name and email yet.{" "}
-              <button type="button" onClick={onIdentity} className="font-medium underline">
-                Set them
-              </button>
-            </p>
-          )}
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && canCommit) commit.mutate();
-            }}
-            rows={2}
-            placeholder={amend ? "New message (empty keeps the last one)" : firstCommit ? "Initial commit" : "Commit message"}
-            aria-label="Commit message"
-            className={clsx(inputClass, "resize-none py-1.5 font-sans")}
-          />
-          <div className="flex items-center gap-2">
-            {!firstCommit && (
-              <label className="flex items-center gap-1.5 text-[11px] text-muted" title="Add the staged changes to the last commit instead of making a new one">
-                <input type="checkbox" checked={amend} onChange={(e) => setAmend(e.target.checked)} className="size-3.5 accent-[var(--accent)]" /> Amend
-              </label>
-            )}
-            <span className="flex-1 text-right text-[11px] text-muted">{staged.length > 0 ? `${staged.length} staged` : unstaged.length ? "Stage files to commit" : ""}</span>
-            <Button size="sm" variant={canCommit ? "primary" : "secondary"} onClick={() => commit.mutate()} disabled={!canCommit || commit.isPending} title="Commit the staged files (Ctrl+Enter)">
-              <GitCommitHorizontal size={13} /> {commit.isPending ? "Committing…" : "Commit"}
-            </Button>
-          </div>
-        </div>
       </div>
-      <div className="flex min-h-64 min-w-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-terminal">
+      <div className="flex min-h-64 min-w-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
         {selected && current ? (
           <FileDiff site={site} file={current} staged={selected.staged} />
         ) : (
-          <div className="flex flex-1 items-center justify-center p-4 text-sm text-slate-400">{files.length ? "Select a file to see its changes." : "Nothing to show."}</div>
+          <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted">{files.length ? "Select a file to see its changes." : "No changes."}</div>
         )}
       </div>
       {discarding && (
@@ -373,96 +425,286 @@ function FileDiff({ site, file, staged }: { site: Site; file: GitFile; staged: b
   });
   return (
     <>
-      <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-terminal-2 px-3 py-1.5 text-xs">
-        <span className="truncate font-mono text-slate-200">{file.path}</span>
-        <span className="shrink-0 text-slate-400">{staged ? "staged" : untracked ? "new file" : "not staged"}</span>
-      </div>
-      <DiffText text={diff.data} loading={diff.isLoading} error={diff.isError ? String(diff.error) : null} />
+      <DiffTitle path={file.path} note={staged ? "Staged" : untracked ? "New file" : "Changes"} from={file.from} />
+      <DiffView text={diff.data} loading={diff.isLoading} error={diff.isError ? String(diff.error) : null} />
     </>
   );
 }
 
-/**
- * A unified diff, coloured by line, without git's header noise (diff --git, index, ---/+++
- * repeat what the pane's title says); it scrolls inside its pane.
- */
-function DiffText({ text, loading, error }: { text?: string; loading?: boolean; error?: string | null }) {
-  const lines = useMemo(() => (text ?? "").split("\n").filter((l) => !/^(diff --git |index [0-9a-f]+\.\.|--- |\+\+\+ |new file mode|deleted file mode|similarity index)/.test(l)), [text]);
-  if (loading) return <p className="p-3 text-xs text-slate-400">Loading…</p>;
-  if (error) return <p className="p-3 text-xs text-red-300">{error}</p>;
-  if (!text?.trim()) return <p className="p-3 text-xs text-slate-400">No text changes (a binary file, or only its mode changed).</p>;
+function DiffTitle({ path, note, from, extra }: { path: string; note?: string; from?: string | null; extra?: ReactNode }) {
   return (
-    <pre className="selectable min-h-0 flex-1 overflow-auto py-1.5 font-mono text-[12px] leading-5">
-      {lines.map((line, i) => (
-        <div
-          key={i}
-          className={clsx(
-            "px-3 whitespace-pre",
-            line.startsWith("+") && "bg-emerald-500/10 text-emerald-300",
-            line.startsWith("-") && "bg-red-500/10 text-red-300",
-            line.startsWith("@@") && "mt-1 text-sky-300/80",
-            /^(commit |Author:|Date:)/.test(line) && "text-slate-400",
-            !/^[+\-@]/.test(line) && "text-slate-300",
-          )}
-        >
-          {line || " "}
-        </div>
-      ))}
-    </pre>
+    <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5 text-xs">
+      <span className="flex min-w-0 items-baseline gap-2">
+        <FileName path={path} />
+      </span>
+      {from && <span className="truncate text-muted">from {from}</span>}
+      <span className="flex-1" />
+      {extra}
+      {note && <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">{note}</span>}
+    </div>
   );
 }
 
-function History({ site }: { site: Site }) {
-  const [pages, setPages] = useState(1);
-  const log = useQuery({ queryKey: ["git-log", site.name, pages], queryFn: () => api.gitLog(site.name, 0, pages * 50) });
-  const [open, setOpen] = useState<string | null>(null);
-  const show = useQuery({ queryKey: ["git-show", site.name, open], queryFn: () => api.gitShow(site.name, open!), enabled: !!open });
-  const commits = log.data ?? [];
+type DiffRow = { kind: "hunk"; text: string } | { kind: "add" | "del" | "ctx"; old: number | null; new: number | null; text: string } | { kind: "note"; text: string };
+
+/** A unified diff as rows with old and new line numbers, the way editors show it. */
+function parseDiff(text: string): DiffRow[] {
+  const rows: DiffRow[] = [];
+  let oldNo = 0;
+  let newNo = 0;
+  let inHunk = false;
+  for (const line of text.split("\n")) {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$/.exec(line);
+    if (hunk) {
+      oldNo = Number(hunk[1]);
+      newNo = Number(hunk[2]);
+      inHunk = true;
+      rows.push({ kind: "hunk", text: hunk[3] });
+      continue;
+    }
+    if (!inHunk) {
+      if (/^Binary files/.test(line)) rows.push({ kind: "note", text: "Binary file: no text to show." });
+      continue;
+    }
+    if (line.startsWith("+")) rows.push({ kind: "add", old: null, new: newNo++, text: line.slice(1) });
+    else if (line.startsWith("-")) rows.push({ kind: "del", old: oldNo++, new: null, text: line.slice(1) });
+    else if (line.startsWith("\\")) rows.push({ kind: "note", text: line.slice(2) });
+    else if (line.startsWith(" ")) rows.push({ kind: "ctx", old: oldNo++, new: newNo++, text: line.slice(1) });
+    else if (line.startsWith("diff ")) inHunk = false;
+  }
+  return rows;
+}
+
+/** Line numbers in a gutter, added and removed lines tinted, no +/− marks in the text. */
+function DiffView({ text, loading, error }: { text?: string; loading?: boolean; error?: string | null }) {
+  const rows = useMemo(() => parseDiff(text ?? ""), [text]);
+  if (loading) return <p className="p-3 text-xs text-muted">Loading…</p>;
+  if (error) return <p className="p-3 text-xs text-danger-text">{error}</p>;
+  if (rows.length === 0) return <p className="p-3 text-xs text-muted">No text changes (a binary file, or only its mode changed).</p>;
+  const gutter = "w-10 shrink-0 select-none pr-2 text-right text-muted/70 tabular-nums";
   return (
-    <div className={panes}>
-      <div className="min-h-64 overflow-y-auto rounded-lg border border-line">
-        {log.isLoading && <p className="p-4 text-sm text-muted">Loading history…</p>}
-        {!log.isLoading && commits.length === 0 && <p className="p-6 text-center text-sm text-muted">No commits yet.</p>}
-        <ul>
-          {commits.map((c) => (
-            <li key={c.hash}>
-              <button
-                type="button"
-                onClick={() => setOpen(c.hash === open ? null : c.hash)}
-                aria-pressed={c.hash === open}
-                className={clsx("block w-full border-b border-line/60 px-3 py-1.5 text-left", c.hash === open ? "bg-accent-soft/50" : "hover:bg-surface-2")}
-              >
-                <span className="block truncate text-[13px] text-fg">{c.subject}</span>
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">
-                  <span className="font-mono">{c.short}</span>·
-                  <span className="truncate" title={c.email}>
-                    {c.author}
-                  </span>
-                  <span className="shrink-0">· {formatAgo(c.time * 1000)}</span>
-                  {c.refs && <span className="truncate font-mono text-accent-text">{c.refs.replace(/^HEAD -> /, "")}</span>}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-        {commits.length === pages * 50 && (
-          <button type="button" className="w-full py-2 text-xs font-medium text-accent-text hover:underline" onClick={() => setPages((p) => p + 1)}>
-            Show older commits
-          </button>
-        )}
-      </div>
-      <div className="flex min-h-64 min-w-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-terminal">
-        {open ? (
-          <DiffText text={show.data} loading={show.isLoading} error={show.isError ? String(show.error) : null} />
-        ) : (
-          <div className="flex flex-1 items-center justify-center p-4 text-sm text-slate-400">Select a commit to see what it changed.</div>
+    <div className="selectable min-h-0 flex-1 overflow-auto font-mono text-[12px] leading-5" aria-label="Changes">
+      <div className="min-w-max">
+        {rows.map((row, i) =>
+          row.kind === "hunk" ? (
+            <div key={i} className="flex border-y border-line/60 bg-surface-2/70 py-0.5 text-[11px] text-muted">
+              <span className={gutter}>⋯</span>
+              <span className={gutter} />
+              <span className="px-3">{row.text}</span>
+            </div>
+          ) : row.kind === "note" ? (
+            <div key={i} className="px-3 py-0.5 text-[11px] text-muted italic">
+              {row.text}
+            </div>
+          ) : (
+            <div key={i} className={clsx("flex", row.kind === "add" && "bg-ok/12", row.kind === "del" && "bg-danger/12")}>
+              <span className={clsx(gutter, row.kind === "del" && "bg-danger/10")}>{row.old ?? ""}</span>
+              <span className={clsx(gutter, row.kind === "add" && "bg-ok/10")}>{row.new ?? ""}</span>
+              <span className="sr-only">{row.kind === "add" ? "added" : row.kind === "del" ? "removed" : ""}</span>
+              <span className="pr-4 pl-3 whitespace-pre text-fg">{row.text || " "}</span>
+            </div>
+          ),
         )}
       </div>
     </div>
   );
 }
 
-function Branches({ site, current, onChanged }: { site: Site; current: string | null; onChanged: () => void }) {
+function History({ site }: { site: Site }) {
+  const [pages, setPages] = useState(1);
+  const log = useQuery({ queryKey: ["git-log", site.name, pages], queryFn: () => api.gitLog(site.name, 0, pages * 50) });
+  const commits = log.data ?? [];
+  const [open, setOpen] = useState<string | null>(null);
+  // The newest commit opens by default, so the right side never starts empty.
+  const shown = open ?? commits[0]?.hash ?? null;
+  return (
+    <div className={panes}>
+      <div className="min-h-64 overflow-y-auto rounded-lg border border-line bg-surface">
+        {log.isLoading && <p className="p-4 text-sm text-muted">Loading history…</p>}
+        {!log.isLoading && commits.length === 0 && <p className="p-6 text-center text-sm text-muted">No commits yet.</p>}
+        <ol>
+          {commits.map((c, i) => (
+            <li key={c.hash} className="relative">
+              {/* A thin line through the dots reads as a timeline. */}
+              {i < commits.length - 1 && <span className="absolute top-5 bottom-0 left-[1.1rem] w-px bg-line" aria-hidden />}
+              <button
+                type="button"
+                onClick={() => setOpen(c.hash)}
+                aria-current={c.hash === shown ? "true" : undefined}
+                className={clsx("relative flex w-full gap-3 px-3 py-2 text-left", c.hash === shown ? "bg-accent-soft/50" : "hover:bg-surface-2")}
+              >
+                <span className={clsx("mt-1.5 size-2.5 shrink-0 rounded-full border-2", i === 0 ? "border-accent bg-accent" : "border-muted bg-surface")} aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium text-fg">{c.subject}</span>
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted">
+                    <span className="truncate" title={c.email}>
+                      {c.author}
+                    </span>
+                    <span className="shrink-0" title={new Date(c.time * 1000).toLocaleString()}>
+                      · {formatAgo(c.time * 1000)}
+                    </span>
+                    <span className="ml-auto shrink-0 font-mono">{c.short}</span>
+                  </span>
+                  {c.refs && <Refs refs={c.refs} />}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ol>
+        {commits.length === pages * 50 && (
+          <button type="button" className="w-full py-2 text-xs font-medium text-accent-text hover:underline" onClick={() => setPages((p) => p + 1)}>
+            Show older commits
+          </button>
+        )}
+      </div>
+      <div className="flex min-h-64 min-w-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
+        {shown ? <CommitView key={shown} site={site} hash={shown} onOpen={setOpen} /> : <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted">No commits yet.</div>}
+      </div>
+    </div>
+  );
+}
+
+/** Branch and tag names on a commit, as small badges. */
+function Refs({ refs }: { refs: string }) {
+  const names = refs
+    .split(",")
+    .map((r) => r.trim().replace(/^HEAD -> /, ""))
+    .filter((r) => r && r !== "HEAD");
+  return (
+    <span className="mt-1 flex flex-wrap gap-1">
+      {names.map((r) => (
+        <span key={r} className={clsx("rounded px-1.5 font-mono text-[10px]", r.startsWith("tag: ") ? "bg-warn/15 text-warn" : r.includes("/") ? "bg-surface-2 text-muted" : "bg-accent-soft text-accent-text")}>
+          {r.replace(/^tag: /, "tag ")}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** One commit: who and when, its full message, the files it changed with counts, and a file's diff. */
+function CommitView({ site, hash, onOpen }: { site: Site; hash: string; onOpen: (hash: string) => void }) {
+  const notify = useAppStore((s) => s.notify);
+  const details = useQuery({ queryKey: ["git-commit", site.name, hash], queryFn: () => api.gitCommitDetails(site.name, hash) });
+  const [file, setFile] = useState<string | null>(null);
+  const d = details.data;
+  if (details.isLoading) return <p className="p-4 text-sm text-muted">Loading the commit…</p>;
+  if (!d) return <p className="p-4 text-sm text-danger-text">{String(details.error)}</p>;
+  const copy = (text: string, what: string) =>
+    navigator.clipboard.writeText(text).then(
+      () => notify("info", `Copied ${what}`),
+      () => notify("error", "Couldn't copy"),
+    );
+  if (file) {
+    const f = d.files.find((x) => x.path === file);
+    return (
+      <>
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-2 py-1.5">
+          <button type="button" onClick={() => setFile(null)} className="flex min-w-0 items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-accent-text hover:bg-surface-2">
+            <ChevronLeft size={13} className="shrink-0" /> <span className="truncate">{d.subject}</span>
+          </button>
+        </div>
+        <DiffTitle path={file} from={f?.from} note={f ? letters[f.status] : undefined} extra={f && <LineCounts add={f.additions} del={f.deletions} binary={f.binary} />} />
+        <CommitFileDiff site={site} hash={hash} path={file} />
+      </>
+    );
+  }
+  const totals = d.files.reduce((t, f) => ({ add: t.add + f.additions, del: t.del + f.deletions }), { add: 0, del: 0 });
+  const sameCommitter = d.committer === d.author && d.committerEmail === d.authorEmail;
+  const when = (t: number) => `${new Date(t * 1000).toLocaleString()} (${formatAgo(t * 1000)})`;
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="space-y-3 border-b border-line p-4">
+        <div>
+          <h4 className="text-base font-semibold text-fg">{d.subject}</h4>
+          {d.body && <p className="selectable mt-1.5 text-sm whitespace-pre-wrap text-muted">{d.body}</p>}
+          {d.refs && <Refs refs={d.refs} />}
+        </div>
+        <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+          <dt className="text-muted">Author</dt>
+          <dd className="truncate text-fg">
+            {d.author} <span className="text-muted">&lt;{d.authorEmail}&gt;</span>
+          </dd>
+          <dt className="text-muted">Date</dt>
+          <dd className="text-fg">{when(d.authorTime)}</dd>
+          {!sameCommitter && (
+            <>
+              <dt className="text-muted">Committed by</dt>
+              <dd className="truncate text-fg">
+                {d.committer} <span className="text-muted">&lt;{d.committerEmail}&gt;</span>, {formatAgo(d.committerTime * 1000)}
+              </dd>
+            </>
+          )}
+          <dt className="text-muted">Commit</dt>
+          <dd className="flex min-w-0 items-center gap-1.5 font-mono text-fg">
+            <span className="selectable truncate">{d.hash}</span>
+            <button type="button" onClick={() => copy(d.hash, "the commit hash")} className="shrink-0 rounded p-0.5 text-muted hover:text-fg" aria-label="Copy the commit hash" title="Copy">
+              <Copy size={12} />
+            </button>
+          </dd>
+          <dt className="text-muted">{d.parents.length > 1 ? "Parents" : "Parent"}</dt>
+          <dd className="flex flex-wrap gap-2 font-mono">
+            {d.parents.length === 0 ? (
+              <span className="font-sans text-muted">None: the first commit</span>
+            ) : (
+              d.parents.map((p) => (
+                <button key={p} type="button" onClick={() => onOpen(p)} className="text-accent-text hover:underline" title="Open this commit">
+                  {p.slice(0, 8)}
+                </button>
+              ))
+            )}
+          </dd>
+        </dl>
+      </div>
+      <div className="flex items-center gap-3 px-4 pt-3 pb-1 text-xs text-muted">
+        <span className="font-semibold text-fg">
+          {d.files.length} {d.files.length === 1 ? "file" : "files"} changed
+        </span>
+        <LineCounts add={totals.add} del={totals.del} />
+        {d.parents.length > 1 && <span>(compared with the first parent)</span>}
+      </div>
+      <ul className="pb-2">
+        {d.files.map((f) => (
+          <li key={f.path}>
+            <button type="button" onClick={() => setFile(f.path)} className="flex w-full items-baseline gap-2 px-4 py-1 text-left hover:bg-surface-2" title={f.from ? `${f.from} → ${f.path}: show the changes` : `${f.path}: show the changes`}>
+              <span className={clsx("w-3 shrink-0 font-mono text-[11px] font-bold", letterColor(f.status))} title={letters[f.status]}>
+                {f.status}
+              </span>
+              <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                <FileName path={f.path} />
+              </span>
+              <LineCounts add={f.additions} del={f.deletions} binary={f.binary} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CommitFileDiff({ site, hash, path }: { site: Site; hash: string; path: string }) {
+  const diff = useQuery({ queryKey: ["git-commit", site.name, hash, path], queryFn: () => api.gitCommitFileDiff(site.name, hash, path) });
+  return <DiffView text={diff.data} loading={diff.isLoading} error={diff.isError ? String(diff.error) : null} />;
+}
+
+/** "+12 −3" with a five-block bar, as code hosts show a change's size. */
+function LineCounts({ add, del, binary }: { add: number; del: number; binary?: boolean }) {
+  if (binary) return <span className="shrink-0 text-[11px] text-muted">binary</span>;
+  const total = add + del;
+  const green = total ? Math.round((add / total) * 5) : 0;
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums">
+      <span className="text-ok">+{add}</span>
+      <span className="text-danger-text">−{del}</span>
+      <span className="flex gap-px" aria-hidden>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <span key={i} className={clsx("size-1.5 rounded-[1px]", !total ? "bg-line" : i < green ? "bg-ok" : "bg-danger")} />
+        ))}
+      </span>
+    </span>
+  );
+}
+
+function Branches({ site, current, upstream, onChanged }: { site: Site; current: string | null; upstream: string | null; onChanged: () => void }) {
   const notify = useAppStore((s) => s.notify);
   const onError = (e: unknown) => notify("error", String(e));
   const list = useQuery({ queryKey: ["git-branches", site.name], queryFn: () => api.gitBranches(site.name) });
@@ -476,6 +718,7 @@ function Branches({ site, current, onChanged }: { site: Site; current: string | 
       if (action.kind === "rename") setRenaming(null);
       if (action.kind === "delete") setDeleting(null);
       if (action.kind === "merge") notify("info", `Merged ${action.branch} into ${current}`);
+      if (action.kind === "setUpstream") notify("info", `${current} now tracks ${action.upstream}`);
       onChanged();
       list.refetch();
     },
@@ -487,7 +730,8 @@ function Branches({ site, current, onChanged }: { site: Site; current: string | 
     },
   });
   const local = (list.data ?? []).filter((b) => !b.remote);
-  const remote = (list.data ?? []).filter((b) => b.remote && !local.some((l) => l.upstream === b.name));
+  const remoteAll = (list.data ?? []).filter((b) => b.remote);
+  const remote = remoteAll.filter((b) => !local.some((l) => l.upstream === b.name));
 
   const row = (b: Branch) => (
     <li key={b.name} className="flex flex-wrap items-center gap-2 border-b border-line/60 px-3 py-2 last:border-0">
@@ -510,10 +754,11 @@ function Branches({ site, current, onChanged }: { site: Site; current: string | 
           </form>
         ) : (
           <>
-            <span className={clsx("block truncate font-mono text-sm", b.current ? "font-bold text-fg" : "text-fg")}>
-              {b.current && <Check size={12} className="mr-1 inline text-ok" />}
+            <span className={clsx("flex items-center gap-1.5 truncate font-mono text-sm text-fg", b.current && "font-bold")}>
+              {b.current && <Check size={12} className="text-ok" aria-label="Current branch" />}
               {b.name}
-              {b.track && <span className="ml-2 font-sans text-[11px] text-muted">{b.track}</span>}
+              {b.upstream && <span className="truncate font-sans text-[11px] font-normal text-muted">→ {b.upstream}</span>}
+              {b.track && <span className="font-sans text-[11px] font-normal text-warn">{b.track.replace(/[[\]]/g, "")}</span>}
             </span>
             <span className="block truncate text-[11px] text-muted">
               {b.subject} · {formatAgo(b.time * 1000)}
@@ -548,29 +793,49 @@ function Branches({ site, current, onChanged }: { site: Site; current: string | 
 
   return (
     <div className="space-y-4">
-      <form
-        className="flex flex-wrap gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          act.mutate({ kind: "create", branch: name.trim(), from: null, switch: true });
-        }}
-      >
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="new-branch-name" aria-label="New branch name" className={clsx(inputClass.replace("w-full", ""), "min-w-48 flex-1 font-mono")} />
-        <Button type="submit" variant="primary" disabled={!name.trim() || act.isPending} title={`Create it from ${current ?? "HEAD"} and switch to it`}>
-          <Plus size={14} /> Create branch
-        </Button>
-      </form>
+      <div className="flex flex-wrap items-end gap-3">
+        <form
+          className="flex min-w-64 flex-1 gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            act.mutate({ kind: "create", branch: name.trim(), from: null, switch: true });
+          }}
+        >
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="new-branch-name" aria-label="New branch name" className={clsx(inputClass, "font-mono")} />
+          <Button type="submit" variant="primary" disabled={!name.trim() || act.isPending} title={`Create it from ${current ?? "HEAD"} and switch to it`}>
+            <Plus size={14} /> Create branch
+          </Button>
+        </form>
+        {current && remoteAll.length > 0 && (
+          <label className="flex items-center gap-2 text-xs text-muted">
+            {current} tracks
+            <select
+              value={upstream ?? ""}
+              onChange={(e) => e.target.value && act.mutate({ kind: "setUpstream", upstream: e.target.value })}
+              className={clsx(inputClass.replace("w-full", ""), "w-48 py-1.5 font-mono text-xs")}
+              aria-label={`Remote branch ${current} tracks`}
+            >
+              {!upstream && <option value="">nothing yet</option>}
+              {remoteAll.map((b) => (
+                <option key={b.name} value={b.name}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
       {list.isLoading && <p className="text-sm text-muted">Loading branches…</p>}
       {local.length > 0 && (
         <section>
           <h4 className="px-1 pb-1 text-[11px] font-bold tracking-wider text-muted uppercase">Local</h4>
-          <ul className="overflow-hidden rounded-lg border border-line">{local.map(row)}</ul>
+          <ul className="overflow-hidden rounded-lg border border-line bg-surface">{local.map(row)}</ul>
         </section>
       )}
       {remote.length > 0 && (
         <section>
-          <h4 className="px-1 pb-1 text-[11px] font-bold tracking-wider text-muted uppercase">Remote only</h4>
-          <ul className="overflow-hidden rounded-lg border border-line">{remote.map(row)}</ul>
+          <h4 className="px-1 pb-1 text-[11px] font-bold tracking-wider text-muted uppercase">Only on the remote</h4>
+          <ul className="overflow-hidden rounded-lg border border-line bg-surface">{remote.map(row)}</ul>
         </section>
       )}
       {deleting && (
@@ -597,136 +862,322 @@ function Branches({ site, current, onChanged }: { site: Site; current: string | 
   );
 }
 
-function RemotesAndIdentity({
-  site,
-  remotes,
-  identity,
-  onChanged,
-}: {
-  site: Site;
-  remotes: { name: string; url: string }[];
-  identity: { name: string | null; email: string | null; local: boolean };
-  onChanged: () => void;
-}) {
+/** Hosts offered when adding a remote by owner/repository. */
+const hosts = [
+  { id: "github.com", label: "GitHub" },
+  { id: "gitlab.com", label: "GitLab" },
+  { id: "bitbucket.org", label: "Bitbucket" },
+];
+
+/** https://host/owner/repo.git ⇄ git@host:owner/repo.git; null when the URL is neither. */
+export function convertUrl(url: string): { url: string; to: "SSH" | "HTTPS" } | null {
+  const https = /^https:\/\/(?:[^@/]+@)?([^/]+)\/(.+?)(?:\.git)?\/?$/.exec(url);
+  if (https) return { url: `git@${https[1]}:${https[2]}.git`, to: "SSH" };
+  const ssh = /^(?:ssh:\/\/)?git@([^:/]+)[:/](.+?)(?:\.git)?$/.exec(url);
+  if (ssh) return { url: `https://${ssh[1]}/${ssh[2]}.git`, to: "HTTPS" };
+  return null;
+}
+
+const isSsh = (url: string) => /^(ssh:\/\/|[\w.-]+@[\w.-]+:)/.test(url);
+
+function RemotesAndSettings({ site, status, onChanged }: { site: Site; status: GitStatus; onChanged: () => void }) {
   const notify = useAppStore((s) => s.notify);
   const onError = (e: unknown) => notify("error", String(e));
-  const [adding, setAdding] = useState({ name: remotes.length ? "" : "origin", url: "" });
-  const [editing, setEditing] = useState<{ name: string; url: string } | null>(null);
-  const [who, setWho] = useState({ name: identity.local ? (identity.name ?? "") : "", email: identity.local ? (identity.email ?? "") : "" });
+  const remotes = status.remotes;
+  const identity = status.identity;
   const remote = useMutation({
     mutationFn: (action: Parameters<typeof api.gitRemote>[1]) => api.gitRemote(site.name, action),
-    onSuccess: (_, action) => {
-      if (action.kind === "add") setAdding({ name: "", url: "" });
-      if (action.kind === "setUrl") setEditing(null);
-      onChanged();
-    },
+    onSuccess: onChanged,
     onError,
   });
+  const [who, setWho] = useState({ name: identity.local ? (identity.name ?? "") : "", email: identity.local ? (identity.email ?? "") : "" });
   const saveWho = useMutation({
-    mutationFn: () => api.gitSetIdentity(site.name, who.name, who.email),
-    onSuccess: () => {
-      notify("info", who.name || who.email ? "This repository now commits as you set" : "This repository uses your global Git identity again");
+    mutationFn: (v: { name: string; email: string }) => api.gitSetIdentity(site.name, v.name, v.email),
+    onSuccess: (_, v) => {
+      notify("info", v.name || v.email ? "This repository now commits as you set" : "This repository uses your global Git identity again");
       onChanged();
     },
     onError,
   });
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <section className="space-y-3">
+    <div className="grid gap-4 xl:grid-cols-2">
+      <section className="space-y-3 rounded-lg border border-line bg-surface p-4">
         <h4 className="text-sm font-semibold text-fg">Remotes</h4>
-        {remotes.length === 0 && <p className="text-sm text-muted">No remote yet. Add one to push this project to GitHub, GitLab or a server.</p>}
+        {remotes.length === 0 && <p className="text-xs text-muted">No remote yet. Add one to push this project to GitHub, GitLab, Bitbucket or your own server.</p>}
         <ul className="space-y-2">
           {remotes.map((r) => (
-            <li key={r.name} className="rounded-lg border border-line p-3">
-              {editing?.name === r.name ? (
-                <form
-                  className="flex gap-2"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    remote.mutate({ kind: "setUrl", name: r.name, url: editing.url });
-                  }}
-                >
-                  <input autoFocus value={editing.url} onChange={(e) => setEditing({ ...editing, url: e.target.value })} className={clsx(inputClass, "font-mono")} aria-label={`${r.name} URL`} />
-                  <Button size="sm" type="submit" disabled={!editing.url.trim() || remote.isPending}>
-                    Save
-                  </Button>
-                  <Button size="sm" variant="ghost" type="button" onClick={() => setEditing(null)} aria-label="Cancel">
-                    <X size={13} />
-                  </Button>
-                </form>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold text-fg">{r.name}</span>
-                    <span className="block truncate font-mono text-xs text-muted" title={r.url}>
-                      {r.url}
-                    </span>
-                  </span>
-                  <Button size="sm" variant="ghost" onClick={() => setEditing({ name: r.name, url: r.url })} aria-label={`Change ${r.name}'s URL`} title="Change URL">
-                    <Pencil size={13} />
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => remote.mutate({ kind: "remove", name: r.name })} aria-label={`Remove ${r.name}`} title="Remove (the remote repository itself isn't touched)">
-                    <Trash2 size={13} />
-                  </Button>
-                </div>
-              )}
-            </li>
+            <RemoteRow key={r.name} remote={r} busy={remote.isPending} onAction={(a) => remote.mutateAsync(a).catch(() => {})} />
           ))}
         </ul>
-        <form
-          className="flex flex-wrap gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            remote.mutate({ kind: "add", name: adding.name.trim(), url: adding.url.trim() });
-          }}
-        >
-          <input value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} placeholder="origin" aria-label="Remote name" className={clsx(inputClass.replace("w-full", ""), "w-28 font-mono")} />
-          <input value={adding.url} onChange={(e) => setAdding({ ...adding, url: e.target.value })} placeholder="git@github.com:you/repo.git" aria-label="Remote URL" className={clsx(inputClass.replace("w-full", ""), "min-w-48 flex-1 font-mono")} />
-          <Button type="submit" disabled={!adding.name.trim() || !adding.url.trim() || remote.isPending}>
-            <Plus size={14} /> Add
-          </Button>
-        </form>
-        <p className="text-[11px] text-muted">Pushing uses your Git's credential helper or SSH key; LampRabit never stores passwords or tokens.</p>
+        <AddRemote taken={remotes.map((r) => r.name)} busy={remote.isPending} onAdd={(name, url) => remote.mutate({ kind: "add", name, url })} />
+        <p className="text-[11px] text-muted">HTTPS uses your Git's credential helper (it may ask you to sign in once); SSH uses your SSH key. LampRabit never stores passwords or tokens.</p>
       </section>
 
-      <section className="space-y-3">
-        <h4 className="flex items-center gap-2 text-sm font-semibold text-fg">
-          <UserRound size={15} /> Identity for this repository
-        </h4>
-        <p className="text-xs text-muted">
-          {identity.local ? "This repository commits as the name and email below." : identity.name || identity.email ? `It commits as ${identity.name ?? "?"} <${identity.email ?? "?"}> from your global Git settings. Set a different one for this repository only:` : "Git has no name or email yet, so commits will fail. Set them for this repository:"}
-        </p>
-        <form
-          className="space-y-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            saveWho.mutate();
-          }}
-        >
-          <input value={who.name} onChange={(e) => setWho({ ...who, name: e.target.value })} placeholder={identity.name ?? "Your Name"} aria-label="Name" className={inputClass} />
-          <input value={who.email} onChange={(e) => setWho({ ...who, email: e.target.value })} placeholder={identity.email ?? "you@example.com"} type="email" aria-label="Email" className={inputClass} />
-          <div className="flex gap-2">
-            <Button type="submit" variant="primary" disabled={saveWho.isPending}>
-              Save
-            </Button>
-            {identity.local && (
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setWho({ name: "", email: "" });
-                  api.gitSetIdentity(site.name, "", "").then(onChanged, onError);
-                }}
-              >
-                <RotateCcw size={13} /> Use the global identity
+      <div className="space-y-4">
+        <RepoSettingsCard site={site} onChanged={onChanged} />
+        <section className="space-y-3 rounded-lg border border-line bg-surface p-4">
+          <h4 className="flex items-center gap-2 text-sm font-semibold text-fg">
+            <UserRound size={15} /> Identity for this repository
+          </h4>
+          <p className="text-xs text-muted">
+            {identity.local
+              ? "This repository commits as the name and email below."
+              : identity.name || identity.email
+                ? `Commits are by ${identity.name ?? "?"} <${identity.email ?? "?"}> from your global Git settings. Set another for this repository only:`
+                : "Git has no name or email yet, so commits will fail. Set them for this repository:"}
+          </p>
+          <form
+            className="grid gap-2 sm:grid-cols-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveWho.mutate(who);
+            }}
+          >
+            <input value={who.name} onChange={(e) => setWho({ ...who, name: e.target.value })} placeholder={identity.name ?? "Your Name"} aria-label="Name" className={inputClass} />
+            <input value={who.email} onChange={(e) => setWho({ ...who, email: e.target.value })} placeholder={identity.email ?? "you@example.com"} type="email" aria-label="Email" className={inputClass} />
+            <div className="flex gap-2 sm:col-span-2">
+              <Button type="submit" size="sm" variant="primary" disabled={saveWho.isPending}>
+                Save
               </Button>
-            )}
-          </div>
-        </form>
-        <p className="text-[11px] text-muted">Only this repository's config changes (git config --local); your global Git settings are left alone.</p>
-      </section>
+              {identity.local && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setWho({ name: "", email: "" });
+                    saveWho.mutate({ name: "", email: "" });
+                  }}
+                >
+                  <RotateCcw size={13} /> Use the global identity
+                </Button>
+              )}
+            </div>
+          </form>
+          <p className="text-[11px] text-muted">Only this repository's config changes; your global Git settings are left alone.</p>
+        </section>
+      </div>
     </div>
+  );
+}
+
+function RemoteRow({ remote: r, busy, onAction }: { remote: GitStatus["remotes"][number]; busy: boolean; onAction: (a: Parameters<typeof api.gitRemote>[1]) => Promise<unknown> }) {
+  const [editing, setEditing] = useState<{ name: string; url: string; pushUrl: string; separate: boolean } | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const convert = convertUrl(r.url);
+  if (editing) {
+    // Rename first, then the URLs under the new name; each step waits for the one before.
+    const save = async () => {
+      const name = editing.name.trim();
+      if (name !== r.name) await onAction({ kind: "rename", from: r.name, to: name });
+      if (editing.url.trim() !== r.url) await onAction({ kind: "setUrl", name, url: editing.url.trim() });
+      const push = editing.separate ? editing.pushUrl.trim() : "";
+      if (push !== (r.pushUrl ?? "")) await onAction({ kind: "setPushUrl", name, url: push || null });
+      setEditing(null);
+    };
+    return (
+      <li className="space-y-2 rounded-lg border border-accent/40 p-3">
+        <label className="block text-xs text-muted">
+          Name
+          <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} className={clsx(inputClass, "mt-1 font-mono")} />
+        </label>
+        <label className="block text-xs text-muted">
+          {editing.separate ? "Fetch URL" : "URL"}
+          <input value={editing.url} onChange={(e) => setEditing({ ...editing, url: e.target.value })} className={clsx(inputClass, "mt-1 font-mono")} />
+        </label>
+        <label className="flex items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={editing.separate}
+            onChange={(e) => setEditing({ ...editing, separate: e.target.checked, pushUrl: editing.pushUrl || convertUrl(editing.url)?.url || editing.url })}
+            className="size-3.5 accent-[var(--accent)]"
+          />
+          Push to a different URL (for example fetch over HTTPS, push over SSH)
+        </label>
+        {editing.separate && (
+          <label className="block text-xs text-muted">
+            Push URL
+            <input value={editing.pushUrl} onChange={(e) => setEditing({ ...editing, pushUrl: e.target.value })} className={clsx(inputClass, "mt-1 font-mono")} />
+          </label>
+        )}
+        <div className="flex gap-2">
+          <Button size="sm" variant="primary" onClick={() => void save()} disabled={busy || !editing.name.trim() || !editing.url.trim()}>
+            Save
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+            Cancel
+          </Button>
+        </div>
+      </li>
+    );
+  }
+  return (
+    <li className="rounded-lg border border-line p-3">
+      <div className="flex items-start gap-1">
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2 text-sm font-semibold text-fg">
+            {r.name}
+            <span className="rounded bg-surface-2 px-1.5 text-[10px] font-medium text-muted">{isSsh(r.url) ? "SSH" : "HTTPS"}</span>
+          </span>
+          <span className="block truncate font-mono text-xs text-muted" title={r.url}>
+            {r.url}
+          </span>
+          {r.pushUrl && (
+            <span className="block truncate font-mono text-xs text-muted" title={r.pushUrl}>
+              push: {r.pushUrl}
+            </span>
+          )}
+        </span>
+        {convert && (
+          <Button size="sm" variant="ghost" onClick={() => void onAction({ kind: "setUrl", name: r.name, url: convert.url })} disabled={busy} title={`Change to ${convert.url}`}>
+            {convert.to === "SSH" ? <KeyRound size={13} /> : <ArrowLeftRight size={13} />} Use {convert.to}
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={() => setEditing({ name: r.name, url: r.url, pushUrl: r.pushUrl ?? "", separate: !!r.pushUrl })} aria-label={`Edit ${r.name}`} title="Rename, change URLs">
+          <Pencil size={13} />
+        </Button>
+        {removing ? (
+          <>
+            <Button size="sm" variant="danger" onClick={() => void onAction({ kind: "remove", name: r.name })} disabled={busy}>
+              Remove
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setRemoving(false)} aria-label="Keep it">
+              <X size={13} />
+            </Button>
+          </>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setRemoving(true)} aria-label={`Remove ${r.name}`} title="Remove (the repository on the server isn't touched)">
+            <Trash2 size={13} />
+          </Button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** Add a remote by host and owner/repository over HTTPS or SSH, or by pasting any URL. */
+function AddRemote({ taken, busy, onAdd }: { taken: string[]; busy: boolean; onAdd: (name: string, url: string) => void }) {
+  const [name, setName] = useState(taken.includes("origin") ? "" : "origin");
+  const [protocol, setProtocol] = useState<"https" | "ssh">("https");
+  const [host, setHost] = useState("github.com");
+  const [repo, setRepo] = useState("");
+  const [custom, setCustom] = useState("");
+  // A pasted full URL in the owner/repo box is taken as it is.
+  const pasted = /^(https?:\/\/|ssh:\/\/|[\w.-]+@[\w.-]+:)/.test(repo.trim());
+  const path = repo.trim().replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
+  const url = host === "custom" ? custom.trim() : pasted ? repo.trim() : path ? (protocol === "ssh" ? `git@${host}:${path}.git` : `https://${host}/${path}.git`) : "";
+  const nameTaken = taken.includes(name.trim());
+  const ok = !!name.trim() && !nameTaken && !!url && (host === "custom" || pasted || /^[\w.-]+\/[\w./-]+$/.test(path));
+  return (
+    <form
+      className="space-y-2 rounded-lg bg-surface-2/50 p-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!ok) return;
+        onAdd(name.trim(), url);
+        setRepo("");
+        setCustom("");
+        setName("");
+      }}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-fg">Add a remote</span>
+        <span className="flex-1" />
+        <div className="flex rounded-md border border-line bg-surface p-0.5 text-xs" role="radiogroup" aria-label="Protocol">
+          {(["https", "ssh"] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              role="radio"
+              aria-checked={protocol === p}
+              onClick={() => setProtocol(p)}
+              disabled={host === "custom" || pasted}
+              className={clsx("rounded px-2 py-0.5 font-medium disabled:opacity-50", protocol === p && host !== "custom" && !pasted ? "bg-accent text-accent-fg" : "text-muted hover:text-fg")}
+              title={p === "https" ? "Signs in through your Git credential helper" : "Uses your SSH key"}
+            >
+              {p.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-[6rem_8rem_minmax(0,1fr)]">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="origin" aria-label="Remote name" className={clsx(inputClass, "font-mono")} />
+        <select value={host} onChange={(e) => setHost(e.target.value)} aria-label="Host" className={inputClass}>
+          {hosts.map((h) => (
+            <option key={h.id} value={h.id}>
+              {h.label}
+            </option>
+          ))}
+          <option value="custom">Other URL…</option>
+        </select>
+        {host === "custom" ? (
+          <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="https://git.example.com/team/repo.git or git@host:team/repo.git" aria-label="Remote URL" className={clsx(inputClass, "font-mono")} />
+        ) : (
+          <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/repository (or paste a URL)" aria-label="Owner and repository" className={clsx(inputClass, "font-mono")} />
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <span className={clsx("min-w-0 flex-1 truncate font-mono text-[11px]", nameTaken ? "text-warn" : "text-muted")} title={url}>
+          {nameTaken ? `A remote called ${name.trim()} exists already` : url}
+        </span>
+        <Button type="submit" size="sm" disabled={!ok || busy}>
+          <Plus size={13} /> Add
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** Pull mode, pruning and first-push tracking for this repository only. */
+function RepoSettingsCard({ site, onChanged }: { site: Site; onChanged: () => void }) {
+  const notify = useAppStore((s) => s.notify);
+  const settings = useQuery({ queryKey: ["git-repo-settings", site.name], queryFn: () => api.gitRepoSettings(site.name) });
+  const save = useMutation({
+    mutationFn: (next: GitRepoSettings) => api.gitSetRepoSettings(site.name, next),
+    onSuccess: () => {
+      settings.refetch();
+      onChanged();
+    },
+    onError: (e) => notify("error", String(e)),
+  });
+  const s = settings.data;
+  return (
+    <section className="space-y-3 rounded-lg border border-line bg-surface p-4">
+      <h4 className="text-sm font-semibold text-fg">Sync settings</h4>
+      {!s ? (
+        <p className="text-xs text-muted">Loading…</p>
+      ) : (
+        <div className="space-y-2.5 text-sm">
+          <label className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              <span className="block text-fg">When pulling</span>
+              <span className="block text-[11px] text-muted">How your commits and the remote's are combined.</span>
+            </span>
+            <select value={s.pull ?? ""} onChange={(e) => save.mutate({ ...s, pull: (e.target.value || null) as GitRepoSettings["pull"] })} className={clsx(inputClass.replace("w-full", ""), "w-56 py-1.5")} disabled={save.isPending}>
+              <option value="">Your global Git setting</option>
+              <option value="merge">Merge (a merge commit when needed)</option>
+              <option value="rebase">Rebase (your commits on top)</option>
+              <option value="ff-only">Fast-forward only (stop if they differ)</option>
+            </select>
+          </label>
+          <label className="flex items-start gap-2">
+            <input type="checkbox" checked={s.prune} onChange={(e) => save.mutate({ ...s, prune: e.target.checked })} className="mt-1 size-3.5 accent-[var(--accent)]" disabled={save.isPending} />
+            <span>
+              <span className="block text-fg">Clean up deleted remote branches on fetch</span>
+              <span className="block text-[11px] text-muted">Branches deleted on the server disappear here too (fetch.prune).</span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input type="checkbox" checked={s.autoSetupRemote} onChange={(e) => save.mutate({ ...s, autoSetupRemote: e.target.checked })} className="mt-1 size-3.5 accent-[var(--accent)]" disabled={save.isPending} />
+            <span>
+              <span className="block text-fg">Track new branches on their first push</span>
+              <span className="block text-[11px] text-muted">A plain git push from the terminal publishes a new branch too (push.autoSetupRemote).</span>
+            </span>
+          </label>
+        </div>
+      )}
+    </section>
   );
 }
 

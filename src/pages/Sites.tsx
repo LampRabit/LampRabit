@@ -230,7 +230,7 @@ export default function Sites() {
           </Card>
         )
       ) : (
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(240px,290px)_minmax(0,1fr)]">
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
           <Card className="min-w-0 overflow-hidden lg:sticky lg:top-4">
             <div className="space-y-2.5 border-b border-line p-3">
               <div className="flex items-center justify-between px-1">

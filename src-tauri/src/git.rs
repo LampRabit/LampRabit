@@ -69,6 +69,8 @@ pub struct Identity {
 pub struct Remote {
     pub name: String,
     pub url: String,
+    /// Where pushes go when it differs from `url` (remote.<name>.pushurl).
+    pub push_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -105,6 +107,8 @@ pub enum BranchAction {
     Rename { from: String, to: String },
     Delete { branch: String, force: bool },
     Merge { branch: String },
+    /// The remote branch the current one tracks (for pull, push and ahead/behind).
+    SetUpstream { upstream: String },
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
@@ -120,14 +124,60 @@ pub enum Sync {
 pub enum RemoteAction {
     Add { name: String, url: String },
     SetUrl { name: String, url: String },
+    /// A separate URL for pushes; None removes it, so pushes use the fetch URL again.
+    SetPushUrl { name: String, url: Option<String> },
+    Rename { from: String, to: String },
     Remove { name: String },
 }
 
-/// Runs git in `dir`; Ok(stdout) on success, else git's own message (stderr) as the error.
-async fn git(dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
+/// The repository's own settings for syncing (git config --local), as the Remotes view edits them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoSettings {
+    /// How pull combines: "merge", "rebase" or "ff-only"; None follows the global config.
+    pub pull: Option<String>,
+    /// Remove remote branches that are gone on fetch (fetch.prune).
+    pub prune: bool,
+    /// A new branch's first push sets its upstream (push.autoSetupRemote).
+    pub auto_setup_remote: bool,
+}
+
+/// One commit in full, for the History view.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDetails {
+    pub hash: String,
+    pub parents: Vec<String>,
+    pub author: String,
+    pub author_email: String,
+    pub author_time: i64,
+    pub committer: String,
+    pub committer_email: String,
+    pub committer_time: i64,
+    pub refs: String,
+    pub subject: String,
+    pub body: String,
+    pub files: Vec<CommitFile>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitFile {
+    pub path: String,
+    pub from: Option<String>,
+    /// A added, M modified, D deleted, R renamed, C copied, T type changed.
+    pub status: char,
+    pub additions: u32,
+    pub deletions: u32,
+    pub binary: bool,
+}
+
+/// Runs git in `dir` and returns its output whatever the exit code.
+async fn run(dir: &Path, args: &[&str], timeout: Duration) -> Result<std::process::Output> {
     let mut cmd = tokio::process::Command::new("git");
-    // Paths as they are (not "\303\251" escapes), and no editor or pager ever.
-    cmd.args(["-c", "core.quotepath=false", "-c", "color.ui=false", "-c", "protocol.ext.allow=never"])
+    // Paths as they are (not "\303\251" escapes), no colour, no line-ending warnings mixed
+    // into output ("LF will be replaced by CRLF"), and no editor or pager ever.
+    cmd.args(["-c", "core.quotepath=false", "-c", "color.ui=false", "-c", "protocol.ext.allow=never", "-c", "core.safecrlf=false"])
         .args(args)
         .current_dir(dir)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -146,6 +196,12 @@ async fn git(dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
         }
         Ok(r) => r?,
     };
+    Ok(out)
+}
+
+/// Runs git in `dir`; Ok(stdout) on success, else git's own message (stderr) as the error.
+async fn git(dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
+    let out = run(dir, args, timeout).await?;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if out.status.success() {
         return Ok(stdout);
@@ -291,9 +347,12 @@ async fn remotes(dir: &Path) -> Vec<Remote> {
     let mut list: Vec<Remote> = Vec::new();
     for line in out.lines() {
         let mut parts = line.split_whitespace();
-        let (Some(name), Some(url)) = (parts.next(), parts.next()) else { continue };
-        if !list.iter().any(|r| r.name == name) {
-            list.push(Remote { name: name.to_string(), url: crate::facts::without_credentials(url) });
+        let (Some(name), Some(url), kind) = (parts.next(), parts.next(), parts.next()) else { continue };
+        let url = crate::facts::without_credentials(url);
+        match list.iter_mut().find(|r| r.name == name) {
+            Some(r) if kind == Some("(push)") && r.url != url => r.push_url = Some(url),
+            Some(_) => {}
+            None => list.push(Remote { name: name.to_string(), url, push_url: None }),
         }
     }
     list
@@ -330,13 +389,14 @@ fn cut(mut text: String) -> String {
 pub async fn diff(dir: &Path, path: &str, staged: bool, untracked: bool) -> Result<String> {
     check_paths(&[path.to_string()])?;
     if untracked {
-        // --no-index exits with 1 when the files differ, which is always here.
+        // --no-index exits with 1 when the files differ, which is always here: only its
+        // stdout is the diff (stderr may hold warnings that aren't part of the file).
         let empty = if cfg!(windows) { "NUL" } else { "/dev/null" };
-        let out = git(dir, &["diff", "--no-index", "--no-color", "--", empty, path], QUICK).await;
-        return Ok(cut(match out {
-            Ok(text) => text,
-            Err(e) => e.to_string(),
-        }));
+        let out = run(dir, &["diff", "--no-index", "--no-color", "--", empty, path], QUICK).await?;
+        if out.status.code().is_some_and(|c| c > 1) {
+            return Err(Error::msg(String::from_utf8_lossy(&out.stderr).trim().to_string()));
+        }
+        return Ok(cut(String::from_utf8_lossy(&out.stdout).into_owned()));
     }
     let mut args = vec!["diff", "--no-color", "--no-ext-diff"];
     if staged {
@@ -384,7 +444,9 @@ pub async fn discard(dir: &Path, paths: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub async fn commit(dir: &Path, message: &str, amend: bool) -> Result<String> {
+/// Commits what's staged; with `all`, everything changed is staged first (new files too),
+/// for a commit straight from a message without staging by hand.
+pub async fn commit(dir: &Path, message: &str, amend: bool, all: bool) -> Result<String> {
     let message = message.trim();
     if message.is_empty() && !amend {
         return Err(Error::msg("Write a commit message first."));
@@ -392,6 +454,9 @@ pub async fn commit(dir: &Path, message: &str, amend: bool) -> Result<String> {
     let who = identity(dir).await;
     if who.name.is_none() || who.email.is_none() {
         return Err(Error::msg("Git doesn't know who you are yet: set your name and email under Identity, then commit again."));
+    }
+    if all {
+        git(dir, &["add", "--all"], QUICK).await?;
     }
     // The user's hooks and signing settings apply as they would on the command line.
     let mut args = vec!["commit"];
@@ -483,6 +548,12 @@ pub async fn branch(dir: &Path, action: BranchAction) -> Result<String> {
                 }
             })
         }
+        BranchAction::SetUpstream { upstream } => {
+            if upstream.starts_with('-') || upstream.is_empty() {
+                return Err(Error::msg("That isn't a remote branch."));
+            }
+            git(dir, &["branch", &format!("--set-upstream-to={upstream}")], QUICK).await
+        }
         BranchAction::Merge { branch } => {
             if branch.starts_with('-') {
                 return Err(Error::msg("That isn't a branch."));
@@ -537,12 +608,118 @@ pub async fn log(dir: &Path, skip: u32, limit: u32, path: Option<&str>) -> Resul
         .collect())
 }
 
-/// A commit's message and changes.
-pub async fn show(dir: &Path, hash: &str) -> Result<String> {
-    if hash.is_empty() || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+fn check_hash(hash: &str) -> Result<()> {
+    if hash.is_empty() || hash.len() > 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(Error::msg("That isn't a commit."));
     }
-    Ok(cut(git(dir, &["show", "--no-color", "--stat", "--patch", "--format=commit %H%nAuthor: %an <%ae>%nDate:   %ad%n%n%B", hash], QUICK).await?))
+    Ok(())
+}
+
+/// A commit's metadata, message and the files it changed with their line counts. A merge
+/// is compared with its first parent, which is what it brought into the branch.
+pub async fn details(dir: &Path, hash: &str) -> Result<CommitDetails> {
+    check_hash(hash)?;
+    let meta = git(dir, &["show", "-s", "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%D%x1f%s%x1f%b", hash], QUICK).await?;
+    let f: Vec<&str> = meta.splitn(11, '\u{1f}').collect();
+    if f.len() < 11 {
+        return Err(Error::msg("Git didn't describe that commit."));
+    }
+    let numstat = git(dir, &["show", "--format=", "--numstat", "-z", "-M", "--diff-merges=first-parent", hash], QUICK).await?;
+    let names = git(dir, &["show", "--format=", "--name-status", "-z", "-M", "--diff-merges=first-parent", hash], QUICK).await?;
+    Ok(CommitDetails {
+        hash: f[0].trim().to_string(),
+        parents: f[1].split_whitespace().map(str::to_string).collect(),
+        author: f[2].to_string(),
+        author_email: f[3].to_string(),
+        author_time: f[4].parse().unwrap_or(0),
+        committer: f[5].to_string(),
+        committer_email: f[6].to_string(),
+        committer_time: f[7].parse().unwrap_or(0),
+        refs: f[8].to_string(),
+        subject: f[9].to_string(),
+        body: f[10].trim().to_string(),
+        files: parse_commit_files(&numstat, &names),
+    })
+}
+
+/// `--numstat -z` ("12\t3\tpath\0", renames "12\t3\t\0from\0to\0") joined with
+/// `--name-status -z` ("M\0path\0", "R100\0from\0to\0").
+fn parse_commit_files(numstat: &str, names: &str) -> Vec<CommitFile> {
+    let mut files = Vec::new();
+    let mut fields = numstat.split('\0').map(|f| f.trim_start_matches('\n'));
+    while let Some(entry) = fields.next() {
+        if entry.is_empty() {
+            continue;
+        }
+        let mut parts = entry.splitn(3, '\t');
+        let (Some(add), Some(del), Some(path)) = (parts.next(), parts.next(), parts.next()) else { continue };
+        let (path, from) = if path.is_empty() {
+            let from = fields.next().unwrap_or_default().to_string();
+            (fields.next().unwrap_or_default().to_string(), Some(from))
+        } else {
+            (path.to_string(), None)
+        };
+        let binary = add == "-";
+        files.push(CommitFile { path, from, status: 'M', additions: add.parse().unwrap_or(0), deletions: del.parse().unwrap_or(0), binary });
+    }
+    let mut fields = names.split('\0').map(|f| f.trim_start_matches('\n'));
+    while let Some(code) = fields.next() {
+        let Some(status) = code.chars().next() else { continue };
+        let path = if matches!(status, 'R' | 'C') {
+            fields.next();
+            fields.next()
+        } else {
+            fields.next()
+        };
+        if let Some(file) = path.and_then(|p| files.iter_mut().find(|f| f.path == p)) {
+            file.status = status;
+        }
+    }
+    files
+}
+
+/// One file's change in a commit (against its first parent).
+pub async fn commit_file_diff(dir: &Path, hash: &str, path: &str) -> Result<String> {
+    check_hash(hash)?;
+    check_paths(&[path.to_string()])?;
+    Ok(cut(git(dir, &["show", "--format=", "--no-color", "-M", "--diff-merges=first-parent", hash, "--", path], QUICK).await?))
+}
+
+/// The repository's sync settings, from its own config.
+pub async fn repo_settings(dir: &Path) -> RepoSettings {
+    let get = |key: &'static str| async move { git(dir, &["config", "--local", "--get", key], QUICK).await.ok().map(|v| v.trim().to_lowercase()) };
+    let pull = match (get("pull.rebase").await.as_deref(), get("pull.ff").await.as_deref()) {
+        (Some("true" | "merges" | "interactive"), _) => Some("rebase".to_string()),
+        (_, Some("only")) => Some("ff-only".to_string()),
+        (Some("false"), _) => Some("merge".to_string()),
+        _ => None,
+    };
+    RepoSettings { pull, prune: get("fetch.prune").await.as_deref() == Some("true"), auto_setup_remote: get("push.autosetupremote").await.as_deref() == Some("true") }
+}
+
+pub async fn set_repo_settings(dir: &Path, settings: &RepoSettings) -> Result<()> {
+    let set = |key: &'static str, value: Option<&'static str>| async move {
+        match value {
+            Some(v) => git(dir, &["config", "--local", key, v], QUICK).await.map(drop),
+            // Unsetting something that isn't set (exit 5) is fine.
+            None => {
+                let _ = git(dir, &["config", "--local", "--unset", key], QUICK).await;
+                Ok(())
+            }
+        }
+    };
+    let (rebase, ff) = match settings.pull.as_deref() {
+        Some("rebase") => (Some("true"), None),
+        Some("ff-only") => (Some("false"), Some("only")),
+        Some("merge") => (Some("false"), None),
+        None => (None, None),
+        Some(other) => return Err(Error::msg(format!("\"{other}\" isn't a pull mode: use merge, rebase or ff-only."))),
+    };
+    set("pull.rebase", rebase).await?;
+    set("pull.ff", ff).await?;
+    set("fetch.prune", settings.prune.then_some("true")).await?;
+    set("push.autoSetupRemote", settings.auto_setup_remote.then_some("true")).await?;
+    Ok(())
 }
 
 pub async fn sync(dir: &Path, action: Sync) -> Result<String> {
@@ -583,6 +760,23 @@ pub async fn remote(dir: &Path, action: RemoteAction) -> Result<()> {
             check_name(dir, &name, "remote").await?;
             check_url(&url)?;
             git(dir, &["remote", "set-url", "--", &name, url.trim()], QUICK).await?;
+        }
+        RemoteAction::SetPushUrl { name, url } => {
+            check_name(dir, &name, "remote").await?;
+            match url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+                Some(url) => {
+                    check_url(url)?;
+                    git(dir, &["remote", "set-url", "--push", "--", &name, url], QUICK).await?;
+                }
+                None => {
+                    let _ = git(dir, &["config", "--local", "--unset-all", &format!("remote.{name}.pushurl")], QUICK).await;
+                }
+            }
+        }
+        RemoteAction::Rename { from, to } => {
+            check_name(dir, &from, "remote").await?;
+            check_name(dir, &to, "remote").await?;
+            git(dir, &["remote", "rename", "--", &from, &to], QUICK).await?;
         }
         RemoteAction::Remove { name } => {
             check_name(dir, &name, "remote").await?;
@@ -683,6 +877,17 @@ u UU N... 100644 100644 100644 100644 f1 f2 f3 conflict.txt\0\
     }
 
     #[test]
+    fn reads_commit_files() {
+        let numstat = "3\t1\tsrc/a.rs\0-\t-\tlogo.png\0\n5\t0\t\0old/b.rs\0new/b.rs\0";
+        let names = "M\0src/a.rs\0A\0logo.png\0R090\0old/b.rs\0new/b.rs\0";
+        let files = parse_commit_files(numstat, names);
+        assert_eq!(files.len(), 3);
+        assert_eq!((files[0].status, files[0].additions, files[0].deletions), ('M', 3, 1));
+        assert!(files[1].binary && files[1].status == 'A');
+        assert_eq!((files[2].path.as_str(), files[2].from.as_deref(), files[2].status), ("new/b.rs", Some("old/b.rs"), 'R'));
+    }
+
+    #[test]
     fn clone_folder_names() {
         assert_eq!(folder_for("https://github.com/laravel/Laravel.git"), "laravel");
         assert_eq!(folder_for("git@github.com:acme/shop-front.git/"), "shop-front");
@@ -715,7 +920,7 @@ u UU N... 100644 100644 100644 100644 f1 f2 f3 conflict.txt\0\
         stage(&dir, &["a.txt".into()], false).await.unwrap();
         assert_eq!(status(&dir).await.unwrap().files[0].staged, '?');
         stage(&dir, &["a.txt".into()], true).await.unwrap();
-        commit(&dir, "First", false).await.unwrap();
+        commit(&dir, "First", false, false).await.unwrap();
 
         std::fs::write(dir.join("a.txt"), "two\n").unwrap();
         assert!(diff(&dir, "a.txt", false, false).await.unwrap().contains("+two"));
@@ -727,7 +932,7 @@ u UU N... 100644 100644 100644 100644 f1 f2 f3 conflict.txt\0\
         assert!(branch(&dir, BranchAction::Create { branch: "a..b".into(), from: None, switch: false }).await.is_err());
         std::fs::write(dir.join("b.txt"), "b\n").unwrap();
         stage(&dir, &["b.txt".into()], true).await.unwrap();
-        commit(&dir, "Second", false).await.unwrap();
+        commit(&dir, "Second", false, false).await.unwrap();
         let list = branches(&dir).await.unwrap();
         assert!(list.iter().any(|b| b.name == "feature" && b.current));
         branch(&dir, BranchAction::Switch { branch: "main".into() }).await.unwrap();
@@ -736,10 +941,23 @@ u UU N... 100644 100644 100644 100644 f1 f2 f3 conflict.txt\0\
 
         let history = log(&dir, 0, 10, None).await.unwrap();
         assert_eq!(history.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), ["Second", "First"]);
-        assert!(show(&dir, &history[0].hash).await.unwrap().contains("b.txt"));
+        let second = details(&dir, &history[0].hash).await.unwrap();
+        assert_eq!(second.subject, "Second");
+        assert_eq!(second.files, vec![CommitFile { path: "b.txt".into(), from: None, status: 'A', additions: 1, deletions: 0, binary: false }]);
+        assert!(commit_file_diff(&dir, &history[0].hash, "b.txt").await.unwrap().contains("+b"));
+        std::fs::write(dir.join("c.txt"), "c\n").unwrap();
+        commit(&dir, "Third, staged for me", false, true).await.unwrap();
+        assert!(status(&dir).await.unwrap().files.is_empty());
+        set_repo_settings(&dir, &RepoSettings { pull: Some("rebase".into()), prune: true, auto_setup_remote: true }).await.unwrap();
+        let rs = repo_settings(&dir).await;
+        assert_eq!((rs.pull.as_deref(), rs.prune, rs.auto_setup_remote), (Some("rebase"), true, true));
         assert!(sync(&dir, Sync::Push).await.is_err());
         remote(&dir, RemoteAction::Add { name: "origin".into(), url: "https://user:secret@example.com/x.git".into() }).await.unwrap();
         assert_eq!(status(&dir).await.unwrap().remotes[0].url, "https://example.com/x.git");
+        remote(&dir, RemoteAction::SetPushUrl { name: "origin".into(), url: Some("git@example.com:x.git".into()) }).await.unwrap();
+        remote(&dir, RemoteAction::Rename { from: "origin".into(), to: "upstream".into() }).await.unwrap();
+        let r = &status(&dir).await.unwrap().remotes[0];
+        assert_eq!((r.name.as_str(), r.push_url.as_deref()), ("upstream", Some("git@example.com:x.git")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

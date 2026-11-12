@@ -1925,9 +1925,9 @@ async fn git_discard(app: AppHandle, state: State<'_, AppState>, name: String, p
 }
 
 #[tauri::command]
-async fn git_commit(app: AppHandle, state: State<'_, AppState>, name: String, message: String, amend: bool) -> Result<String> {
+async fn git_commit(app: AppHandle, state: State<'_, AppState>, name: String, message: String, amend: bool, all: Option<bool>) -> Result<String> {
     let (_, layout) = state.snapshot().await;
-    let out = git::commit(&project_dir(&layout, &name)?, &message, amend).await?;
+    let out = git::commit(&project_dir(&layout, &name)?, &message, amend, all.unwrap_or(false)).await?;
     logs::system(&app, logs::Level::Info, format!("{} in {name}: {}", if amend { "Amended the last commit" } else { "Committed" }, message.lines().next().unwrap_or_default()));
     Ok(out)
 }
@@ -1967,9 +1967,27 @@ async fn git_log(state: State<'_, AppState>, name: String, skip: u32, limit: u32
 }
 
 #[tauri::command]
-async fn git_show(state: State<'_, AppState>, name: String, hash: String) -> Result<String> {
+async fn git_commit_details(state: State<'_, AppState>, name: String, hash: String) -> Result<git::CommitDetails> {
     let (_, layout) = state.snapshot().await;
-    git::show(&project_dir(&layout, &name)?, &hash).await
+    git::details(&project_dir(&layout, &name)?, &hash).await
+}
+
+#[tauri::command]
+async fn git_commit_file_diff(state: State<'_, AppState>, name: String, hash: String, path: String) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    git::commit_file_diff(&project_dir(&layout, &name)?, &hash, &path).await
+}
+
+#[tauri::command]
+async fn git_repo_settings(state: State<'_, AppState>, name: String) -> Result<git::RepoSettings> {
+    let (_, layout) = state.snapshot().await;
+    Ok(git::repo_settings(&project_dir(&layout, &name)?).await)
+}
+
+#[tauri::command]
+async fn git_set_repo_settings(state: State<'_, AppState>, name: String, settings: git::RepoSettings) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    git::set_repo_settings(&project_dir(&layout, &name)?, &settings).await
 }
 
 #[tauri::command]
@@ -3277,7 +3295,10 @@ pub fn run() {
             git_abort,
             git_continue,
             git_log,
-            git_show,
+            git_commit_details,
+            git_commit_file_diff,
+            git_repo_settings,
+            git_set_repo_settings,
             git_sync,
             git_remote,
             git_set_identity,

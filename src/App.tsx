@@ -157,7 +157,7 @@ export default function App() {
             hidden={id !== page}
             className={clsx(
               "motion-page mx-auto px-6 pt-8 pb-10 sm:px-10",
-              id === "overview" ? "max-w-[90rem]" : id === "logs" ? "h-full min-h-0 max-w-7xl overflow-hidden pt-4 pb-3" : "max-w-7xl",
+              id === "overview" || id === "sites" ? "max-w-[90rem]" : id === "logs" ? "h-full min-h-0 max-w-7xl overflow-hidden pt-4 pb-3" : "max-w-7xl",
             )}
           >
             <PageActiveContext.Provider value={id === page}>
