@@ -95,14 +95,15 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         Runtime::Mariadb => (
             "MariaDB",
             "Stores your data",
-            "Official MariaDB releases",
-            mac.then_some("MariaDB publishes no macOS builds, and LampRabit doesn't build its own yet. Use PostgreSQL, or MariaDB from Homebrew on its own port."),
+            if mac { "LampRabit's builds of MariaDB's LTS releases (MariaDB publishes none for macOS)" } else { "Official MariaDB releases" },
+            None,
         ),
         Runtime::Mysql => (
             "MySQL",
             "Stores your data",
             "Official MySQL releases; runs next to MariaDB on its own port",
-            mac.then_some("MySQL on macOS isn't supported by LampRabit yet. Use PostgreSQL, or MySQL from Homebrew on its own port."),
+            // Oracle's macOS archives are built for a recent macOS (15 today).
+            None,
         ),
         Runtime::Postgres => ("PostgreSQL", "Stores your data", "PostgreSQL built from source for every OS by theseus-rs (checksum checked); psql and pg_dump work in LampRabit's terminal", None),
         Runtime::Mongodb => ("MongoDB", "Stores your documents", "Official MongoDB Community Server releases (checksum checked); each major version keeps its own data folder", None),

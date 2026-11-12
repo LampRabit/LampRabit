@@ -478,6 +478,29 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 env: vec![("JAVA_HOME", path(java_home)), ("CATALINA_HOME", path(home.clone())), ("CATALINA_BASE", path(base.clone()))],
             }
         }
+        // PostgreSQL won't run with administrator rights, and LampRabit has them when UAC is off
+        // or it was started with "Run as administrator". pg_ctl starts it with those rights
+        // dropped; LampRabit's `--pg-elevated` mode runs pg_ctl, then stands in for the server
+        // (its output, and exiting when the server does) so the supervisor works as usual.
+        ServiceKind::Postgres if cfg!(windows) && procgroup::elevated() => {
+            let data = path(configs::postgres_data(settings, layout));
+            let bin = home.join("bin");
+            LaunchSpec {
+                program: std::env::current_exe()?,
+                args: vec![
+                    "--pg-elevated".into(),
+                    path(bin.join(exe("pg_ctl"))),
+                    data.clone(),
+                    settings.ports.postgres.to_string(),
+                    path(layout.tmp().join("postgres-pgctl.log")),
+                ],
+                test: None,
+                stop_cmd: Some((bin.join(exe("pg_ctl")), vec!["stop".into(), "-D".into(), data, "-m".into(), "fast".into(), "-s".into()])),
+                env: vec![],
+                cwd: home,
+                path_prepend: vec![],
+            }
+        }
         ServiceKind::Postgres => {
             let data = path(configs::postgres_data(settings, layout));
             LaunchSpec {

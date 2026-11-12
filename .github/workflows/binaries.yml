@@ -1,6 +1,6 @@
 name: Runtimes
 
-# Builds Apache, Nginx, PHP, Redis and Memcached for Linux and macOS (see build/linux/),
+# Builds Apache, Nginx, PHP, Redis and Memcached for Linux and macOS, and MariaDB for macOS (see build/linux/),
 # repackages Memcached for Windows, and publishes them, with manifest.json, to the
 # "binaries" release that the app's Services page reads. Builds already published are
 # skipped, so this only does work when versions.env changes or PHP has a new patch release.
@@ -51,7 +51,7 @@ jobs:
         run: |
           . build/linux/versions.env
           gh release download "$RELEASE_TAG" -p manifest.json -D /tmp 2>/dev/null || echo '{"releases":[]}' > /tmp/manifest.json
-          export NGINX_VERSIONS APACHE_VERSIONS PHP_LINES PHP_LINES_NOT_MACOS REDIS_VERSIONS MEMCACHED_VERSIONS MINIO_VERSIONS
+          export NGINX_VERSIONS APACHE_VERSIONS PHP_LINES PHP_LINES_NOT_MACOS REDIS_VERSIONS MEMCACHED_VERSIONS MINIO_VERSIONS MARIADB_VERSIONS
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import json, os, urllib.request
           have = {(e["runtime"], e["version"], e.get("os", "linux"), e["arch"]) for e in json.load(open("/tmp/manifest.json"))["releases"]}
@@ -79,6 +79,9 @@ jobs:
           # runner itself, whose CMake is new enough for static-php-cli (Debian 11's isn't).
           include = [{"kind": k, "version": v, "os": o, "arch": a, "runner": r, "container": "" if k == "php" else c, "args": ""}
                      for k, v in wanted for o, a, r, c in platforms if (k, v, o, a) not in have and not skip(k, v, o)]
+          # MariaDB for macOS only: it publishes Linux and Windows archives itself.
+          include += [{"kind": "mariadb", "version": v, "os": "macos", "arch": a, "runner": r, "container": "", "args": ""}
+                      for v in os.environ["MARIADB_VERSIONS"].split() for o, a, r, c in platforms if o == "macos" and ("mariadb", v, o, a) not in have]
           # Memcached for Windows is nono303's build, repackaged (nothing to compile).
           include += [{"kind": "memcached", "version": v, "os": "windows", "arch": "x86_64", "runner": "ubuntu-24.04", "container": "debian:bullseye", "args": "windows"}
                       for v in os.environ["MEMCACHED_VERSIONS"].split() if ("memcached", v, "windows", "x86_64") not in have]

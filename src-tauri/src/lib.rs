@@ -3188,6 +3188,60 @@ fn run_smoke_test(mut context: tauri::Context<tauri::Wry>, options: smoke::Optio
     app.run(|_, _| {});
 }
 
+/// `--pg-elevated <pg_ctl> <data> <port> <log>`: starts PostgreSQL through pg_ctl (which
+/// drops administrator rights PostgreSQL refuses to run with), then prints the server's log
+/// as it grows and exits when the server does, so the supervisor can treat this process as
+/// the server: output, health, crash restarts. Stopping goes through `pg_ctl stop`.
+fn pg_elevated(args: Vec<String>) -> i32 {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let [pg_ctl, data, port, log] = args.as_slice() else {
+        eprintln!("usage: --pg-elevated <pg_ctl> <data> <port> <log>");
+        return 2;
+    };
+    let start = std::fs::metadata(log).map(|m| m.len()).unwrap_or(0);
+    let options = format!("-p {port} -c listen_addresses=127.0.0.1 -c unix_socket_directories=");
+    let mut cmd = std::process::Command::new(pg_ctl);
+    cmd.args(["start", "-w", "-t", "60", "-D", data, "-l", log, "-o", &options]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let started = cmd.status();
+    let mut file = std::fs::File::open(log).ok();
+    let mut offset = start;
+    let mut echo = |file: &mut Option<std::fs::File>| {
+        if let Some(f) = file.as_mut() {
+            let mut chunk = String::new();
+            if f.seek(SeekFrom::Start(offset)).is_ok() && f.read_to_string(&mut chunk).is_ok() && !chunk.is_empty() {
+                offset += chunk.len() as u64;
+                print!("{chunk}");
+                let _ = std::io::stdout().flush();
+            }
+        }
+    };
+    if !started.is_ok_and(|s| s.success()) {
+        echo(&mut file);
+        eprintln!("PostgreSQL didn't start (pg_ctl start failed); its log is above.");
+        return 1;
+    }
+    let pid: Option<u32> = std::fs::read_to_string(std::path::Path::new(data).join("postmaster.pid")).ok().and_then(|t| t.lines().next()?.trim().parse().ok());
+    let Some(pid) = pid else {
+        echo(&mut file);
+        eprintln!("PostgreSQL started but wrote no postmaster.pid.");
+        return 1;
+    };
+    while procgroup::alive(pid) {
+        if file.is_none() {
+            file = std::fs::File::open(log).ok();
+        }
+        echo(&mut file);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    echo(&mut file);
+    0
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // The Windows uninstaller's cleanup: no window, and before the single-instance plugin,
@@ -3195,6 +3249,10 @@ pub fn run() {
     if std::env::args().any(|a| a == "--uninstall-cleanup") {
         uninstall::cli();
         return;
+    }
+    // PostgreSQL under an elevated LampRabit (services.rs): no window, no single instance.
+    if std::env::args().nth(1).as_deref() == Some("--pg-elevated") {
+        std::process::exit(pg_elevated(std::env::args().skip(2).collect()));
     }
     let context = tauri::generate_context!();
     // Also before the single-instance plugin: a LampRabit already open must not take it.

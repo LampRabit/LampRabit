@@ -1341,7 +1341,7 @@ pub async fn update_hosts(layout: &Layout, sites: &[Site]) -> Result<()> {
         cmd.status().await?
     } else if cfg!(target_os = "macos") {
         let script = format!(
-            "do shell script \"cp '{}' /etc/hosts && dscacheutil -flushcache\" with administrator privileges",
+            "do shell script \"cp '{}' /etc/hosts && dscacheutil -flushcache && killall -HUP mDNSResponder\" with administrator privileges",
             staged.display()
         );
         tokio::process::Command::new("osascript").args(["-e", &script]).status().await?

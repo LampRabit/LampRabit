@@ -574,6 +574,10 @@ async fn apache_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
 
 /// The MariaDB REST API lists stable series and the files of their latest release.
 async fn mariadb_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    // MariaDB publishes no macOS builds; LampRabit's CI builds the LTS lines from source.
+    if cfg!(target_os = "macos") {
+        return own_builds(client, Runtime::Mariadb).await;
+    }
     let (suffix, archive) = if cfg!(windows) {
         ("winx64.zip", Archive::Zip)
     } else if cfg!(target_os = "linux") {
@@ -1812,34 +1816,33 @@ async fn adminer_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
 /// comes from the official Docker image's metadata (maintained with every release), and
 /// the archives from MySQL's CDN, which publishes an MD5 next to each.
 async fn mysql_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let (suffix, archive) = match std::env::consts::OS {
-        "windows" => ("winx64.zip", Archive::Zip),
+    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
+    // Candidates in order; the first with a published checksum is the download. macOS
+    // archives carry the macOS version they're built for (macos15 today), which moves on,
+    // and not every line has both architectures.
+    let (suffixes, archive): (Vec<String>, Archive) = match std::env::consts::OS {
+        "windows" => (vec!["winx64.zip".into()], Archive::Zip),
         // "minimal": stripped of debug symbols and tests, about a tenth of the full archive.
-        "linux" if cfg!(target_arch = "x86_64") => ("linux-glibc2.28-x86_64-minimal.tar.xz", Archive::TarXz),
-        "linux" => ("linux-glibc2.28-aarch64-minimal.tar.xz", Archive::TarXz),
+        "linux" if cfg!(target_arch = "x86_64") => (vec!["linux-glibc2.28-x86_64-minimal.tar.xz".into()], Archive::TarXz),
+        "linux" => (vec!["linux-glibc2.28-aarch64-minimal.tar.xz".into()], Archive::TarXz),
+        "macos" => (["macos26", "macos15", "macos14"].iter().map(|m| format!("{m}-{arch}.tar.gz")).collect(), Archive::TarGz),
         _ => return Err(unsupported("MySQL")),
     };
+    let suffixes = &suffixes;
     let lines = get_json(client, "https://raw.githubusercontent.com/docker-library/mysql/master/versions.json").await?;
     let fetches = lines.as_object().into_iter().flatten().filter_map(|(line, info)| {
         let version = info["version"].as_str()?.to_string();
         let label = Some(if line == "innovation" { "Innovation".to_string() } else { "LTS".to_string() });
         Some(async move {
             let series = version.rsplit_once('.').map_or(version.as_str(), |(s, _)| s).to_string();
-            let url = format!("https://cdn.mysql.com/Downloads/MySQL-{series}/mysql-{version}-{suffix}");
-            let md5 = client
-                .get(format!("{url}.md5"))
-                .send()
-                .await
-                .and_then(|r| r.error_for_status())
-                .ok()?
-                .text()
-                .await
-                .ok()?
-                .split_whitespace()
-                .next()
-                .map(str::to_string);
-            md5.as_ref()?;
-            Some(Release { runtime: Runtime::Mysql, version, url, sha256: None, sha512: None, md5, sha3_256: None, archive, label })
+            for suffix in suffixes {
+                let url = format!("https://cdn.mysql.com/Downloads/MySQL-{series}/mysql-{version}-{suffix}");
+                let md5 = async { client.get(format!("{url}.md5")).send().await.and_then(|r| r.error_for_status()).ok()?.text().await.ok()?.split_whitespace().next().map(str::to_string) }.await;
+                if md5.is_some() {
+                    return Some(Release { runtime: Runtime::Mysql, version, url, sha256: None, sha512: None, md5, sha3_256: None, archive, label });
+                }
+            }
+            None
         })
     });
     let releases: Vec<Release> = futures_util::future::join_all(fetches.collect::<Vec<_>>()).await.into_iter().flatten().collect();
@@ -2219,6 +2222,12 @@ fn extract_into(archive: &Path, kind: Archive, scratch: &Path, dest: &Path, mark
         std::fs::remove_dir_all(dest)?;
     }
     std::fs::rename(root, dest)?;
+    // macOS marks what a quarantined app downloads, and Gatekeeper then blocks each binary
+    // on first run ("can't be opened"). The download was checksum-checked, so the mark goes.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("xattr").args(["-dr", "com.apple.quarantine"]).arg(dest).status();
+    }
     Ok(())
 }
 
