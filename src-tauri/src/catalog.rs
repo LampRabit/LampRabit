@@ -492,6 +492,17 @@ fn newest<'a>(versions: impl Iterator<Item = &'a str>, need: &Need) -> Option<&'
 mod tests {
     use super::*;
 
+    /// Writes the default settings and the catalog as JSON for the UI screenshot harness
+    /// (scripts/screenshots): `cargo test --lib write_ui_fixtures -- --ignored`.
+    #[test]
+    #[ignore]
+    fn write_ui_fixtures() {
+        let out = serde_json::json!({ "settings": Settings::default(), "catalog": catalog() });
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/screenshots/fixtures.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_string_pretty(&out).unwrap()).unwrap();
+    }
+
     #[test]
     fn ranges_compare_by_the_bounds_parts() {
         let java17 = need("java", Some("17"), None, "");

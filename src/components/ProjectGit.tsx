@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowLeftRight, ArrowUp, Check, ChevronLeft, Copy, GitBranch, GitCommitHorizontal, GitMerge, KeyRound, Link2, Minus, Pencil, Plus, RefreshCw, RotateCcw, Trash2, Undo2, UserRound, X } from "lucide-react";
 import clsx from "clsx";
 import { api, type GitBranch as Branch, type GitFile, type GitRepoSettings, type GitStatus, type Site } from "../lib/api";
+import { convertUrl, isSsh, nextStep, parseDiff } from "../lib/git";
 import { useAppStore } from "../lib/store";
 import { formatAgo } from "../lib/time";
 import Dialog from "./Dialog";
@@ -19,17 +20,6 @@ import { Button, inputClass } from "./ui";
 
 type View = "changes" | "history" | "branches" | "remotes";
 type SyncAction = "fetch" | "pull" | "push";
-
-/** What the repository needs next, in order of urgency. */
-function nextStep(s: GitStatus): "resolve" | "commit" | "pull" | "push" | "publish" | "remote" | null {
-  if (s.operation) return "resolve";
-  if (s.files.length > 0) return "commit";
-  if (s.behind > 0) return "pull";
-  if (s.remotes.length === 0) return s.head ? "remote" : null;
-  if (s.branch && !s.upstream && s.head) return "publish";
-  if (s.ahead > 0) return "push";
-  return null;
-}
 
 export default function ProjectGit({ site }: { site: Site }) {
   const queryClient = useQueryClient();
@@ -168,8 +158,8 @@ function Count({ n, on }: { n: number; on: boolean }) {
   return <span className={clsx("ml-1.5 rounded-full px-1.5 text-[11px] tabular-nums", on ? "bg-accent-soft text-accent-text" : "bg-surface-2")}>{n}</span>;
 }
 
-const letters: Record<string, string> = { M: "Modified", A: "Added", D: "Deleted", R: "Renamed", C: "Copied", T: "Type changed", U: "Conflict", "?": "New, not tracked yet" };
-const letterColor = (code: string) => (code === "D" ? "text-danger-text" : code === "?" || code === "A" ? "text-ok" : code === "U" ? "text-warn" : "text-accent-text");
+const letters: Record<string, string> = { M: "Modified", A: "Added", D: "Deleted", R: "Renamed", C: "Copied", T: "Type changed", "!": "Conflict", "?": "New, not tracked yet" };
+const letterColor = (code: string) => (code === "D" ? "text-danger-text" : code === "?" || code === "A" ? "text-ok" : code === "!" ? "text-warn" : "text-accent-text");
 
 /** The two panes (list, diff) share one height, so the diff gets the room and the page doesn't grow. */
 const panes = "grid gap-3 lg:h-[min(66vh,42rem)] lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]";
@@ -259,7 +249,7 @@ function Changes({
         <ul>
           {list.map((f) => {
             const isStaged = kind === "staged";
-            const code = kind === "conflict" ? "U" : isStaged ? f.staged : f.staged === "?" ? "?" : f.unstaged;
+            const code = kind === "conflict" ? "!" : isStaged ? f.staged : f.staged === "?" ? "?" : f.unstaged;
             const active = selected?.path === f.path && selected.staged === isStaged;
             return (
               <li key={`${kind}:${f.path}`} className={clsx("group flex items-center gap-1 pr-1.5 pl-3", active ? "bg-accent-soft/50" : "hover:bg-surface-2")}>
@@ -309,6 +299,27 @@ function Changes({
         <ArrowUp size={13} /> {pushing ? "Pushing…" : !status.upstream ? "Publish branch" : `Push ${status.ahead} ${status.ahead === 1 ? "commit" : "commits"}`}
       </Button>
     ) : null;
+
+  if (files.length === 0 && !amend) {
+    return (
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3">
+        <Check size={16} className="shrink-0 text-ok" aria-hidden />
+        <p className="min-w-0 flex-1 text-sm text-fg">
+          {status.remotes.length === 0
+            ? "Everything is committed. Add a remote to back it up."
+            : status.ahead > 0 || (!status.upstream && status.head)
+              ? "Everything is committed; your commits aren't on the remote yet."
+              : "Everything is committed and pushed."}
+        </p>
+        {!firstCommit && (
+          <label className="flex items-center gap-1.5 text-xs text-muted" title="Change the last commit's message">
+            <input type="checkbox" checked={amend} onChange={(e) => setAmend(e.target.checked)} className="size-3.5 accent-[var(--accent)]" /> Amend last commit
+          </label>
+        )}
+        {footer}
+      </div>
+    );
+  }
 
   return (
     <div className={panes}>
@@ -443,36 +454,6 @@ function DiffTitle({ path, note, from, extra }: { path: string; note?: string; f
       {note && <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">{note}</span>}
     </div>
   );
-}
-
-type DiffRow = { kind: "hunk"; text: string } | { kind: "add" | "del" | "ctx"; old: number | null; new: number | null; text: string } | { kind: "note"; text: string };
-
-/** A unified diff as rows with old and new line numbers, the way editors show it. */
-function parseDiff(text: string): DiffRow[] {
-  const rows: DiffRow[] = [];
-  let oldNo = 0;
-  let newNo = 0;
-  let inHunk = false;
-  for (const line of text.split("\n")) {
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$/.exec(line);
-    if (hunk) {
-      oldNo = Number(hunk[1]);
-      newNo = Number(hunk[2]);
-      inHunk = true;
-      rows.push({ kind: "hunk", text: hunk[3] });
-      continue;
-    }
-    if (!inHunk) {
-      if (/^Binary files/.test(line)) rows.push({ kind: "note", text: "Binary file: no text to show." });
-      continue;
-    }
-    if (line.startsWith("+")) rows.push({ kind: "add", old: null, new: newNo++, text: line.slice(1) });
-    else if (line.startsWith("-")) rows.push({ kind: "del", old: oldNo++, new: null, text: line.slice(1) });
-    else if (line.startsWith("\\")) rows.push({ kind: "note", text: line.slice(2) });
-    else if (line.startsWith(" ")) rows.push({ kind: "ctx", old: oldNo++, new: newNo++, text: line.slice(1) });
-    else if (line.startsWith("diff ")) inHunk = false;
-  }
-  return rows;
 }
 
 /** Line numbers in a gutter, added and removed lines tinted, no +/− marks in the text. */
@@ -869,17 +850,6 @@ const hosts = [
   { id: "bitbucket.org", label: "Bitbucket" },
 ];
 
-/** https://host/owner/repo.git ⇄ git@host:owner/repo.git; null when the URL is neither. */
-export function convertUrl(url: string): { url: string; to: "SSH" | "HTTPS" } | null {
-  const https = /^https:\/\/(?:[^@/]+@)?([^/]+)\/(.+?)(?:\.git)?\/?$/.exec(url);
-  if (https) return { url: `git@${https[1]}:${https[2]}.git`, to: "SSH" };
-  const ssh = /^(?:ssh:\/\/)?git@([^:/]+)[:/](.+?)(?:\.git)?$/.exec(url);
-  if (ssh) return { url: `https://${ssh[1]}/${ssh[2]}.git`, to: "HTTPS" };
-  return null;
-}
-
-const isSsh = (url: string) => /^(ssh:\/\/|[\w.-]+@[\w.-]+:)/.test(url);
-
 function RemotesAndSettings({ site, status, onChanged }: { site: Site; status: GitStatus; onChanged: () => void }) {
   const notify = useAppStore((s) => s.notify);
   const onError = (e: unknown) => notify("error", String(e));
@@ -1101,7 +1071,7 @@ function AddRemote({ taken, busy, onAdd }: { taken: string[]; busy: boolean; onA
           ))}
         </div>
       </div>
-      <div className="grid gap-2 sm:grid-cols-[6rem_8rem_minmax(0,1fr)]">
+      <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="origin" aria-label="Remote name" className={clsx(inputClass, "font-mono")} />
         <select value={host} onChange={(e) => setHost(e.target.value)} aria-label="Host" className={inputClass}>
           {hosts.map((h) => (
@@ -1112,9 +1082,9 @@ function AddRemote({ taken, busy, onAdd }: { taken: string[]; busy: boolean; onA
           <option value="custom">Other URL…</option>
         </select>
         {host === "custom" ? (
-          <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="https://git.example.com/team/repo.git or git@host:team/repo.git" aria-label="Remote URL" className={clsx(inputClass, "font-mono")} />
+          <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="https://git.example.com/team/repo.git or git@host:team/repo.git" aria-label="Remote URL" className={clsx(inputClass, "col-span-2 font-mono")} />
         ) : (
-          <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/repository (or paste a URL)" aria-label="Owner and repository" className={clsx(inputClass, "font-mono")} />
+          <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/repository, or paste a URL" aria-label="Owner and repository" className={clsx(inputClass, "col-span-2 font-mono")} />
         )}
       </div>
       <div className="flex items-center gap-2">

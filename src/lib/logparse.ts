@@ -31,7 +31,7 @@ function validDate(d: Date | null): Date | null {
 
 function levelFromText(text: string): Level {
   // Summaries like "0 warnings and 0 errors" or "0 failed" are good news.
-  text = text.replace(/(no|0) (errors?|warnings?|failed|failures?)/gi, "");
+  text = text.replace(/\b(no|0) (errors?|warnings?|failed|failures?)\b/gi, "");
   if (/\b(fatal|error|failed|crit)/i.test(text)) return "error";
   if (/\bwarn/i.test(text)) return "warn";
   if (/\b(notice|deprecated)/i.test(text)) return "notice";
@@ -105,7 +105,7 @@ export function parseLog(raw: RawLogLine, received = new Date()): LogEntry {
       ...base,
       time: validDate(new Date(`${m[1]}T${m[2].padStart(2, "0")}:${m[3]}`)) ?? received,
       level: kind === "error" ? "error" : kind === "warning" ? "warn" : "info",
-      message: `[${m[4]}] ${m[5]}`,
+      message: m[5],
     };
   }
 
@@ -176,7 +176,9 @@ function parseOther(line: string): { time: Date; level: Level; message: string }
     if (time) {
       const rest = m[4];
       const word = rest.match(/^(?:\d+ |\[\d+\] )?\[?(\w+)\]?[: ]/)?.[1] ?? "";
-      return { time, level: levelWord(word, rest), message: rest.replace(/^\d+ (?=\[)/, "") };
+      // MySQL 8: "0 [Warning] [MY-010068] [Server] text" → "Server: text"; the level is its own column.
+      const mysql = /^\d+ \[\w+\] \[MY-\d+\] \[(\w+)\] (.*)$/.exec(rest);
+      return { time, level: levelWord(word, rest), message: mysql ? `${mysql[1]}: ${mysql[2]}` : rest.replace(/^\d+ (?=\[)/, "") };
     }
   }
 

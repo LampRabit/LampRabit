@@ -66,7 +66,7 @@ const ranges = [
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const stamp = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-const columns = "grid-cols-[9.5rem_5.5rem_4rem_minmax(0,1fr)]";
+const columns = "grid-cols-[9.5rem_7.5rem_4rem_minmax(0,1fr)]";
 
 export default function Logs() {
   const queryClient = useQueryClient();

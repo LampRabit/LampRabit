@@ -54,7 +54,8 @@ Read [PLAN.md](PLAN.md) for the roadmap and decisions, [RELEASING.md](RELEASING.
 
 ## Checks
 
-- `npx tsc --noEmit -p .` and `npm run build` (frontend); `cargo check` and `cargo test --lib` in `src-tauri/` (backend). CI runs these on Windows, macOS and Linux.
+- `npx tsc --noEmit -p .`, `npm test` (Vitest: unit and fast-check property tests in `src/lib/*.test.ts`, component tests with a mocked `api` in jsdom) and `npm run build` (frontend); `cargo check` and `cargo test --lib` in `src-tauri/` (backend). CI runs these on Windows, macOS and Linux.
+- **Layout checks**: `npm run screenshots` renders the real pages with a fake backend (`scripts/screenshots/harness.tsx`) in headless Edge/Chrome into `scripts/screenshots/out/`. Refresh its fixtures with `cargo test --lib write_ui_fixtures -- --ignored`. Keep Python edit scripts' patterns raw (`r'...'`): a plain `''` once wrote a backspace into logparse.ts.
 - **Linux testing on the maintainer's Windows machine** uses the WSL distro `Ubuntu-24.04` (user `dev`, passwordless sudo) with Rust, Node and the Tauri build libraries installed. Build with `npx tauri build --bundles appimage` there, run the AppImage under `Xvfb :99` with `GDK_BACKEND=x11`, drive it with `xdotool` and capture screenshots with `import -window root`. Build the runtimes with `build/linux/build-*.sh`, then serve `out/` with a manifest and set `LAMPRABIT_BINARIES_URL` (steps in RELEASING.md).
 
 ## Pitfalls already hit

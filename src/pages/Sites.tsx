@@ -230,7 +230,7 @@ export default function Sites() {
           </Card>
         )
       ) : (
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
+        <div className="grid items-start gap-5 md:grid-cols-[minmax(200px,240px)_minmax(0,1fr)] xl:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
           <Card className="min-w-0 overflow-hidden lg:sticky lg:top-4">
             <div className="space-y-2.5 border-b border-line p-3">
               <div className="flex items-center justify-between px-1">
@@ -277,7 +277,7 @@ export default function Sites() {
             {shown.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-muted">No projects match.</p>
             ) : (
-              <ul className="scrollbar-thin space-y-0.5 p-1.5 lg:max-h-[calc(100dvh-16rem)] lg:overflow-y-auto lg:overscroll-contain" aria-label="Projects">
+              <ul className="scrollbar-thin space-y-0.5 p-1.5 md:max-h-[calc(100dvh-16rem)] md:overflow-y-auto md:overscroll-contain" aria-label="Projects">
                 {shown.map((site) => (
                   <li key={site.path}>
                     <ProjectRow site={site} status={statuses[site.name]} selected={selectedSite?.path === site.path} onSelect={() => setSelectedPath(site.path)} />
