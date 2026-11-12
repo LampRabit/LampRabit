@@ -47,7 +47,8 @@ export type Runtime =
   | "go"
   | "rust"
   | "maven"
-  | "gradle";
+  | "gradle"
+  | "git";
 // Labels come from the backend's catalog (catalog.rs), loaded once before the first render
 // (loadLabels), so a runtime is named in one place. An id the catalog doesn't name shows as
 // itself rather than as "undefined".

@@ -26,6 +26,7 @@ export default function ProjectGit({ site }: { site: Site }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const onError = (e: unknown) => notify("error", String(e));
+  const navigate = useAppStore((s) => s.navigate);
   const version = useQuery({ queryKey: ["git-version"], queryFn: api.gitVersion, staleTime: Infinity });
   const active = usePageActive();
   const status = useQuery({ queryKey: ["git-status", site.name], queryFn: () => api.gitStatus(site.name), refetchInterval: active ? 5000 : false, enabled: !!version.data });
@@ -63,7 +64,13 @@ export default function ProjectGit({ site }: { site: Site }) {
     return (
       <div className="text-sm">
         <p className="font-semibold text-fg">Git isn't installed</p>
-        <p className="mt-1 text-muted">Install Git from git-scm.com (or your package manager), then reopen this tab. LampRabit uses your own Git, with your credentials and SSH keys.</p>
+        <p className="mt-1 text-muted">
+          LampRabit uses the Git on your computer, with your credentials and SSH keys. On Windows it can install one for you (MinGit); on Linux use your package manager (sudo apt install git), on
+          macOS run xcode-select --install.
+        </p>
+        <Button className="mt-3" variant="primary" onClick={() => navigate("services")}>
+          <GitBranch size={14} /> Install Git from Services
+        </Button>
       </div>
     );
   }

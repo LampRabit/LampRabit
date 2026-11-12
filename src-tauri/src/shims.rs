@@ -113,6 +113,13 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
             shim(&dir, "mongosh", &[Case { folder: None, target, args, env: Vec::new() }])?;
         }
     }
+    // LampRabit's Git (MinGit on Windows), when the computer has none of its own.
+    if let Some(v) = settings.versions.get("git") {
+        let target = layout.bin("git", v).join("cmd").join(exe("git"));
+        if target.exists() {
+            shim(&dir, "git", &[Case { folder: None, target, args: Vec::new(), env: Vec::new() }])?;
+        }
+    }
     // MongoDB's dump and restore tools.
     if let Some(home) = settings.versions.get("mongotools").map(|v| layout.bin("mongotools", v)) {
         for name in ["mongodump", "mongorestore", "mongoexport", "mongoimport"] {

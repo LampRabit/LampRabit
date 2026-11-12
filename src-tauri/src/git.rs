@@ -174,7 +174,7 @@ pub struct CommitFile {
 
 /// Runs git in `dir` and returns its output whatever the exit code.
 async fn run(dir: &Path, args: &[&str], timeout: Duration) -> Result<std::process::Output> {
-    let mut cmd = tokio::process::Command::new("git");
+    let mut cmd = tokio::process::Command::new(program());
     // Paths as they are (not "\303\251" escapes), no colour, no line-ending warnings mixed
     // into output ("LF will be replaced by CRLF"), and no editor or pager ever.
     cmd.args(["-c", "core.quotepath=false", "-c", "color.ui=false", "-c", "protocol.ext.allow=never", "-c", "core.safecrlf=false"])
@@ -192,11 +192,35 @@ async fn run(dir: &Path, args: &[&str], timeout: Duration) -> Result<std::proces
     let out = match tokio::time::timeout(timeout, cmd.output()).await {
         Err(_) => return Err(Error::msg(format!("git {} took longer than {} seconds and was stopped.", args.first().unwrap_or(&""), timeout.as_secs()))),
         Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(Error::msg("Git isn't installed (or not on PATH). Install it from git-scm.com, then try again."));
+            return Err(Error::msg("Git isn't installed (or not on PATH). Install it from Services → Developer tools → Git, then try again."));
         }
         Ok(r) => r?,
     };
     Ok(out)
+}
+
+/// LampRabit's own Git (MinGit) when one is active, else None for the `git` on PATH.
+static PROGRAM: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+/// Picks the Git to run from the settings: the active MinGit if there is one.
+pub fn configure(settings: &crate::config::Settings, layout: &crate::layout::Layout) {
+    let own = settings.versions.get("git").map(|v| layout.bin("git", v).join("cmd").join("git.exe")).filter(|p| p.is_file());
+    if let Ok(mut p) = PROGRAM.write() {
+        *p = own;
+    }
+}
+
+fn program() -> std::ffi::OsString {
+    PROGRAM.read().ok().and_then(|p| p.clone()).map_or_else(|| "git".into(), |p| p.into_os_string())
+}
+
+/// The Git on PATH, whatever LampRabit installed: for "already on this computer".
+pub async fn system_version() -> Option<String> {
+    let mut cmd = tokio::process::Command::new("git");
+    cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+    procgroup::prepare(&mut cmd);
+    let out = tokio::time::timeout(QUICK, cmd.output()).await.ok()?.ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().trim_start_matches("git version ").to_string())
 }
 
 /// Network operations in flight, by the id the UI gave them, so they can be cancelled.
@@ -222,7 +246,7 @@ pub fn cancel(op: &str) -> bool {
 async fn streamed(app: &tauri::AppHandle, op: &str, dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
     use tauri::Emitter;
     use tokio::io::AsyncReadExt;
-    let mut cmd = tokio::process::Command::new("git");
+    let mut cmd = tokio::process::Command::new(program());
     cmd.args(["-c", "core.quotepath=false", "-c", "color.ui=false", "-c", "protocol.ext.allow=never", "-c", "core.safecrlf=false"])
         .args(args)
         .current_dir(dir)

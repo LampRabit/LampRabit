@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArchiveRestore, BarChart3, Bot, Cog, HardDrive, Inbox, Search, Workflow, Cloud, Code2, Coffee, Compass, Cpu, Feather as FeatherIcon, Flame, Gauge, Leaf, Network, SquareTerminal, Terminal, Database, DatabaseZap, Feather, Layers3, Mail, Package, Radio, Server, ShieldCheck, Table2, TableProperties, Zap } from "lucide-react";
+import { ArchiveRestore, GitBranch, BarChart3, Bot, Cog, HardDrive, Inbox, Search, Workflow, Cloud, Code2, Coffee, Compass, Cpu, Feather as FeatherIcon, Flame, Gauge, Leaf, Network, SquareTerminal, Terminal, Database, DatabaseZap, Feather, Layers3, Mail, Package, Radio, Server, ShieldCheck, Table2, TableProperties, Zap } from "lucide-react";
 import type { Runtime } from "../lib/api";
 
 /** Icon and colour used for each runtime across the app. */
@@ -103,6 +103,11 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     className: "bg-red-700/10 text-red-700 dark:text-red-400",
     text: "text-red-700 dark:text-red-400",
     icon: (size) => <Package size={size} strokeWidth={1.75} />,
+  },
+  git: {
+    className: "bg-orange-600/10 text-orange-700 dark:text-orange-400",
+    text: "text-orange-700 dark:text-orange-400",
+    icon: (size) => <GitBranch size={size} strokeWidth={1.75} />,
   },
   gradle: {
     className: "bg-teal-600/10 text-teal-700 dark:text-teal-400",

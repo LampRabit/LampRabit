@@ -123,7 +123,7 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         Runtime::N8n => &[ServiceKind::N8n],
         Runtime::Rabbitmq | Runtime::Erlang => &[ServiceKind::Rabbitmq],
         // Languages run from the terminal and projects' own processes.
-        Runtime::Go | Runtime::Rust | Runtime::Maven | Runtime::Gradle => &[],
+        Runtime::Go | Runtime::Rust | Runtime::Maven | Runtime::Gradle | Runtime::Git => &[],
         // Projects run Python themselves; pgAdmin keeps the Python it was installed with.
         Runtime::Python => &[],
         Runtime::Phppgadmin => &ServiceKind::WEB,
@@ -1894,31 +1894,37 @@ async fn create_project_database(app: AppHandle, state: State<'_, AppState>, nam
 
 /// Git, for a project's folder (git.rs).
 #[tauri::command]
-async fn git_version() -> Option<String> {
-    git::version().await
+async fn git_version(state: State<'_, AppState>) -> Result<Option<String>> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    Ok(git::version().await)
 }
 
 #[tauri::command]
 async fn git_status(state: State<'_, AppState>, name: String) -> Result<git::Status> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::status(&project_dir(&layout, &name)?).await
 }
 
 #[tauri::command]
 async fn git_diff(state: State<'_, AppState>, name: String, path: String, staged: bool, untracked: bool) -> Result<String> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::diff(&project_dir(&layout, &name)?, &path, staged, untracked).await
 }
 
 #[tauri::command]
 async fn git_stage(state: State<'_, AppState>, name: String, paths: Vec<String>, stage: bool) -> Result<()> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::stage(&project_dir(&layout, &name)?, &paths, stage).await
 }
 
 #[tauri::command]
 async fn git_discard(app: AppHandle, state: State<'_, AppState>, name: String, paths: Vec<String>) -> Result<()> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::discard(&project_dir(&layout, &name)?, &paths).await?;
     logs::system(&app, logs::Level::Info, format!("Discarded changes to {} in {name}", paths.join(", ")));
     Ok(())
@@ -1926,7 +1932,8 @@ async fn git_discard(app: AppHandle, state: State<'_, AppState>, name: String, p
 
 #[tauri::command]
 async fn git_commit(app: AppHandle, state: State<'_, AppState>, name: String, message: String, amend: bool, all: Option<bool>) -> Result<String> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     let out = git::commit(&project_dir(&layout, &name)?, &message, amend, all.unwrap_or(false)).await?;
     logs::system(&app, logs::Level::Info, format!("{} in {name}: {}", if amend { "Amended the last commit" } else { "Committed" }, message.lines().next().unwrap_or_default()));
     Ok(out)
@@ -1934,14 +1941,16 @@ async fn git_commit(app: AppHandle, state: State<'_, AppState>, name: String, me
 
 #[tauri::command]
 async fn git_branches(state: State<'_, AppState>, name: String) -> Result<Vec<git::Branch>> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::branches(&project_dir(&layout, &name)?).await
 }
 
 /// Branch actions; a switch or merge changes the files, so the site's facts refresh.
 #[tauri::command]
 async fn git_branch(app: AppHandle, state: State<'_, AppState>, name: String, action: git::BranchAction) -> Result<String> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     let what = format!("{action:?}");
     let out = git::branch(&project_dir(&layout, &name)?, action).await?;
     logs::system(&app, logs::Level::Info, format!("Git in {name}: {what}"));
@@ -1950,49 +1959,57 @@ async fn git_branch(app: AppHandle, state: State<'_, AppState>, name: String, ac
 
 #[tauri::command]
 async fn git_abort(state: State<'_, AppState>, name: String) -> Result<()> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::abort(&project_dir(&layout, &name)?).await
 }
 
 #[tauri::command]
 async fn git_continue(state: State<'_, AppState>, name: String) -> Result<String> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::continue_operation(&project_dir(&layout, &name)?).await
 }
 
 #[tauri::command]
 async fn git_log(state: State<'_, AppState>, name: String, skip: u32, limit: u32, path: Option<String>) -> Result<Vec<git::Commit>> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::log(&project_dir(&layout, &name)?, skip, limit, path.as_deref()).await
 }
 
 #[tauri::command]
 async fn git_commit_details(state: State<'_, AppState>, name: String, hash: String) -> Result<git::CommitDetails> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::details(&project_dir(&layout, &name)?, &hash).await
 }
 
 #[tauri::command]
 async fn git_commit_file_diff(state: State<'_, AppState>, name: String, hash: String, path: String) -> Result<String> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::commit_file_diff(&project_dir(&layout, &name)?, &hash, &path).await
 }
 
 #[tauri::command]
 async fn git_repo_settings(state: State<'_, AppState>, name: String) -> Result<git::RepoSettings> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     Ok(git::repo_settings(&project_dir(&layout, &name)?).await)
 }
 
 #[tauri::command]
 async fn git_set_repo_settings(state: State<'_, AppState>, name: String, settings: git::RepoSettings) -> Result<()> {
-    let (_, layout) = state.snapshot().await;
+    let (app_settings, layout) = state.snapshot().await;
+    git::configure(&app_settings, &layout);
     git::set_repo_settings(&project_dir(&layout, &name)?, &settings).await
 }
 
 #[tauri::command]
 async fn git_sync(app: AppHandle, state: State<'_, AppState>, name: String, action: git::Sync, op: Option<String>) -> Result<String> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     let op = op.unwrap_or_else(|| format!("{name}:{action:?}"));
     let out = git::sync(&app, &op, &project_dir(&layout, &name)?, action).await?;
     logs::system(&app, logs::Level::Info, format!("Git {action:?} in {name} finished"));
@@ -2001,26 +2018,30 @@ async fn git_sync(app: AppHandle, state: State<'_, AppState>, name: String, acti
 
 #[tauri::command]
 async fn git_remote(state: State<'_, AppState>, name: String, action: git::RemoteAction) -> Result<()> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::remote(&project_dir(&layout, &name)?, action).await
 }
 
 #[tauri::command]
 async fn git_set_identity(state: State<'_, AppState>, name: String, user: String, email: String) -> Result<()> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::set_identity(&project_dir(&layout, &name)?, &user, &email).await
 }
 
 #[tauri::command]
 async fn git_init(state: State<'_, AppState>, name: String) -> Result<()> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::init(&project_dir(&layout, &name)?).await
 }
 
 /// Clones a repository into www/; the folder becomes a project like any other.
 #[tauri::command]
 async fn git_clone(app: AppHandle, state: State<'_, AppState>, url: String, folder: Option<String>, op: Option<String>) -> Result<String> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     let folder = folder.map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).unwrap_or_else(|| git::folder_for(&url));
     manage::check_project_name(&layout, &folder)?;
     logs::system(&app, logs::Level::Info, format!("Cloning into www/{folder}"));
@@ -2031,43 +2052,50 @@ async fn git_clone(app: AppHandle, state: State<'_, AppState>, url: String, fold
 
 #[tauri::command]
 async fn git_stashes(state: State<'_, AppState>, name: String) -> Result<Vec<git::Stash>> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::stashes(&project_dir(&layout, &name)?).await
 }
 
 #[tauri::command]
 async fn git_stash(state: State<'_, AppState>, name: String, action: git::StashAction) -> Result<String> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::stash(&project_dir(&layout, &name)?, action).await
 }
 
 #[tauri::command]
 async fn git_stage_hunk(state: State<'_, AppState>, name: String, path: String, hunk: usize, unstage: bool) -> Result<()> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::stage_hunk(&project_dir(&layout, &name)?, &path, hunk, unstage).await
 }
 
 #[tauri::command]
 async fn git_resolve(state: State<'_, AppState>, name: String, path: String, theirs: bool) -> Result<()> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::resolve(&project_dir(&layout, &name)?, &path, theirs).await
 }
 
 #[tauri::command]
 async fn git_tags(state: State<'_, AppState>, name: String) -> Result<Vec<git::Tag>> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::tags(&project_dir(&layout, &name)?).await
 }
 
 #[tauri::command]
 async fn git_tag(state: State<'_, AppState>, name: String, action: git::TagAction) -> Result<String> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::tag(&project_dir(&layout, &name)?, action).await
 }
 
 #[tauri::command]
 async fn git_revert(app: AppHandle, state: State<'_, AppState>, name: String, hash: String) -> Result<String> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     let out = git::revert(&project_dir(&layout, &name)?, &hash).await?;
     logs::system(&app, logs::Level::Info, format!("Reverted {} in {name}", &hash[..hash.len().min(8)]));
     Ok(out)
@@ -2075,7 +2103,8 @@ async fn git_revert(app: AppHandle, state: State<'_, AppState>, name: String, ha
 
 #[tauri::command]
 async fn git_restore_file(state: State<'_, AppState>, name: String, hash: String, path: String) -> Result<()> {
-    let (_, layout) = state.snapshot().await;
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
     git::restore_file(&project_dir(&layout, &name)?, &hash, &path).await
 }
 

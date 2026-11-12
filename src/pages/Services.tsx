@@ -42,7 +42,7 @@ type ServiceSelection = Runtime | "node" | "tunnels";
  * anything already installed. The full catalog (forty-odd entries) hid the basic path from
  * new users.
  */
-const ESSENTIALS: ServiceSelection[] = ["apache", "nginx", "php", "composer", "node", "mariadb", "mysql", "mailpit", "redis", "phpmyadmin"];
+const ESSENTIALS: ServiceSelection[] = ["apache", "nginx", "php", "composer", "node", "git", "mariadb", "mysql", "mailpit", "redis", "phpmyadmin"];
 
 export default function Services() {
   const notify = useAppStore((s) => s.notify);

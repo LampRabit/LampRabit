@@ -68,6 +68,8 @@ function useBackendEvents() {
         setInstall(payload);
         if (payload.stage === "done" || payload.stage === "error") {
           queryClient.invalidateQueries({ queryKey: ["installed"] });
+          // Installing Git (MinGit) makes the Git tab usable without a restart.
+          if (payload.runtime === "git") queryClient.invalidateQueries({ queryKey: ["git-version"] });
           queryClient.invalidateQueries({ queryKey: ["services"] });
         }
         if (payload.stage === "done") {

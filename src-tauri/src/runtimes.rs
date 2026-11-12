@@ -104,10 +104,13 @@ pub enum Runtime {
     Gradle,
     /// Rust through rustup, with its homes inside LampRabit's folder.
     Rust,
+    /// Git for the Git tab and the terminal when the computer has none: MinGit, Git for
+    /// Windows' official portable build. Linux and macOS use the system's Git.
+    Git,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 43] = [
+    pub const ALL: [Runtime; 44] = [
         Runtime::Apache,
         Runtime::Nginx,
         Runtime::Php,
@@ -151,6 +154,7 @@ impl Runtime {
         Runtime::Rust,
         Runtime::Maven,
         Runtime::Gradle,
+        Runtime::Git,
     ];
 
     pub fn from_id(id: &str) -> Option<Self> {
@@ -202,6 +206,7 @@ impl Runtime {
             Self::Rust => "rust",
             Self::Maven => "maven",
             Self::Gradle => "gradle",
+            Self::Git => "git",
         }
     }
 
@@ -260,6 +265,7 @@ impl Runtime {
             Self::Rust => PathBuf::from("installed.txt"),
             Self::Maven => Path::new("bin").join("mvn"),
             Self::Gradle => Path::new("bin").join("gradle"),
+            Self::Git => Path::new("cmd").join("git.exe"),
         }
     }
 }
@@ -409,6 +415,7 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         Runtime::Rust => rust_releases(client).await?,
         Runtime::Maven => maven_releases(client).await?,
         Runtime::Gradle => gradle_releases(client).await?,
+        Runtime::Git => git_releases(client).await?,
     };
     releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
     Ok(releases)
@@ -1762,6 +1769,29 @@ fn ngrok_releases() -> Vec<Release> {
     }]
 }
 
+/// MinGit from Git for Windows' latest release (GitHub's SHA-256 digest checked). The tag
+/// is "v2.47.1.windows.1"; the version shown is Git's own ("2.47.1", or "2.47.1.2" for a
+/// Windows-only follow-up release).
+async fn git_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    if !cfg!(windows) {
+        return Err(Error::msg("Use your system's Git: install it with your package manager, or xcode-select --install on macOS."));
+    }
+    let suffix = if cfg!(target_arch = "aarch64") { "-arm64.zip" } else { "-64-bit.zip" };
+    let mut releases = github_latest(client, Runtime::Git, "git-for-windows/git", Archive::Zip, |n, _| n.starts_with("MinGit-") && n.ends_with(suffix) && !n.contains("busybox")).await?;
+    for r in &mut releases {
+        r.version = git_version_from_tag(&r.version);
+    }
+    Ok(releases)
+}
+
+fn git_version_from_tag(tag: &str) -> String {
+    match tag.split_once(".windows.") {
+        Some((base, "1")) => base.to_string(),
+        Some((base, n)) => format!("{base}.{n}"),
+        None => tag.to_string(),
+    }
+}
+
 async fn cloudflared_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
     let (name, archive) = match std::env::consts::OS {
@@ -2256,7 +2286,7 @@ pub struct UpdateNotice {
 /// Newer patch releases for installed versions: same "major.minor" line (for example
 /// PHP 8.4.27 → 8.4.30), never a jump to a new minor that could change behaviour.
 pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNotice> {
-    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama, Runtime::Minio, Runtime::Elasticsearch, Runtime::Opensearch, Runtime::N8n, Runtime::Rabbitmq, Runtime::Erlang, Runtime::Go, Runtime::Maven, Runtime::Gradle]
+    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama, Runtime::Minio, Runtime::Elasticsearch, Runtime::Opensearch, Runtime::N8n, Runtime::Rabbitmq, Runtime::Erlang, Runtime::Go, Runtime::Maven, Runtime::Gradle, Runtime::Git]
         .into_iter()
         .map(|runtime| async move {
             let installed = installed(layout, runtime);
@@ -2280,6 +2310,13 @@ pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNot
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_git_for_windows_tags() {
+        assert_eq!(git_version_from_tag("2.47.1.windows.1"), "2.47.1");
+        assert_eq!(git_version_from_tag("2.47.1.windows.2"), "2.47.1.2");
+        assert_eq!(git_version_from_tag("2.48.0-rc1.windows.1"), "2.48.0-rc1");
+    }
 
     #[test]
     fn mongodb_build_follows_the_linux_distribution() {

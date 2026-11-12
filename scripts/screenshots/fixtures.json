@@ -101,6 +101,7 @@
         "blurb": "Mail catching and web interfaces for your databases and caches.",
         "id": "tools",
         "items": [
+          "git",
           "mailpit",
           "phpmyadmin",
           "adminer",
@@ -560,6 +561,15 @@
           "java"
         ],
         "source": "Gradle's official distribution from services.gradle.org (SHA-256 checked); gradle works in LampRabit's terminal on the active Java",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Version control",
+        "id": "git",
+        "label": "Git",
+        "needs": [],
+        "source": "MinGit, Git for Windows' official portable build (SHA-256 checked), for the Git tab, Clone and LampRabit's terminal. A Git already installed on the computer works too",
         "suggests": [],
         "unavailable": null
       }

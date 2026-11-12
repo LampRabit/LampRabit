@@ -59,7 +59,7 @@ fn groups() -> Vec<Group> {
         g("queues", "Queues", "Message brokers for background jobs and events.", &["rabbitmq", "erlang"]),
         g("ai", "AI and automation", "Run language models locally and automate workflows.", &["ollama", "n8n"]),
         g("cache", "Cache", "In-memory stores for caches, sessions and queues.", &["redis", "memcached"]),
-        g("tools", "Developer tools", "Mail catching and web interfaces for your databases and caches.", &["mailpit", "phpmyadmin", "adminer", "phppgadmin", "pgadmin", "phpredisadmin", "compass", "mongosh", "mongotools"]),
+        g("tools", "Developer tools", "Mail catching and web interfaces for your databases and caches.", &["git", "mailpit", "phpmyadmin", "adminer", "phppgadmin", "pgadmin", "phpredisadmin", "compass", "mongosh", "mongotools"]),
         g("sharing", "Sharing", "Put a project or local port on a public URL.", &["cloudflared", "ngrok", "tunnels"]),
     ]
 }
@@ -173,6 +173,12 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         ),
         Runtime::Composer => ("Composer", "PHP packages", "PHP's package manager; run composer from the LampRabit terminal", None),
         Runtime::Maven => ("Maven", "Java builds", "Apache Maven from Apache's mirror (SHA-512 checked); mvn works in LampRabit's terminal on the active Java", None),
+        Runtime::Git => (
+            "Git",
+            "Version control",
+            "MinGit, Git for Windows' official portable build (SHA-256 checked), for the Git tab, Clone and LampRabit's terminal. A Git already installed on the computer works too",
+            (!win).then_some("LampRabit uses your system's Git here: install it with your package manager (sudo apt install git), or xcode-select --install on macOS."),
+        ),
         Runtime::Gradle => ("Gradle", "Java builds", "Gradle's official distribution from services.gradle.org (SHA-256 checked); gradle works in LampRabit's terminal on the active Java", None),
         Runtime::Phpredisadmin => ("phpRedisAdmin", "Redis admin", "Browse and edit Redis keys in the browser, like phpMyAdmin", None),
         Runtime::Memcached => (
@@ -468,7 +474,11 @@ pub async fn starter(client: &reqwest::Client, settings: &Settings, layout: &Lay
     let plans = ids.iter().filter_map(|id| Runtime::from_id(id)).map(|runtime| async move {
         let meta = info(runtime);
         let need = Need { runtime: runtime.id(), min: None, max: None, prefer: None, why: "" };
-        let action = runtime_action(client, settings, layout, &need, meta.label).await;
+        let system_git = if runtime == Runtime::Git && settings.versions.get("git").is_none() { crate::git::system_version().await } else { None };
+        let action = match system_git {
+            Some(version) => Action::Ready { version: format!("{version} (already on this computer)") },
+            None => runtime_action(client, settings, layout, &need, meta.label).await,
+        };
         let size = match &action {
             Action::Install { release } => download_size(client, &release.url).await,
             _ => None,

@@ -20,21 +20,21 @@ import { Button } from "./ui";
 type StarterId = "php" | "laravel" | "wordpress" | "node" | "full" | "custom";
 
 const starters: { id: StarterId; title: string; blurb: string; runtimes: string[] }[] = [
-  { id: "php", title: "PHP", blurb: "Apache, PHP, Composer, MariaDB and Mailpit: plain PHP sites and most frameworks.", runtimes: ["apache", "php", "composer", "mariadb", "mailpit", "phpmyadmin"] },
-  { id: "laravel", title: "Laravel", blurb: "The PHP stack plus Node.js for Vite and Redis for queues and cache.", runtimes: ["apache", "php", "composer", "mariadb", "redis", "mailpit", "phpmyadmin", "node"] },
-  { id: "wordpress", title: "WordPress", blurb: "Apache, PHP, MariaDB, phpMyAdmin and Mailpit to catch WordPress's mail.", runtimes: ["apache", "php", "mariadb", "mailpit", "phpmyadmin"] },
-  { id: "node", title: "Node.js", blurb: "Node.js through NVM, and Apache to give each project its .test domain.", runtimes: ["apache", "node", "mailpit"] },
+  { id: "php", title: "PHP", blurb: "Apache, PHP, Composer, MariaDB and Mailpit: plain PHP sites and most frameworks.", runtimes: ["apache", "php", "composer", "mariadb", "mailpit", "phpmyadmin", "git"] },
+  { id: "laravel", title: "Laravel", blurb: "The PHP stack plus Node.js for Vite and Redis for queues and cache.", runtimes: ["apache", "php", "composer", "mariadb", "redis", "mailpit", "phpmyadmin", "node", "git"] },
+  { id: "wordpress", title: "WordPress", blurb: "Apache, PHP, MariaDB, phpMyAdmin and Mailpit to catch WordPress's mail.", runtimes: ["apache", "php", "mariadb", "mailpit", "phpmyadmin", "git"] },
+  { id: "node", title: "Node.js", blurb: "Node.js through NVM, and Apache to give each project its .test domain.", runtimes: ["apache", "node", "mailpit", "git"] },
   {
     id: "full",
     title: "Full stack",
     blurb: "Both web servers, PHP, Node.js, MariaDB, MySQL, PostgreSQL, Redis, Mailpit and the database tools.",
-    runtimes: ["apache", "nginx", "php", "composer", "node", "mariadb", "mysql", "postgres", "redis", "mailpit", "phpmyadmin", "adminer"],
+    runtimes: ["apache", "nginx", "php", "composer", "node", "mariadb", "mysql", "postgres", "redis", "mailpit", "phpmyadmin", "adminer", "git"],
   },
   { id: "custom", title: "Custom", blurb: "Pick each component yourself.", runtimes: [] },
 ];
 
 /** What Custom offers to pick from; everything else is on the Services page. */
-const customChoices = ["apache", "nginx", "caddy", "php", "composer", "node", "python", "java", "mariadb", "mysql", "postgres", "mongodb", "redis", "memcached", "mailpit", "phpmyadmin", "adminer"];
+const customChoices = ["apache", "nginx", "caddy", "php", "composer", "node", "git", "python", "java", "mariadb", "mysql", "postgres", "mongodb", "redis", "memcached", "mailpit", "phpmyadmin", "adminer"];
 
 type ItemState = { status: "waiting" | "working" | "done" | "error"; error?: string };
 
@@ -56,7 +56,7 @@ function Guide({ firstRun = false, onDone }: { firstRun?: boolean; onDone: () =>
   const [step, setStep] = useState<"folder" | "starter" | "install" | "project">(firstRun ? "folder" : "starter");
   const [moving, setMoving] = useState(false);
   const [starter, setStarter] = useState<StarterId>("php");
-  const [custom, setCustom] = useState<string[]>(["apache", "php", "composer", "mariadb"]);
+  const [custom, setCustom] = useState<string[]>(["apache", "php", "composer", "mariadb", "git"]);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const chosen = starter === "custom" ? custom : starters.find((s) => s.id === starter)!.runtimes;
 
