@@ -243,6 +243,12 @@ mod tests {
         assert_eq!(post(port, init, None, None).await.0, 401);
         assert_eq!(post(port, init, Some("wrong"), None).await.0, 401);
         assert_eq!(post(port, init, Some("secret-token"), Some("https://evil.example")).await.0, 403);
+        // A browser gets a page saying what this is, with nothing private on it.
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        s.write_all(b"GET /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/html,*/*\r\n\r\n").await.unwrap();
+        let mut page = String::new();
+        s.read_to_string(&mut page).await.unwrap();
+        assert!(page.starts_with("HTTP/1.1 200") && page.contains("Settings → AI assistants") && !page.contains("secret-token"));
         assert!(http_running());
         stop_http();
     }
@@ -322,6 +328,11 @@ async fn http_request(mut stream: tokio::net::TcpStream, token: &str) -> std::io
     let mut parts = request_line.split_whitespace();
     let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
     let header = |name: &str| lines.clone().find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string()));
+    // Someone opened the address in a browser: say what it is instead of a bare refusal.
+    // The page holds nothing private; assistants still need the token.
+    if method == "GET" && header("accept").is_some_and(|a| a.contains("text/html")) {
+        return respond(&mut stream, 200, "text/html; charset=utf-8", BROWSER_PAGE).await;
+    }
     if path.split('?').next() != Some("/mcp") {
         return respond(&mut stream, 404, "text/plain", "LampRabit's MCP server is at /mcp").await;
     }
@@ -379,3 +390,12 @@ async fn respond(stream: &mut tokio::net::TcpStream, status: u16, kind: &str, bo
     stream.write_all(response.as_bytes()).await?;
     stream.flush().await
 }
+
+/// What a browser sees at the MCP address: it's for AI assistants, and how to connect one.
+const BROWSER_PAGE: &str = r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LampRabit MCP server</title>
+<style>:root{color-scheme:light dark}body{font:15px/1.55 system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1.25rem;color:#1b2028;background:#f7f8fa}@media(prefers-color-scheme:dark){body{color:#e7ecf1;background:#13171d}code{background:#232a34}}h1{font-size:1.4rem;margin:0 0 .25rem}.ok{color:#178a5f;font-weight:600}code{background:#eceff3;padding:.1rem .35rem;border-radius:.3rem}li{margin:.35rem 0}</style></head>
+<body><h1>LampRabit's MCP server</h1><p class="ok">● Running</p>
+<p>This address is for AI assistants (Claude, Cursor, VS Code…), not for a browser: they connect here with a token, and LampRabit refuses requests without it.</p>
+<p>To connect an assistant, open LampRabit → <b>Settings → AI assistants</b> and either:</p>
+<ul><li>press <b>Connect</b> next to your assistant, or</li><li>copy the <code>claude mcp add …</code> command or the JSON config shown under <b>Run the MCP server in LampRabit</b>; they include the token.</li></ul>
+</body></html>"#;
