@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowLeftRight, ArrowUp, Check, ChevronLeft, Copy, GitBranch, GitCommitHorizontal, GitMerge, KeyRound, Link2, Minus, Pencil, Plus, RefreshCw, RotateCcw, Trash2, Undo2, UserRound, X } from "lucide-react";
 import clsx from "clsx";
 import { api, type GitBranch as Branch, type GitFile, type GitRepoSettings, type GitStatus, type Site } from "../lib/api";
-import { convertUrl, isSsh, nextStep, parseDiff } from "../lib/git";
+import { convertUrl, isSsh, looksSensitive, nextStep, parseDiff, progressPercent, useGitProgress } from "../lib/git";
+import { usePageActive } from "../lib/pageActive";
 import { useAppStore } from "../lib/store";
 import { formatAgo } from "../lib/time";
 import Dialog from "./Dialog";
@@ -26,7 +27,8 @@ export default function ProjectGit({ site }: { site: Site }) {
   const notify = useAppStore((s) => s.notify);
   const onError = (e: unknown) => notify("error", String(e));
   const version = useQuery({ queryKey: ["git-version"], queryFn: api.gitVersion, staleTime: Infinity });
-  const status = useQuery({ queryKey: ["git-status", site.name], queryFn: () => api.gitStatus(site.name), refetchInterval: 5000, enabled: !!version.data });
+  const active = usePageActive();
+  const status = useQuery({ queryKey: ["git-status", site.name], queryFn: () => api.gitStatus(site.name), refetchInterval: active ? 5000 : false, enabled: !!version.data });
   const [view, setView] = useState<View>("changes");
   // Whatever changed the repository refreshes everything that shows it.
   const refresh = () => {
@@ -34,14 +36,22 @@ export default function ProjectGit({ site }: { site: Site }) {
     queryClient.invalidateQueries({ queryKey: ["sites"] });
   };
   const init = useMutation({ mutationFn: () => api.gitInit(site.name), onSuccess: refresh, onError });
+  // Each run gets its own id, so its progress and Cancel don't mix with another's.
+  const [op, setOp] = useState<string | null>(null);
+  const progress = useGitProgress(op);
   const sync = useMutation({
-    mutationFn: (action: SyncAction) => api.gitSync(site.name, action),
+    mutationFn: (action: SyncAction) => {
+      const id = `${site.name}:${action}:${Date.now()}`;
+      setOp(id);
+      return api.gitSync(site.name, action, id);
+    },
+    onSettled: () => setOp(null),
     onSuccess: (out, action) => {
       notify("info", action === "fetch" ? "Fetched" : action === "pull" ? "Pulled" : "Pushed", out.trim() ? out.trim().split("\n").slice(-6) : undefined);
       refresh();
     },
     onError: (e) => {
-      onError(e);
+      if (String(e) !== "Cancelled.") onError(e);
       refresh();
     },
   });
@@ -130,6 +140,8 @@ export default function ProjectGit({ site }: { site: Site }) {
         )}
       </div>
 
+      {sync.isPending && op && <ProgressBar line={progress} label={`${sync.variables === "fetch" ? "Fetching" : sync.variables === "pull" ? "Pulling" : "Pushing"}…`} onCancel={() => void api.gitCancel(op)} />}
+
       {s.operation && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-sm" role="status">
           <GitMerge size={15} className="text-warn" />
@@ -150,6 +162,27 @@ export default function ProjectGit({ site }: { site: Site }) {
       {view === "history" && <History site={site} />}
       {view === "branches" && <Branches site={site} current={s.branch} upstream={s.upstream} onChanged={refresh} />}
       {view === "remotes" && <RemotesAndSettings site={site} status={s} onChanged={refresh} />}
+    </div>
+  );
+}
+
+/** Git's progress for a network operation, with a bar when it gives a percentage, and Cancel. */
+function ProgressBar({ line, label, onCancel }: { line: string | null; label: string; onCancel: () => void }) {
+  const percent = progressPercent(line);
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-line bg-surface px-3 py-2 text-xs" role="status" aria-live="polite">
+      <RefreshCw size={13} className="shrink-0 animate-spin text-accent-text" aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-fg">{line ?? label}</span>
+        {percent !== null && (
+          <span className="mt-1 block h-1 overflow-hidden rounded-full bg-surface-2">
+            <span className="block h-full bg-accent transition-[width]" style={{ width: `${percent}%` }} />
+          </span>
+        )}
+      </span>
+      <Button size="sm" variant="ghost" onClick={onCancel}>
+        <X size={13} /> Cancel
+      </Button>
     </div>
   );
 }
@@ -234,6 +267,8 @@ function Changes({
     onError,
   });
   const hasWork = staged.length > 0 || unstaged.length > 0;
+  const newFiles = unstaged.filter((f) => f.staged === "?").length;
+  const sensitive = (commitAll ? unstaged : staged).filter((f) => looksSensitive(f.path)).map((f) => f.path);
   const canCommit = conflicted.length === 0 && (amend || (hasWork && !!message.trim()));
   const commitLabel = amend ? "Amend" : commitAll ? `Commit all ${unstaged.length}` : `Commit ${staged.length}`;
 
@@ -334,6 +369,13 @@ function Changes({
             </p>
           )}
           {firstCommit && staged.length > 0 && <p className="text-[11px] text-muted">No commits yet: the project's files are staged for the first one. Unstage any you want to leave out.</p>}
+          {commitAll && newFiles > 0 && sensitive.length === 0 && <p className="text-[11px] text-muted">Commit all includes {newFiles} new {newFiles === 1 ? "file" : "files"}. Stage files with + to commit only those.</p>}
+          {sensitive.length > 0 && (
+            <p className="text-[11px] text-warn" role="alert">
+              {sensitive.slice(0, 2).join(", ")}
+              {sensitive.length > 2 && ` and ${sensitive.length - 2} more`} {sensitive.length === 1 ? "looks" : "look"} like secrets or local settings. Add {sensitive.length === 1 ? "it" : "them"} to .gitignore, or stage only the files you mean to commit.
+            </p>
+          )}
           {hasWork || amend ? (
             <textarea
               value={message}
@@ -1156,20 +1198,31 @@ export function CloneDialog({ onClose, onCloned }: { onClose: () => void; onClon
   const notify = useAppStore((s) => s.notify);
   const [url, setUrl] = useState("");
   const [folder, setFolder] = useState("");
+  const [op, setOp] = useState<string | null>(null);
+  const progress = useGitProgress(op);
   const guess = url.trim().replace(/\/+$/, "").split(/[/:]/).pop()?.replace(/\.git$/, "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") ?? "";
   const clone = useMutation({
-    mutationFn: () => api.gitClone(url.trim(), folder.trim() || undefined),
+    mutationFn: () => {
+      const id = `clone:${Date.now()}`;
+      setOp(id);
+      return api.gitClone(url.trim(), folder.trim() || undefined, id);
+    },
+    onSettled: () => setOp(null),
     onSuccess: (name) => {
       notify("info", `Cloned into www/${name}`);
       onCloned(name);
       onClose();
     },
-    onError: (e) => notify("error", String(e)),
+    onError: (e) => String(e) !== "Cancelled." && notify("error", String(e)),
   });
   return (
     <Dialog
       open
-      onClose={onClose}
+      onClose={() => {
+        // Closing while it runs stops the clone; the partial folder is removed.
+        if (op) void api.gitCancel(op);
+        onClose();
+      }}
       title="Clone a repository"
       icon={<GitBranch size={18} />}
       footer={
@@ -1197,6 +1250,7 @@ export function CloneDialog({ onClose, onCloned }: { onClose: () => void; onClon
           <input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder={guess || "shop"} className={clsx(inputClass, "mt-1 font-mono")} />
           <span className="mt-1 block text-xs text-muted">The project is served as https://{folder.trim() || guess || "shop"}.test. Private repositories use your Git credentials or SSH key.</span>
         </label>
+        {clone.isPending && op && <ProgressBar line={progress} label="Connecting…" onCancel={() => void api.gitCancel(op)} />}
         <button type="submit" hidden />
       </form>
     </Dialog>

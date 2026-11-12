@@ -1991,9 +1991,10 @@ async fn git_set_repo_settings(state: State<'_, AppState>, name: String, setting
 }
 
 #[tauri::command]
-async fn git_sync(app: AppHandle, state: State<'_, AppState>, name: String, action: git::Sync) -> Result<String> {
+async fn git_sync(app: AppHandle, state: State<'_, AppState>, name: String, action: git::Sync, op: Option<String>) -> Result<String> {
     let (_, layout) = state.snapshot().await;
-    let out = git::sync(&project_dir(&layout, &name)?, action).await?;
+    let op = op.unwrap_or_else(|| format!("{name}:{action:?}"));
+    let out = git::sync(&app, &op, &project_dir(&layout, &name)?, action).await?;
     logs::system(&app, logs::Level::Info, format!("Git {action:?} in {name} finished"));
     Ok(out)
 }
@@ -2018,14 +2019,20 @@ async fn git_init(state: State<'_, AppState>, name: String) -> Result<()> {
 
 /// Clones a repository into www/; the folder becomes a project like any other.
 #[tauri::command]
-async fn git_clone(app: AppHandle, state: State<'_, AppState>, url: String, folder: Option<String>) -> Result<String> {
+async fn git_clone(app: AppHandle, state: State<'_, AppState>, url: String, folder: Option<String>, op: Option<String>) -> Result<String> {
     let (_, layout) = state.snapshot().await;
     let folder = folder.map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).unwrap_or_else(|| git::folder_for(&url));
     manage::check_project_name(&layout, &folder)?;
     logs::system(&app, logs::Level::Info, format!("Cloning into www/{folder}"));
-    git::clone(&layout.www(), &url, &folder).await?;
+    git::clone(&app, op.as_deref().unwrap_or("clone"), &layout.www(), &url, &folder).await?;
     logs::system(&app, logs::Level::Info, format!("Cloned www/{folder}"));
     Ok(folder)
+}
+
+/// Stops a clone, fetch, pull or push in progress.
+#[tauri::command]
+fn git_cancel(op: String) -> bool {
+    git::cancel(&op)
 }
 
 /// Points a project at the other MySQL-family server (its .env's DB_PORT).
@@ -3304,6 +3311,7 @@ pub fn run() {
             git_set_identity,
             git_init,
             git_clone,
+            git_cancel,
             set_project_env,
             ports_listening,
             set_site_php_ini,

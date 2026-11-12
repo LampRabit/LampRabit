@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -95,19 +95,11 @@ export default function Settings() {
   // "Find a setting": sections whose text doesn't match are hidden. Read from the rendered
   // text, so every label, hint and value counts without a separate index.
   const [find, setFind] = useState("");
-  const [matches, setMatches] = useState<string[] | null>(null);
-  useEffect(() => {
-    const q = find.trim().toLowerCase();
-    const found: string[] = [];
-    for (const { id } of sections) {
-      const el = document.getElementById(`settings-${id}`);
-      if (!el) continue;
-      const hit = !q || (el.textContent ?? "").toLowerCase().includes(q);
-      el.hidden = !hit;
-      if (hit) found.push(id);
-    }
-    setMatches(q ? found : null);
-  }, [find]);
+  // Each Section reports whether it matches; the rail lists those that do.
+  const [hits, setHits] = useState<Record<string, boolean>>({});
+  const query = find.trim().toLowerCase();
+  const matches = query ? sections.map((s) => s.id).filter((id) => hits[id] !== false) : null;
+  const findValue = useMemo(() => ({ query, report: (id: string, hit: boolean) => setHits((h) => (h[id] === hit ? h : { ...h, [id]: hit })) }), [query]);
 
   const activeVersions = useMemo<Versions | null>(
     () => (installed.data ? (Object.fromEntries(installed.data.map((i) => [i.runtime, i.active])) as Versions) : null),
@@ -193,6 +185,7 @@ export default function Settings() {
         }
       />
 
+      <FindContext.Provider value={findValue}>
       <div className="grid items-start gap-8 lg:grid-cols-[12rem_minmax(0,1fr)]">
         <nav aria-label="Settings sections" className="sticky top-4 hidden lg:block">
           <input
@@ -621,6 +614,7 @@ export default function Settings() {
           {uninstalling && <UninstallDialog onClose={() => setUninstalling(false)} />}
         </div>
       </div>
+      </FindContext.Provider>
       {moving && settings.data && <MoveEnvironmentDialog current={settings.data.rootDir} onClose={() => setMoving(false)} />}
       <ApplyBar
         dirty={dirty}
@@ -636,9 +630,22 @@ export default function Settings() {
 }
 
 /** A settings group: a heading and rows separated by lines. */
+/** "Find a setting": the query, and how a section says whether its text matches it. */
+const FindContext = createContext<{ query: string; report: (id: string, hit: boolean) => void }>({ query: "", report: () => {} });
+
 function Section({ id, title, subtitle, children }: { id: string; title: string; subtitle?: string; children: ReactNode }) {
+  const { query, report } = useContext(FindContext);
+  const ref = useRef<HTMLElement>(null);
+  const [hit, setHit] = useState(true);
+  // Matched against the rendered text, so every label, hint and value counts without a
+  // separate index; the section hides itself through its own state.
+  useLayoutEffect(() => {
+    const yes = !query || (ref.current?.textContent ?? "").toLowerCase().includes(query);
+    setHit(yes);
+    report(id, yes);
+  }, [query, id, report]);
   return (
-    <section id={`settings-${id}`} aria-labelledby={`settings-${id}-title`} className="scroll-mt-4">
+    <section ref={ref} hidden={!hit} id={`settings-${id}`} aria-labelledby={`settings-${id}-title`} className="scroll-mt-4">
       <h2 id={`settings-${id}-title`} className="text-base font-bold tracking-tight">
         {title}
       </h2>

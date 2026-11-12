@@ -199,6 +199,125 @@ async fn run(dir: &Path, args: &[&str], timeout: Duration) -> Result<std::proces
     Ok(out)
 }
 
+/// Network operations in flight, by the id the UI gave them, so they can be cancelled.
+static RUNNING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>> = std::sync::LazyLock::new(Default::default);
+
+/// Progress of a clone, fetch, pull or push: git's own progress lines ("Receiving objects:
+/// 45% (450/1000)"), sent as `git-progress` while it runs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Progress {
+    pub op: String,
+    pub line: String,
+    pub done: bool,
+}
+
+/// Stops an operation started with `streamed`; false when it already ended.
+pub fn cancel(op: &str) -> bool {
+    RUNNING.lock().ok().and_then(|mut m| m.remove(op)).is_some_and(|tx| tx.send(()).is_ok())
+}
+
+/// Runs a long git command (with --progress), sending its progress lines as events and
+/// stopping it when `cancel(op)` is called. Ok(stdout and the last messages) on success.
+async fn streamed(app: &tauri::AppHandle, op: &str, dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
+    use tauri::Emitter;
+    use tokio::io::AsyncReadExt;
+    let mut cmd = tokio::process::Command::new("git");
+    cmd.args(["-c", "core.quotepath=false", "-c", "color.ui=false", "-c", "protocol.ext.allow=never", "-c", "core.safecrlf=false"])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_EDITOR", "true")
+        .env("GCM_INTERACTIVE", "auto")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    procgroup::prepare(&mut cmd);
+    let mut child = cmd.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            Error::msg("Git isn't installed (or not on PATH). Install it from Services → Essentials, then try again.")
+        } else {
+            e.into()
+        }
+    })?;
+    let (tx, mut rx) = tokio::sync::oneshot::channel();
+    if let Ok(mut m) = RUNNING.lock() {
+        m.insert(op.to_string(), tx);
+    }
+    let mut stdout = child.stdout.take().expect("piped");
+    let mut stderr = child.stderr.take().expect("piped");
+    let out_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf).await;
+        buf
+    });
+    // Progress lines end in \r (redrawn in place) or \n; each becomes one event.
+    let (app2, op2) = (app.clone(), op.to_string());
+    let err_task = tokio::spawn(async move {
+        let mut lines: Vec<String> = Vec::new();
+        let mut current = Vec::new();
+        let mut chunk = [0u8; 4096];
+        while let Ok(n) = stderr.read(&mut chunk).await {
+            if n == 0 {
+                break;
+            }
+            for &b in &chunk[..n] {
+                if b == b'\r' || b == b'\n' {
+                    let line = without_secrets(String::from_utf8_lossy(&current).trim());
+                    current.clear();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let _ = app2.emit("git-progress", Progress { op: op2.clone(), line: line.clone(), done: false });
+                    // Keep messages, not every redraw of a percentage.
+                    if b == b'\n' {
+                        lines.push(line);
+                    }
+                } else {
+                    current.push(b);
+                }
+            }
+        }
+        if !current.is_empty() {
+            lines.push(without_secrets(String::from_utf8_lossy(&current).trim()));
+        }
+        lines
+    });
+    let outcome = tokio::select! {
+        status = child.wait() => Some(status),
+        _ = &mut rx => None,
+        _ = tokio::time::sleep(timeout) => {
+            let _ = child.start_kill();
+            let _ = app.emit("git-progress", Progress { op: op.to_string(), line: String::new(), done: true });
+            if let Ok(mut m) = RUNNING.lock() { m.remove(op); }
+            return Err(Error::msg(format!("git {} took longer than {} minutes and was stopped.", args.first().unwrap_or(&""), timeout.as_secs() / 60)));
+        }
+    };
+    if let Ok(mut m) = RUNNING.lock() {
+        m.remove(op);
+    }
+    let _ = app.emit("git-progress", Progress { op: op.to_string(), line: String::new(), done: true });
+    let Some(status) = outcome else {
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+        return Err(Error::msg("Cancelled."));
+    };
+    let status = status?;
+    let stdout = String::from_utf8_lossy(&out_task.await.unwrap_or_default()).into_owned();
+    let messages: Vec<String> = err_task.await.unwrap_or_default().into_iter().filter(|l| !l.starts_with("hint:") && !is_progress(l)).collect();
+    if status.success() {
+        return Ok(without_secrets(&format!("{}{}", stdout, messages.join("\n"))));
+    }
+    let message = messages.join("\n");
+    Err(Error::msg(if message.is_empty() { format!("git {} failed.", args.first().unwrap_or(&"")) } else { message }))
+}
+
+/// "Receiving objects:  45% (450/1000)": a redraw, not a message worth keeping.
+fn is_progress(line: &str) -> bool {
+    line.contains('%') && (line.contains("objects") || line.contains("deltas") || line.contains("files"))
+}
+
 /// Runs git in `dir`; Ok(stdout) on success, else git's own message (stderr) as the error.
 async fn git(dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {
     let out = run(dir, args, timeout).await?;
@@ -722,27 +841,27 @@ pub async fn set_repo_settings(dir: &Path, settings: &RepoSettings) -> Result<()
     Ok(())
 }
 
-pub async fn sync(dir: &Path, action: Sync) -> Result<String> {
+pub async fn sync(app: &tauri::AppHandle, op: &str, dir: &Path, action: Sync) -> Result<String> {
     let status = status(dir).await?;
     if status.remotes.is_empty() {
         return Err(Error::msg("This repository has no remote yet: add one under Remotes."));
     }
     let out = match action {
-        Sync::Fetch => git(dir, &["fetch", "--all", "--prune"], NETWORK).await?,
+        Sync::Fetch => streamed(app, op, dir, &["fetch", "--all", "--progress"], NETWORK).await?,
         Sync::Pull => {
             if status.upstream.is_none() {
                 return Err(Error::msg("This branch doesn't track a remote branch yet: push it first, or switch to one that does."));
             }
-            git(dir, &["pull", "--no-edit", "--ff"], NETWORK).await?
+            streamed(app, op, dir, &["pull", "--no-edit", "--progress"], NETWORK).await?
         }
         Sync::Push => {
             let branch = status.branch.ok_or_else(|| Error::msg("HEAD is detached: switch to a branch before pushing."))?;
             if status.upstream.is_some() {
-                git(dir, &["push"], NETWORK).await?
+                streamed(app, op, dir, &["push", "--progress"], NETWORK).await?
             } else {
                 // The first push of a branch sets it up to track the same name on the first remote.
                 let remote = status.remotes.iter().find(|r| r.name == "origin").unwrap_or(&status.remotes[0]).name.clone();
-                git(dir, &["push", "--set-upstream", &remote, &branch], NETWORK).await?
+                streamed(app, op, dir, &["push", "--progress", "--set-upstream", &remote, &branch], NETWORK).await?
             }
         }
     };
@@ -812,13 +931,17 @@ pub async fn init(dir: &Path) -> Result<()> {
 }
 
 /// Clones into www/<folder>; the folder must not exist yet.
-pub async fn clone(www: &Path, url: &str, folder: &str) -> Result<PathBuf> {
+pub async fn clone(app: &tauri::AppHandle, op: &str, www: &Path, url: &str, folder: &str) -> Result<PathBuf> {
     check_url(url)?;
     let target = www.join(folder);
     if target.exists() {
         return Err(Error::msg(format!("www/{folder} exists already: pick another folder name.")));
     }
-    git(www, &["clone", "--", url.trim(), folder], Duration::from_secs(900)).await?;
+    if let Err(e) = streamed(app, op, www, &["clone", "--progress", "--", url.trim(), folder], Duration::from_secs(1800)).await {
+        // A cancelled or failed clone leaves a partial folder; it isn't a project.
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(e);
+    }
     Ok(target)
 }
 
@@ -951,7 +1074,7 @@ u UU N... 100644 100644 100644 100644 f1 f2 f3 conflict.txt\0\
         set_repo_settings(&dir, &RepoSettings { pull: Some("rebase".into()), prune: true, auto_setup_remote: true }).await.unwrap();
         let rs = repo_settings(&dir).await;
         assert_eq!((rs.pull.as_deref(), rs.prune, rs.auto_setup_remote), (Some("rebase"), true, true));
-        assert!(sync(&dir, Sync::Push).await.is_err());
+        assert!(status(&dir).await.unwrap().remotes.is_empty());
         remote(&dir, RemoteAction::Add { name: "origin".into(), url: "https://user:secret@example.com/x.git".into() }).await.unwrap();
         assert_eq!(status(&dir).await.unwrap().remotes[0].url, "https://example.com/x.git");
         remote(&dir, RemoteAction::SetPushUrl { name: "origin".into(), url: Some("git@example.com:x.git".into()) }).await.unwrap();

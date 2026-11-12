@@ -55,6 +55,8 @@ interface AppStore {
   activeProfile: string | null;
   setActiveProfile: (name: string | null) => void;
   logs: LogEntry[];
+  /** Lines that fell out of the view because it keeps only the newest ones. */
+  logsDropped: number;
   notices: Notice[];
   activity: Activity[];
   /** In-flight installs keyed by installKey(). */
@@ -119,6 +121,7 @@ export const useAppStore = create<AppStore>((set) => ({
     set({ activeProfile });
   },
   logs: [],
+  logsDropped: 0,
   notices: [],
   activity: [{ id: nextId++, at: new Date(), text: "Environment ready", source: "System", tone: "info" }],
   installs: {},
@@ -131,7 +134,7 @@ export const useAppStore = create<AppStore>((set) => ({
       return { installs };
     }),
   pushLog: (line) =>
-    set((s) => (line.id <= logCursor ? s : { logs: [...s.logs.slice(-(MAX_LOG_LINES - 1)), parseLog(line)] })),
+    set((s) => (line.id <= logCursor ? s : { logs: [...s.logs.slice(-(MAX_LOG_LINES - 1)), parseLog(line)], logsDropped: s.logsDropped + (s.logs.length >= MAX_LOG_LINES ? 1 : 0) })),
   loadHistory: ({ lines, cursor }) =>
     set((s) => {
       logCursor = cursor;
@@ -160,9 +163,9 @@ export const useAppStore = create<AppStore>((set) => ({
       }
       const live = s.logs.filter((l) => l.id > cursor);
       const merged = [...history, ...live].sort((a, b) => a.time.getTime() - b.time.getTime());
-      return { logs: merged.slice(-MAX_LOG_LINES) };
+      return { logs: merged.slice(-MAX_LOG_LINES), logsDropped: Math.max(0, merged.length - MAX_LOG_LINES) };
     }),
-  clearLogs: () => set({ logs: [] }),
+  clearLogs: () => set({ logs: [], logsDropped: 0 }),
   record: (text, source, tone) =>
     set((s) => ({
       activity: [{ id: nextId++, at: new Date(), text, source, tone }, ...s.activity].slice(0, MAX_ACTIVITY),

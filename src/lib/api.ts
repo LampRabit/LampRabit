@@ -158,6 +158,13 @@ export interface GitStatus {
   remotes: { name: string; url: string; pushUrl: string | null }[];
 }
 
+/** A line of git's progress for a clone, fetch, pull or push (`git-progress` event). */
+export interface GitProgress {
+  op: string;
+  line: string;
+  done: boolean;
+}
+
 export interface GitRepoSettings {
   pull: "merge" | "rebase" | "ff-only" | null;
   prune: boolean;
@@ -897,11 +904,12 @@ export const api = {
   gitCommitFileDiff: (name: string, hash: string, path: string) => invoke<string>("git_commit_file_diff", { name, hash, path }),
   gitRepoSettings: (name: string) => invoke<GitRepoSettings>("git_repo_settings", { name }),
   gitSetRepoSettings: (name: string, settings: GitRepoSettings) => invoke<void>("git_set_repo_settings", { name, settings }),
-  gitSync: (name: string, action: "fetch" | "pull" | "push") => invoke<string>("git_sync", { name, action }),
+  gitSync: (name: string, action: "fetch" | "pull" | "push", op?: string) => invoke<string>("git_sync", { name, action, op: op ?? null }),
+  gitCancel: (op: string) => invoke<boolean>("git_cancel", { op }),
   gitRemote: (name: string, action: GitRemoteAction) => invoke<void>("git_remote", { name, action }),
   gitSetIdentity: (name: string, user: string, email: string) => invoke<void>("git_set_identity", { name, user, email }),
   gitInit: (name: string) => invoke<void>("git_init", { name }),
-  gitClone: (url: string, folder?: string) => invoke<string>("git_clone", { url, folder: folder ?? null }),
+  gitClone: (url: string, folder?: string, op?: string) => invoke<string>("git_clone", { url, folder: folder ?? null, op: op ?? null }),
   createProjectDatabase: (name: string) => invoke<void>("create_project_database", { name }),
   setProjectEnv: (name: string, key: string, value: string) => invoke<void>("set_project_env", { name, key, value }),
   portsListening: (ports: number[]) => invoke<number[]>("ports_listening", { ports }),

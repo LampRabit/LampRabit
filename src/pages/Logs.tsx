@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { api, serviceLabels, type Dump, type DumpNode, type LogStream, type ServiceKind } from "../lib/api";
 import type { Level, LogEntry } from "../lib/logparse";
@@ -71,6 +72,8 @@ const columns = "grid-cols-[9.5rem_7.5rem_4rem_minmax(0,1fr)]";
 export default function Logs() {
   const queryClient = useQueryClient();
   const logs = useAppStore((s) => s.logs);
+  const logsDropped = useAppStore((s) => s.logsDropped);
+  const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
   const clearLogs = useAppStore((s) => s.clearLogs);
   const loadHistory = useAppStore((s) => s.loadHistory);
   const notify = useAppStore((s) => s.notify);
@@ -571,6 +574,15 @@ export default function Logs() {
               </span>
             </span>
           </div>
+          {/* The view keeps the newest lines only; a busy day's earliest ones are then only in the files. */}
+          {logsDropped > 0 && (
+            <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-200" role="status">
+              Showing the newest {logs.length.toLocaleString()} lines; {logsDropped.toLocaleString()} older {logsDropped === 1 ? "line is" : "lines are"} only in the log files.
+              <button type="button" onClick={() => paths.data && openPath(paths.data.logs).catch(onError)} className="font-medium underline">
+                Open the logs folder
+              </button>
+            </div>
+          )}
           <div ref={scroller} className="selectable scrollbar-none min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3 font-mono text-[12px] leading-6">
             <div className={clsx("sticky top-0 z-10 grid border-b border-white/10 bg-terminal-2 px-4 py-2 text-[11px] font-semibold tracking-wide text-slate-400 uppercase", columns)}>
               <span>Timestamp</span>
