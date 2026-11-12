@@ -57,6 +57,8 @@ pub struct Settings {
     pub auto_restart: BTreeSet<String>,
     /// PHP's dump() and dd() go to Logs (VarDumper's server mode) instead of the page.
     pub catch_dumps: bool,
+    /// LampRabit runs its MCP server over HTTP (ports.mcp) for AI assistants to connect to.
+    pub mcp_server: bool,
     /// A log file bigger than this (MB) is rotated; `log_keep` older copies are kept, and
     /// the logs folder as a whole stays under `log_total_mb`.
     pub log_max_mb: u32,
@@ -450,6 +452,8 @@ pub struct Ports {
     pub mail_ui: u16,
     /// Where PHP's dump() sends dumps for Logs (Symfony's dump server uses 9912 too).
     pub dumps: u16,
+    /// LampRabit's own MCP server over HTTP, when it's switched on.
+    pub mcp: u16,
 }
 
 /// Active version per runtime; `None` means not installed yet.
@@ -552,6 +556,7 @@ impl Default for Settings {
             // n8n's Node process is the one that falls over on large workflows.
             auto_restart: BTreeSet::from(["n8n".to_string()]),
             catch_dumps: false,
+            mcp_server: false,
             log_max_mb: 10,
             log_keep: 3,
             log_total_mb: 500,
@@ -605,6 +610,7 @@ impl Default for Ports {
             memcached: 11211,
             mail_ui: 8025,
             dumps: 9912,
+            mcp: 39813,
         }
     }
 }

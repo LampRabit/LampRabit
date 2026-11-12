@@ -256,6 +256,16 @@ export interface DoctorIssue {
   fix: { label: string; preview: string; action: { kind: string } & Record<string, unknown> } | null;
 }
 
+/** LampRabit's MCP server: the in-app HTTP server, and the assistants it can be added to. */
+export interface McpStatus {
+  running: boolean;
+  url: string;
+  token: string;
+  command: string;
+  args: string[];
+  clients: { id: string; name: string; installed: boolean; connected: boolean; path: string | null }[];
+}
+
 /** One component of a first-run starter stack (starterPlan). */
 export interface StarterItem {
   runtime: Runtime;
@@ -770,6 +780,8 @@ export interface Settings {
     memcached: number;
     /** Where PHP's dump() sends dumps for Logs. */
     dumps: number;
+    /** LampRabit's own MCP server over HTTP. */
+    mcp: number;
   };
   versions: Partial<Record<Runtime, string | null>>;
   /** The web servers that run; the first is the primary one (main ports, localhost, tools). */
@@ -794,6 +806,8 @@ export interface Settings {
   autoRestart: string[];
   /** dump() and dd() go to Logs instead of the page. */
   catchDumps: boolean;
+  /** LampRabit runs its MCP server over HTTP (ports.mcp). */
+  mcpServer: boolean;
   /** Log files over logMaxMb are rotated, logKeep old copies kept, the folder under logTotalMb. */
   logMaxMb: number;
   logKeep: number;
@@ -916,6 +930,9 @@ export const api = {
   databaseStatus: (name: string) => invoke<DbStatus | null>("database_status", { name }),
   switchProjectDatabase: (name: string, engine: "mariadb" | "mysql") => invoke<void>("switch_project_database", { name, engine }),
   projectDoctor: (name: string) => invoke<DoctorIssue[]>("project_doctor", { name }),
+  mcpStatus: () => invoke<McpStatus>("mcp_status"),
+  setMcpServer: (enabled: boolean) => invoke<void>("set_mcp_server", { enabled }),
+  mcpConnect: (client: string, on: boolean) => invoke<string>("mcp_connect", { client, on }),
   doctorFix: (name: string, id: string) => invoke<string>("doctor_fix", { name, id }),
   gitVersion: () => invoke<string | null>("git_version"),
   gitStatus: (name: string) => invoke<GitStatus>("git_status", { name }),

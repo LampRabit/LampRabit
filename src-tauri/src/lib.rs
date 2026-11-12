@@ -7,6 +7,7 @@ mod config;
 mod control;
 mod cli;
 mod mcp;
+mod mcp_clients;
 mod configs;
 mod cron;
 mod diagnose;
@@ -2329,6 +2330,82 @@ async fn control_command(app: AppHandle, cmd: &str, args: serde_json::Value) -> 
     }
 }
 
+/// The token clients send to LampRabit's MCP server over HTTP, made once and kept in the
+/// app's config folder (readable by the user only).
+fn mcp_token(app: &AppHandle) -> Result<String> {
+    let path = app.path().app_config_dir().map_err(|e| Error::msg(e.to_string()))?.join("mcp-token");
+    if let Ok(t) = std::fs::read_to_string(&path) {
+        if t.trim().len() >= 32 {
+            return Ok(t.trim().to_string());
+        }
+    }
+    use std::hash::{BuildHasher, Hasher};
+    let token: String = (0..2)
+        .map(|i| {
+            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+            h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() + i);
+            format!("{:016x}", h.finish())
+        })
+        .collect();
+    std::fs::create_dir_all(path.parent().unwrap())?;
+    std::fs::write(&path, &token)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(token)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpStatus {
+    /// The HTTP server runs (Settings → AI assistants).
+    running: bool,
+    url: String,
+    token: String,
+    /// What LampRabit adds to an assistant's config: its own program with these arguments.
+    command: String,
+    args: Vec<&'static str>,
+    clients: Vec<mcp_clients::ClientStatus>,
+}
+
+#[tauri::command]
+async fn mcp_status(app: AppHandle, state: State<'_, AppState>) -> Result<McpStatus> {
+    let (settings, _) = state.snapshot().await;
+    Ok(McpStatus {
+        running: mcp::http_running(),
+        url: format!("http://127.0.0.1:{}/mcp", settings.ports.mcp),
+        token: mcp_token(&app)?,
+        command: std::env::current_exe()?.to_string_lossy().into_owned(),
+        args: vec!["--cli", "mcp"],
+        clients: mcp_clients::status(),
+    })
+}
+
+/// Switches LampRabit's own MCP server (HTTP, on ports.mcp) on or off, and remembers it.
+#[tauri::command]
+async fn set_mcp_server(app: AppHandle, state: State<'_, AppState>, enabled: bool) -> Result<()> {
+    if enabled {
+        let port = state.snapshot().await.0.ports.mcp;
+        mcp::start_http(port, mcp_token(&app)?).await?;
+        logs::system(&app, logs::Level::Info, format!("MCP server on http://127.0.0.1:{port}/mcp"));
+    } else {
+        mcp::stop_http();
+        logs::system(&app, logs::Level::Info, "MCP server stopped");
+    }
+    state.update_settings(|s| s.mcp_server = enabled).await?;
+    Ok(())
+}
+
+/// Adds LampRabit to (or removes it from) an AI assistant's MCP config.
+#[tauri::command]
+fn mcp_connect(app: AppHandle, client: String, on: bool) -> Result<String> {
+    let note = mcp_clients::set(&client, on)?;
+    logs::system(&app, logs::Level::Info, note.clone());
+    Ok(note)
+}
+
 /// Points a project at the other MySQL-family server (its .env's DB_PORT).
 #[tauri::command]
 async fn switch_project_database(state: State<'_, AppState>, name: String, engine: manage::Engine) -> Result<()> {
@@ -3647,11 +3724,22 @@ pub fn run() {
             });
 
             setup_tray(app)?;
-            // The control channel for the `lamprabit` command line and its MCP server.
+            // The control channel for the `lamprabit` command line and its MCP server, and the
+            // MCP server over HTTP when it's switched on.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = control::serve(handle.clone(), control_dispatch).await {
                     logs::system(&handle, logs::Level::Warn, format!("The command line's control channel couldn't start: {e}"));
+                }
+                let settings = handle.state::<AppState>().snapshot().await.0;
+                if settings.mcp_server {
+                    let started = match mcp_token(&handle) {
+                        Ok(token) => mcp::start_http(settings.ports.mcp, token).await,
+                        Err(e) => Err(e),
+                    };
+                    if let Err(e) = started {
+                        logs::system(&handle, logs::Level::Warn, format!("The MCP server didn't start: {e}"));
+                    }
                 }
             });
             // A window bigger than the screen (1280×860 on a 1024×768 display) would open
@@ -3701,6 +3789,9 @@ pub fn run() {
             database_status,
             create_project_database,
             switch_project_database,
+            mcp_status,
+            set_mcp_server,
+            mcp_connect,
             project_doctor,
             doctor_fix,
             git_version,

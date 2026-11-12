@@ -206,6 +206,47 @@ mod tests {
         assert_eq!(unknown["error"]["code"], -32601);
     }
 
+    /// The HTTP transport, over a real socket: answers with the token, refuses without it or
+    /// from a web page, and takes notifications with 202.
+    #[tokio::test]
+    async fn serves_over_http() {
+        use tokio::io::AsyncReadExt;
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        start_http(port, "secret-token".into()).await.unwrap();
+        async fn post(port: u16, body: &str, auth: Option<&str>, origin: Option<&str>) -> (u16, String) {
+            let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            let crlf = "\r\n";
+            let mut req = format!("POST /mcp HTTP/1.1{crlf}Host: 127.0.0.1{crlf}Content-Type: application/json{crlf}Content-Length: {}{crlf}", body.len());
+            if let Some(a) = auth {
+                req.push_str(&format!("Authorization: Bearer {a}{crlf}"));
+            }
+            if let Some(o) = origin {
+                req.push_str(&format!("Origin: {o}{crlf}"));
+            }
+            req.push_str(crlf);
+            req.push_str(body);
+            s.write_all(req.as_bytes()).await.unwrap();
+            let mut out = String::new();
+            s.read_to_string(&mut out).await.unwrap();
+            let status = out.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
+            let body = out.split("\r\n\r\n").nth(1).unwrap_or_default().to_string();
+            (status, body)
+        }
+        let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#;
+        let (status, body) = post(port, init, Some("secret-token"), None).await;
+        assert_eq!(status, 200);
+        assert!(body.contains("\"lamprabit\""), "{body}");
+        let (status, body) = post(port, r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#, Some("secret-token"), Some("http://localhost:5173")).await;
+        assert_eq!(status, 200);
+        assert!(body.contains("read_logs"));
+        assert_eq!(post(port, r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#, Some("secret-token"), None).await.0, 202);
+        assert_eq!(post(port, init, None, None).await.0, 401);
+        assert_eq!(post(port, init, Some("wrong"), None).await.0, 401);
+        assert_eq!(post(port, init, Some("secret-token"), Some("https://evil.example")).await.0, 403);
+        assert!(http_running());
+        stop_http();
+    }
+
     #[test]
     fn maps_tool_arguments() {
         let tools = tools();
@@ -214,4 +255,127 @@ mod tests {
         let logs = tools.iter().find(|t| t.name == "read_logs").unwrap();
         assert_eq!(request(logs, &json!({"lines": 5000}))["lines"], 1000);
     }
+}
+
+// ---- The same server over HTTP, run by the app itself (Settings → AI assistants). ----
+
+/// The running HTTP server, so it can be stopped from Settings.
+static HTTP: std::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>> = std::sync::Mutex::new(None);
+
+pub fn http_running() -> bool {
+    HTTP.lock().ok().is_some_and(|h| h.as_ref().is_some_and(|t| !t.inner().is_finished()))
+}
+
+pub fn stop_http() {
+    if let Some(task) = HTTP.lock().ok().and_then(|mut h| h.take()) {
+        task.abort();
+    }
+}
+
+/// MCP's Streamable HTTP transport, answering with plain JSON: POST /mcp with a JSON-RPC
+/// message, the token as a Bearer header. Only 127.0.0.1, and a browser page from another
+/// site is refused (its Origin header), so a web page can't reach it by rebinding a domain.
+pub async fn start_http(port: u16, token: String) -> crate::error::Result<()> {
+    stop_http();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+        .await
+        .map_err(|e| crate::error::Error::msg(format!("Port {port} is taken ({e}); pick another for the MCP server.")))?;
+    let task = tauri::async_runtime::spawn(async move {
+        loop {
+            let Ok((stream, peer)) = listener.accept().await else { continue };
+            if !peer.ip().is_loopback() {
+                continue;
+            }
+            let token = token.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = http_request(stream, &token).await;
+            });
+        }
+    });
+    if let Ok(mut h) = HTTP.lock() {
+        *h = Some(task);
+    }
+    Ok(())
+}
+
+async fn http_request(mut stream: tokio::net::TcpStream, token: &str) -> std::io::Result<()> {
+    use tokio::io::AsyncReadExt;
+    // Headers, then a body of Content-Length bytes; both bounded.
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let head_end = loop {
+        let n = tokio::time::timeout(std::time::Duration::from_secs(10), stream.read(&mut chunk)).await.map_err(|_| std::io::ErrorKind::TimedOut)??;
+        if n == 0 {
+            return Ok(());
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break i + 4;
+        }
+        if buf.len() > 64 * 1024 {
+            return respond(&mut stream, 431, "", "").await;
+        }
+    };
+    let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
+    let mut lines = head.lines();
+    let request_line = lines.next().unwrap_or_default();
+    let mut parts = request_line.split_whitespace();
+    let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    let header = |name: &str| lines.clone().find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string()));
+    if path.split('?').next() != Some("/mcp") {
+        return respond(&mut stream, 404, "text/plain", "LampRabit's MCP server is at /mcp").await;
+    }
+    if let Some(origin) = header("origin") {
+        let local = ["http://localhost", "http://127.0.0.1", "https://localhost", "https://127.0.0.1"].iter().any(|o| origin == *o || origin.starts_with(&format!("{o}:")));
+        if !local {
+            return respond(&mut stream, 403, "text/plain", "Requests from web pages aren't allowed").await;
+        }
+    }
+    if header("authorization").as_deref() != Some(&format!("Bearer {token}")) {
+        return respond(&mut stream, 401, "text/plain", "Missing or wrong token: copy the config from LampRabit's Settings").await;
+    }
+    if method != "POST" {
+        // No server-initiated stream: everything is a reply to a POST.
+        return respond(&mut stream, 405, "text/plain", "Use POST").await;
+    }
+    let length: usize = header("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
+    if length > 4 * 1024 * 1024 {
+        return respond(&mut stream, 413, "", "").await;
+    }
+    let mut body = buf[head_end..].to_vec();
+    while body.len() < length {
+        let n = stream.read(&mut chunk).await?;
+        if n == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..n]);
+    }
+    let Ok(message) = serde_json::from_slice::<Value>(&body) else {
+        let error = json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "Parse error"}});
+        return respond(&mut stream, 400, "application/json", &error.to_string()).await;
+    };
+    // The app is running (it's serving this), so tools never launch it.
+    match answer(false, &message).await {
+        Some(reply) => respond(&mut stream, 200, "application/json", &reply.to_string()).await,
+        None => respond(&mut stream, 202, "", "").await,
+    }
+}
+
+async fn respond(stream: &mut tokio::net::TcpStream, status: u16, kind: &str, body: &str) -> std::io::Result<()> {
+    let reason = match status {
+        200 => "OK",
+        202 => "Accepted",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        413 => "Payload Too Large",
+        _ => "Request Header Fields Too Large",
+    };
+    let kind = if kind.is_empty() { String::new() } else { format!("Content-Type: {kind}\r\n") };
+    let allow = if status == 405 { "Allow: POST\r\n" } else { "" };
+    let response = format!("HTTP/1.1 {status} {reason}\r\n{kind}{allow}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+    stream.write_all(response.as_bytes()).await?;
+    stream.flush().await
 }

@@ -34,7 +34,12 @@ Exit codes: `0` done, `1` the request failed (the message says why), `2` usage, 
 
 ## MCP for AI assistants
 
-`lamprabit mcp` is an [MCP](https://modelcontextprotocol.io) server over stdio. Settings → Terminal shows the entry to copy into an assistant's MCP settings, for example:
+No terminal needed: **Settings → AI assistants** does it from the app.
+
+- **Connect** adds LampRabit to Claude Desktop, Claude Code, Cursor, VS Code or Windsurf: it writes a `lamprabit` entry into that assistant's MCP config (keeping everything else, in order, and backing the file up the first time); **Disconnect** removes it. The assistant then starts LampRabit's MCP server itself, with LampRabit open or not.
+- **Run the MCP server in LampRabit** serves it over HTTP at `http://127.0.0.1:39813/mcp` (Settings → Ports → MCP server) for assistants that connect by URL. Only this computer can reach it; requests need the token shown there (`Authorization: Bearer …`), and requests from web pages are refused. The section shows the `claude mcp add` command and the JSON to copy.
+
+By hand, `lamprabit mcp` is the same server over stdio, for example:
 
 ```json
 { "mcpServers": { "lamprabit": { "command": "C:\\lampRabit\\shims\\lamprabit.cmd", "args": ["mcp"] } } }
