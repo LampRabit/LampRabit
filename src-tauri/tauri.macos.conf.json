@@ -1,4 +1,5 @@
 {
+  "$schema": "https://schema.tauri.app/config/2",
   "app": {
     "windows": [
       {
@@ -9,9 +10,10 @@
         "minHeight": 600,
         "center": true,
         "decorations": true,
-        "shadow": true,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 18, "y": 24 },
+        "shadow": true
       }
     ]
   }

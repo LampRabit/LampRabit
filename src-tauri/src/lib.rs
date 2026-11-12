@@ -3393,6 +3393,18 @@ pub fn run() {
             });
 
             setup_tray(app)?;
+            // A window bigger than the screen (1280×860 on a 1024×768 display) would open
+            // partly off it, hiding its controls: fit it to the screen's work area first.
+            if let Some(w) = app.get_webview_window("main") {
+                if let (Ok(Some(monitor)), Ok(size)) = (w.current_monitor(), w.outer_size()) {
+                    let area = monitor.work_area().size;
+                    if size.width > area.width || size.height > area.height {
+                        let fitted = tauri::PhysicalSize::new(size.width.min(area.width * 95 / 100), size.height.min(area.height * 95 / 100));
+                        let _ = w.set_size(fitted);
+                        let _ = w.center();
+                    }
+                }
+            }
             // Started with the OS: stay in the tray.
             if std::env::args().any(|a| a == "--minimized") {
                 if let Some(w) = app.get_webview_window("main") {
