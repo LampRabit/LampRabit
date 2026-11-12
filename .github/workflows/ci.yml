@@ -20,6 +20,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build # tsc + vite build
+      - run: npm test # Vitest: unit, property and component tests
 
   rust:
     strategy:

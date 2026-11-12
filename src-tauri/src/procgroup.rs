@@ -14,6 +14,56 @@ pub struct ProcGroup {
     pgid: i32,
 }
 
+/// Whether LampRabit runs with administrator rights (an elevated token on Windows): with
+/// UAC off, or "Run as administrator". PostgreSQL refuses to start that way.
+#[cfg(windows)]
+pub fn elevated() -> bool {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, HANDLE},
+        Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+    unsafe {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut size = 0u32;
+        let ok = GetTokenInformation(token, TokenElevation, &mut elevation as *mut _ as *mut _, std::mem::size_of::<TOKEN_ELEVATION>() as u32, &mut size);
+        CloseHandle(token);
+        ok != 0 && elevation.TokenIsElevated != 0
+    }
+}
+
+#[cfg(not(windows))]
+pub fn elevated() -> bool {
+    false
+}
+
+/// Whether a process is still running.
+#[cfg(windows)]
+pub fn alive(pid: u32) -> bool {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, WAIT_TIMEOUT},
+        System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE},
+    };
+    unsafe {
+        let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let running = WaitForSingleObject(handle, 0) == WAIT_TIMEOUT;
+        CloseHandle(handle);
+        running
+    }
+}
+
+#[cfg(unix)]
+pub fn alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
 /// Must be called on the command before spawning.
 pub fn prepare(cmd: &mut Command) {
     #[cfg(windows)]

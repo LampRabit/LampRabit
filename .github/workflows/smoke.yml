@@ -6,7 +6,7 @@ name: Smoke test
 # doesn't have (Typesense on Windows, MariaDB on macOS…) are reported as skipped, with why.
 on:
   pull_request:
-    paths: ["src-tauri/src/**", "src-tauri/Cargo.toml", ".github/workflows/smoke.yml"]
+    paths: ["src-tauri/src/**", "src-tauri/Cargo.toml", "src/**", ".github/workflows/smoke.yml"]
   schedule:
     # Tuesdays, after Monday's runtime builds: catches upstream download changes too.
     - cron: "0 6 * * 2"
@@ -39,7 +39,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-24.04, macos-latest]
+        # macos-latest is Apple silicon; macos-15-intel covers Intel Macs.
+        os: [windows-latest, ubuntu-24.04, macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     steps:
@@ -87,6 +88,9 @@ jobs:
       - name: Summary
         if: always()
         shell: bash
+        # Windows' Python writes the cp1252 code page by default, which has no emoji.
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           python3 - "$RUNNER_TEMP/lamprabit-smoke/smoke-report.json" >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           import json, sys
@@ -110,3 +114,49 @@ jobs:
             ${{ runner.temp }}/lamprabit-smoke/logs/
             ${{ runner.temp }}/lamprabit-smoke/etc/
           if-no-files-found: ignore
+
+  # The real app on macOS, which nobody on the team can open by hand: build the .app, open
+  # it, check it keeps running and its window loads, and keep a screenshot to look at.
+  app-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build the app bundle
+        run: npx tauri build --debug --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}' 
+      - name: Open it
+        run: |
+          app="$(ls -d src-tauri/target/debug/bundle/macos/*.app | head -1)"
+          echo "Opening $app"
+          open "$app"
+          # The first run shows the folder question; give the window time to draw.
+          sleep 25
+          pgrep -fl "$(basename "$app" .app)" || { echo "::error::LampRabit isn't running 25 s after opening"; exit 1; }
+          mkdir -p shots
+          screencapture -x shots/first-run.png || echo "::warning::screencapture failed (screen recording permission)"
+          # Its own log says the app got as far as starting up.
+          log="$HOME/lampRabit/logs/lampRabit.log"
+          [ -f "$log" ] && tail -20 "$log" || echo "::warning::no LampRabit log at $log"
+      - name: Quit
+        if: always()
+        run: pkill -f LampRabit || true
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: app-${{ matrix.os }}
+          path: shots/
+          if-no-files-found: ignore
+

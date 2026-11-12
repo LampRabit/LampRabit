@@ -15,7 +15,6 @@ import {
   FileCog,
   FileText,
   FolderOpen,
-  Globe,
   Keyboard,
   Layers,
   Layers3,
@@ -74,7 +73,7 @@ import { useHotkeys } from "../lib/shortcuts";
 import { Button, Card, Pill, Segmented } from "../components/ui";
 import Menu from "../components/Menu";
 import ProblemPanel from "../components/ProblemPanel";
-import ProfilesDialog from "../components/ProfilesDialog";
+import ProfilesDialog, { ProfilesTransfer } from "../components/ProfilesDialog";
 import Sparkline from "../components/Sparkline";
 import { Kbd } from "../components/Dialog";
 
@@ -351,10 +350,10 @@ export default function Overview() {
           </p>
         </section>
 
-        <aside className="space-y-4" aria-label="Shortcuts and connections">
+        <aside className="space-y-4" aria-label="Projects, shortcuts and connections">
+          <ProjectList sites={sites.data?.sites ?? []} onNew={() => openNewProject(true)} />
           <QuickShortcuts sites={sites.data} services={services.data ?? []} settings={settings.data} />
           <ConnectPanel services={stack.usable} onCopy={copy} />
-          <RecentProjects sites={sites.data?.sites ?? []} onNew={() => openNewProject(true)} />
           <RecentActivity />
         </aside>
       </div>
@@ -390,15 +389,30 @@ function ProfileTiles({
   busy: boolean;
 }) {
   const profileList = [{ name: null, label: "All services", services: [] as ServiceKind[] }, ...profiles.map((p) => ({ ...p, label: p.name }))];
+  // Folded until there's a profile of your own: "All services" alone repeats the list below.
+  const [open, setOpen] = useState(() => {
+    const saved = readPref("home-profiles");
+    return saved === null ? profiles.length > 0 : saved === "open";
+  });
+  const toggle = () => {
+    setOpen(!open);
+    writePref("home-profiles", open ? "closed" : "open");
+  };
 
   return (
     <section aria-labelledby="profiles-heading">
-      <div className="mb-3 flex items-center justify-between px-1">
+      <div className={clsx("flex items-center justify-between px-1", open && "mb-3")}>
         <div>
-          <h2 id="profiles-heading" className="text-base font-bold">Stack Profiles</h2>
-          <p className="text-xs text-muted">Select a profile to filter your stack, or start its services directly.</p>
+          <button type="button" onClick={toggle} aria-expanded={open} className="flex items-center gap-1.5 rounded">
+            <ChevronDown size={16} className={clsx("text-muted transition-transform", !open && "-rotate-90")} aria-hidden />
+            <h2 id="profiles-heading" className="text-base font-bold">Stack Profiles</h2>
+            {!open && active && <span className="text-sm font-normal text-muted">· {active}</span>}
+          </button>
+          {open && <p className="text-xs text-muted">Select a profile to filter your stack, or start its services directly.</p>}
         </div>
+        {open && <ProfilesTransfer />}
       </div>
+      {open && (
       <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3" role="radiogroup" aria-label="Service profiles">
         {profileList.map((profile) => {
           const selected = profile.name === active;
@@ -486,7 +500,8 @@ function ProfileTiles({
                 <span className="text-xs">
                   {selected ? (
                     <span className="inline-flex items-center gap-1 font-semibold text-accent-text">
-                      <Check size={12} strokeWidth={2.5} /> Active
+                      {/* "Active" read as "running" while its services were stopped. */}
+                      <Check size={12} strokeWidth={2.5} /> Selected
                     </span>
                   ) : (
                     <span className="text-muted group-hover:text-fg">Click to select</span>
@@ -530,6 +545,7 @@ function ProfileTiles({
           Add custom profile
         </button>
       </div>
+      )}
     </section>
   );
 }
@@ -981,12 +997,30 @@ function VcRuntimeBanner() {
   );
 }
 
-function PanelTitle({ title, extra }: { title: string; extra?: ReactNode }) {
+/**
+ * A side panel whose body folds away under its title; the choice is kept per device. Home
+ * showed everything at once, which buried the projects and the services people use most.
+ */
+function FoldCard({ id, defaultOpen, title, extra, children }: { id: string; defaultOpen: boolean; title: string; extra?: ReactNode; children: ReactNode }) {
+  const [open, setOpen] = useState(() => {
+    const saved = readPref(id);
+    return saved === null ? defaultOpen : saved === "open";
+  });
+  const toggle = () => {
+    setOpen(!open);
+    writePref(id, open ? "closed" : "open");
+  };
   return (
-    <div className="mb-2 flex items-center justify-between gap-2 px-1">
-      <h2 className="text-sm font-bold">{title}</h2>
-      {extra}
-    </div>
+    <Card className="p-4">
+      <div className={clsx("flex items-center justify-between gap-2 px-1", open && "mb-2")}>
+        <button type="button" onClick={toggle} aria-expanded={open} className="flex items-center gap-1.5 rounded text-sm font-bold text-fg">
+          <ChevronDown size={14} className={clsx("text-muted transition-transform", !open && "-rotate-90")} aria-hidden />
+          <h2>{title}</h2>
+        </button>
+        {open && extra}
+      </div>
+      {open && children}
+    </Card>
   );
 }
 
@@ -1014,8 +1048,7 @@ function QuickShortcuts({ sites, services, settings }: { sites?: SitesInfo; serv
   const readyCount = tools.filter((t) => t.installed && t.ready).length;
 
   return (
-    <Card className="p-4">
-      <PanelTitle title="Quick shortcuts" extra={<span className="text-xs text-muted">{readyCount} of {tools.length} ready</span>} />
+    <FoldCard id="home-shortcuts" defaultOpen={true} title="Quick shortcuts" extra={<span className="text-xs text-muted">{readyCount} of {tools.length} ready</span>}>
       <div className="space-y-1">
         {tools.map((t) => {
           const tiles = runtimeTiles[t.tool];
@@ -1039,7 +1072,7 @@ function QuickShortcuts({ sites, services, settings }: { sites?: SitesInfo; serv
           );
         })}
       </div>
-    </Card>
+    </FoldCard>
   );
 }
 
@@ -1061,8 +1094,7 @@ function ConnectPanel({ services, onCopy }: { services: ServiceInfo[]; onCopy: (
   const allEnv = shown.map((s) => `# ${s.label}\n${envText(connection(s.kind, s.port).env)}`).join("\n\n");
 
   return (
-    <Card className="p-4">
-      <PanelTitle
+    <FoldCard id="home-connect" defaultOpen={false}
         title="Connect your app"
         extra={
           <Segmented
@@ -1075,7 +1107,7 @@ function ConnectPanel({ services, onCopy }: { services: ServiceInfo[]; onCopy: (
             ]}
           />
         }
-      />
+      >
       <ul className="space-y-1.5">
         {shown.map((s) => {
           const c = connection(s.kind, s.port);
@@ -1104,47 +1136,51 @@ function ConnectPanel({ services, onCopy }: { services: ServiceInfo[]; onCopy: (
       <Button size="sm" variant="soft" className="mt-3 w-full" onClick={() => copy("all", allEnv, "all services as .env")}>
         {copied === "all" ? <Check size={14} /> : <Copy size={14} />} Copy everything as .env
       </Button>
-    </Card>
+    </FoldCard>
   );
 }
 
-function RecentProjects({ sites, onNew }: { sites: Site[]; onNew: () => void }) {
+/**
+ * The most recent projects, at the top of the side column so the services keep the main
+ * one: each opens its card on Sites, its site, or its folder.
+ */
+function ProjectList({ sites, onNew }: { sites: Site[]; onNew: () => void }) {
   const navigate = useAppStore((s) => s.navigate);
+  const openSite = useAppStore((s) => s.openSite);
   const notify = useAppStore((s) => s.notify);
   const onError = (e: unknown) => notify("error", String(e));
   const recent = [...sites].sort((a, b) => b.modified - a.modified).slice(0, 4);
-
   return (
-    <Card className="p-4">
-      <PanelTitle
-        title="Recent projects"
-        extra={
-          <button onClick={() => navigate("sites")} className="text-xs font-semibold text-accent-text hover:underline">
-            View all ›
-          </button>
-        }
-      />
+    <FoldCard
+      id="home-recent"
+      defaultOpen={true}
+      title={`Projects${sites.length ? ` · ${sites.length}` : ""}`}
+      extra={
+        <button onClick={() => navigate("sites")} className="text-xs font-semibold text-accent-text hover:underline">
+          All ›
+        </button>
+      }
+    >
       {recent.length === 0 && <p className="px-1 py-2 text-sm text-muted">Each folder in www becomes a site.</p>}
       <ul className="space-y-0.5">
         {recent.map((site) => (
-          <li key={site.path} className="group flex items-center gap-1">
-            <button
-              onClick={() => openUrl(site.url).catch(onError)}
-              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-surface-2/60"
-              title={`Open ${site.url}`}
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent-text" aria-hidden>
-                <Globe size={16} />
+          <li key={site.path} className="group flex items-center gap-1 rounded-xl hover:bg-surface-2/60">
+            <button type="button" onClick={() => openSite(site.path)} className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2 text-left" title={`${site.name}: open its card on Sites`}>
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-sm font-bold text-accent-text uppercase" aria-hidden>
+                {site.name.slice(0, 1)}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{site.domain}</span>
-                <span className="selectable block truncate font-mono text-xs text-muted">{site.path}</span>
-              </span>
-              <span className="shrink-0 rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-muted">
-                {serviceLabels[site.server]}
+                <span className="block truncate text-sm font-semibold">{site.name}</span>
+                <span className="block truncate text-xs text-muted">
+                  {site.framework ?? site.language}
+                  {site.gitBranch && ` · ${site.gitBranch}`}
+                </span>
               </span>
             </button>
-            <Button size="sm" variant="ghost" onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`}>
+            <Button size="sm" variant="ghost" onClick={() => openUrl(site.url).catch(onError)} aria-label={`Open ${site.domain}`} title={`Open ${site.url}`}>
+              <ExternalLink size={14} />
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`} title="Open the folder">
               <FolderOpen size={14} />
             </Button>
           </li>
@@ -1157,7 +1193,7 @@ function RecentProjects({ sites, onNew }: { sites: Site[]; onNew: () => void }) 
       >
         <Plus size={14} /> New project
       </button>
-    </Card>
+    </FoldCard>
   );
 }
 
@@ -1173,15 +1209,14 @@ function RecentActivity() {
   const navigate = useAppStore((s) => s.navigate);
 
   return (
-    <Card className="p-4">
-      <PanelTitle
+    <FoldCard id="home-activity" defaultOpen={false}
         title="Recent activity"
         extra={
           <button onClick={() => navigate("logs")} className="text-xs font-semibold text-accent-text hover:underline">
             Logs ›
           </button>
         }
-      />
+      >
       <ul className="space-y-1.5 px-1">
         {activity.slice(0, 4).map((a) => (
           <li key={a.id} className="flex items-center gap-2.5 text-xs">
@@ -1191,6 +1226,6 @@ function RecentActivity() {
           </li>
         ))}
       </ul>
-    </Card>
+    </FoldCard>
   );
 }

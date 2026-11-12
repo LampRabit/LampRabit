@@ -47,7 +47,8 @@ export type Runtime =
   | "go"
   | "rust"
   | "maven"
-  | "gradle";
+  | "gradle"
+  | "git";
 // Labels come from the backend's catalog (catalog.rs), loaded once before the first render
 // (loadLabels), so a runtime is named in one place. An id the catalog doesn't name shows as
 // itself rather than as "undefined".
@@ -132,6 +133,129 @@ export type RequirementAction =
   | { kind: "installNode"; version: string }
   | { kind: "useNode"; version: string }
   | { kind: "unavailable"; reason: string };
+
+/** Git (git.rs): a project's repository through the git command. */
+export interface GitFile {
+  path: string;
+  /** The old path of a rename. */
+  from: string | null;
+  /** Index side: " " unchanged, M A D R C T, "?" untracked. */
+  staged: string;
+  /** Working-tree side. */
+  unstaged: string;
+  conflicted: boolean;
+}
+
+export interface GitStatus {
+  repo: boolean;
+  branch: string | null;
+  head: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  files: GitFile[];
+  operation: "merge" | "rebase" | "cherry-pick" | "revert" | null;
+  identity: { name: string | null; email: string | null; local: boolean };
+  remotes: { name: string; url: string; pushUrl: string | null }[];
+}
+
+/** A line of git's progress for a clone, fetch, pull or push (`git-progress` event). */
+export interface GitProgress {
+  op: string;
+  line: string;
+  done: boolean;
+}
+
+export interface GitStash {
+  index: number;
+  message: string;
+  time: number;
+}
+
+export interface GitTag {
+  name: string;
+  commit: string;
+  subject: string;
+  time: number;
+}
+
+export type GitStashAction = { kind: "save"; message: string; untracked: boolean } | { kind: "apply"; index: number } | { kind: "pop"; index: number } | { kind: "drop"; index: number };
+export type GitTagAction = { kind: "create"; name: string; message: string; commit: string | null } | { kind: "delete"; name: string } | { kind: "push"; name: string; remote: string };
+
+export interface GitRepoSettings {
+  pull: "merge" | "rebase" | "ff-only" | null;
+  prune: boolean;
+  autoSetupRemote: boolean;
+}
+
+export interface GitCommitFile {
+  path: string;
+  from: string | null;
+  status: string;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
+
+export interface GitCommitDetails {
+  hash: string;
+  parents: string[];
+  author: string;
+  authorEmail: string;
+  authorTime: number;
+  committer: string;
+  committerEmail: string;
+  committerTime: number;
+  refs: string;
+  subject: string;
+  body: string;
+  files: GitCommitFile[];
+}
+
+export interface GitBranch {
+  name: string;
+  remote: boolean;
+  current: boolean;
+  upstream: string | null;
+  track: string;
+  time: number;
+  subject: string;
+}
+
+export interface GitCommit {
+  hash: string;
+  short: string;
+  author: string;
+  email: string;
+  time: number;
+  refs: string;
+  subject: string;
+}
+
+export type GitBranchAction =
+  | { kind: "create"; branch: string; from: string | null; switch: boolean }
+  | { kind: "switch"; branch: string }
+  | { kind: "rename"; from: string; to: string }
+  | { kind: "delete"; branch: string; force: boolean }
+  | { kind: "merge"; branch: string }
+  | { kind: "setUpstream"; upstream: string };
+
+export type GitRemoteAction =
+  | { kind: "add"; name: string; url: string }
+  | { kind: "setUrl"; name: string; url: string }
+  | { kind: "setPushUrl"; name: string; url: string | null }
+  | { kind: "rename"; from: string; to: string }
+  | { kind: "remove"; name: string };
+
+/** One component of a first-run starter stack (starterPlan). */
+export interface StarterItem {
+  runtime: Runtime;
+  label: string;
+  blurb: string;
+  action: RequirementAction;
+  /** Download size in bytes, when the server says. */
+  size: number | null;
+}
 
 export interface Requirement {
   /** A runtime id, or "node". */
@@ -553,6 +677,12 @@ export interface DbStatus {
   running: boolean;
   /** null when it can't be told (PostgreSQL while stopped). */
   exists: boolean | null;
+  /** The port the project's config connects to. */
+  port: number | null;
+  /** Why this server was chosen (the port it connects to, or the default). */
+  reason: string | null;
+  /** The other MySQL-family server, installed while this one isn't; switchProjectDatabase points the .env at it. */
+  alternative: { engine: "mariadb" | "mysql"; label: string; port: number } | null;
 }
 
 export interface ProjectFacts {
@@ -775,6 +905,36 @@ export const api = {
   projectCommands: (name: string) => invoke<ProjectCommands>("project_commands", { name }),
   projectFacts: (name: string) => invoke<ProjectFacts>("project_facts", { name }),
   databaseStatus: (name: string) => invoke<DbStatus | null>("database_status", { name }),
+  switchProjectDatabase: (name: string, engine: "mariadb" | "mysql") => invoke<void>("switch_project_database", { name, engine }),
+  gitVersion: () => invoke<string | null>("git_version"),
+  gitStatus: (name: string) => invoke<GitStatus>("git_status", { name }),
+  gitDiff: (name: string, path: string, staged: boolean, untracked: boolean) => invoke<string>("git_diff", { name, path, staged, untracked }),
+  gitStage: (name: string, paths: string[], stage: boolean) => invoke<void>("git_stage", { name, paths, stage }),
+  gitDiscard: (name: string, paths: string[]) => invoke<void>("git_discard", { name, paths }),
+  gitCommit: (name: string, message: string, amend: boolean, all = false) => invoke<string>("git_commit", { name, message, amend, all }),
+  gitBranches: (name: string) => invoke<GitBranch[]>("git_branches", { name }),
+  gitBranch: (name: string, action: GitBranchAction) => invoke<string>("git_branch", { name, action }),
+  gitAbort: (name: string) => invoke<void>("git_abort", { name }),
+  gitContinue: (name: string) => invoke<string>("git_continue", { name }),
+  gitLog: (name: string, skip: number, limit: number, path?: string) => invoke<GitCommit[]>("git_log", { name, skip, limit, path: path ?? null }),
+  gitCommitDetails: (name: string, hash: string) => invoke<GitCommitDetails>("git_commit_details", { name, hash }),
+  gitCommitFileDiff: (name: string, hash: string, path: string) => invoke<string>("git_commit_file_diff", { name, hash, path }),
+  gitRepoSettings: (name: string) => invoke<GitRepoSettings>("git_repo_settings", { name }),
+  gitSetRepoSettings: (name: string, settings: GitRepoSettings) => invoke<void>("git_set_repo_settings", { name, settings }),
+  gitSync: (name: string, action: "fetch" | "pull" | "push", op?: string) => invoke<string>("git_sync", { name, action, op: op ?? null }),
+  gitCancel: (op: string) => invoke<boolean>("git_cancel", { op }),
+  gitStashes: (name: string) => invoke<GitStash[]>("git_stashes", { name }),
+  gitStash: (name: string, action: GitStashAction) => invoke<string>("git_stash", { name, action }),
+  gitStageHunk: (name: string, path: string, hunk: number, unstage: boolean) => invoke<void>("git_stage_hunk", { name, path, hunk, unstage }),
+  gitResolve: (name: string, path: string, theirs: boolean) => invoke<void>("git_resolve", { name, path, theirs }),
+  gitTags: (name: string) => invoke<GitTag[]>("git_tags", { name }),
+  gitTag: (name: string, action: GitTagAction) => invoke<string>("git_tag", { name, action }),
+  gitRevert: (name: string, hash: string) => invoke<string>("git_revert", { name, hash }),
+  gitRestoreFile: (name: string, hash: string, path: string) => invoke<void>("git_restore_file", { name, hash, path }),
+  gitRemote: (name: string, action: GitRemoteAction) => invoke<void>("git_remote", { name, action }),
+  gitSetIdentity: (name: string, user: string, email: string) => invoke<void>("git_set_identity", { name, user, email }),
+  gitInit: (name: string) => invoke<void>("git_init", { name }),
+  gitClone: (url: string, folder?: string, op?: string) => invoke<string>("git_clone", { url, folder: folder ?? null, op: op ?? null }),
   createProjectDatabase: (name: string) => invoke<void>("create_project_database", { name }),
   setProjectEnv: (name: string, key: string, value: string) => invoke<void>("set_project_env", { name, key, value }),
   portsListening: (ports: number[]) => invoke<number[]>("ports_listening", { ports }),
@@ -844,6 +1004,8 @@ export const api = {
   clearProblem: (kind: ServiceKind) => invoke<void>("clear_problem", { kind }),
   diagnostics: (redact: boolean) => invoke<string>("diagnostics", { redact }),
   saveText: (path: string, contents: string) => invoke<void>("save_text", { path, contents }),
+  readText: (path: string) => invoke<string>("read_text", { path }),
+  starterPlan: (runtimes: string[]) => invoke<StarterItem[]>("starter_plan", { runtimes }),
   logHistory: () => invoke<LogHistory>("log_history"),
   /** One source ("apache", "dumps", "project:shop"), or every log with none. */
   clearLogs: (source?: string) => invoke<void>("clear_logs", { source: source ?? null }),

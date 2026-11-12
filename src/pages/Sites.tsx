@@ -32,12 +32,14 @@ import { api, runtimeLabels, serviceLabels, type AppStatus, type CommandRun, typ
 import { useAppStore } from "../lib/store";
 import Dialog from "../components/Dialog";
 import ProjectDomains from "../components/ProjectDomains";
+import ProjectGit, { CloneDialog } from "../components/ProjectGit";
 import ProjectProcesses, { processFrom } from "../components/ProjectProcesses";
+import { usePageToolbar } from "../components/PageToolbar";
 import { toolUrl } from "../lib/tools";
 import { useHotkeys } from "../lib/shortcuts";
 import { bestMatch, satisfies } from "../lib/constraint";
 import { formatAgo, useNow } from "../lib/time";
-import { Button, Card, PageHeader, Switch, inputClass } from "../components/ui";
+import { Button, Card, Switch, inputClass } from "../components/ui";
 import { ShareButton, TunnelRow, useProjectTunnel } from "../components/Tunnels";
 import { AppControls, CommandPrompt, CommandsPanel, OutputPanel, Row, ServeSettings, appCommand, isActive, stateStyle, useAppActions, useAppInfo, useAppStatuses, useUnreadOutput } from "../components/ProjectRun";
 
@@ -69,7 +71,7 @@ const frameworkStyle: Record<string, string> = {
 const languageLabel: Record<Language, string> = { php: "PHP", node: "Node.js", java: "Java", python: "Python", go: "Go", rust: "Rust", static: "Static" };
 
 type Sort = "recent" | "name";
-type Tab = "overview" | "commands" | "domains" | "settings";
+type Tab = "overview" | "commands" | "domains" | "git" | "settings";
 
 export default function Sites() {
   const queryClient = useQueryClient();
@@ -84,7 +86,15 @@ export default function Sites() {
   const [language, setLanguage] = useState<Language | null>(null);
   const [sort, setSort] = useState<Sort>("recent");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const siteFocus = useAppStore((s) => s.siteFocus);
+  const openSite = useAppStore((s) => s.openSite);
+  useEffect(() => {
+    if (!siteFocus) return;
+    setSelectedPath(siteFocus);
+    openSite(null);
+  }, [siteFocus, openSite]);
   const [tab, setTab] = useState<Tab>("overview");
+  const [cloning, setCloning] = useState(false);
 
   const apply = useMutation({ mutationFn: api.applySites, onSuccess: refresh, onError });
   const trust = useMutation({
@@ -108,31 +118,41 @@ export default function Sites() {
   const selectedSite = shown.find((site) => site.path === selectedPath) ?? shown[0];
   const running = all.filter((s) => isActive(statuses[s.name])).length;
 
+  const siteToolbarActions = (
+    <>
+      <Button size="sm" variant="ghost" onClick={() => setCloning(true)} title="Clone a Git repository into www" aria-label="Clone repository">
+        <GitBranch size={15} /> <span className="hidden xl:inline">Clone</span>
+      </Button>
+      <Button size="sm" variant="primary" onClick={() => openNewProject(true)} title="New project (N)" aria-label="New project">
+        <FolderPlus size={15} /> <span className="hidden xl:inline">New project</span>
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => info.refetch()} disabled={info.isFetching} aria-label="Refresh sites" title="Refresh sites">
+        <RefreshCw size={15} className={clsx(info.isFetching && "animate-spin")} />
+      </Button>
+    </>
+  );
+  const siteToolbarMenu = (
+    <>
+      <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => setCloning(true)}>
+        <GitBranch size={15} /> Clone repository
+      </Button>
+      <Button size="sm" variant="primary" className="w-full justify-start" onClick={() => openNewProject(true)}>
+        <FolderPlus size={15} /> New project
+      </Button>
+      <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => info.refetch()} disabled={info.isFetching}>
+        <RefreshCw size={15} className={clsx(info.isFetching && "animate-spin")} /> Refresh sites
+      </Button>
+    </>
+  );
+  usePageToolbar("sites", {
+    title: "Sites",
+    subtitle: <>Every folder in <span className="font-mono">www</span> is served at <span className="font-mono">&lt;folder&gt;.{data?.tld ?? "test"}</span>, sub-domains included.</>,
+    actions: siteToolbarActions,
+    menuActions: siteToolbarMenu,
+  });
+
   return (
     <>
-      <PageHeader
-        title="Sites"
-        subtitle={
-          <>
-            Every folder in <span className="font-mono">www</span> is served at{" "}
-            <span className="font-mono">&lt;folder&gt;.{data?.tld ?? "test"}</span>, sub-domains included.
-          </>
-        }
-        actions={
-          <>
-            <Button onClick={() => paths.data && openPath(paths.data.www).catch(onError)}>
-              <FolderOpen size={16} /> Open www
-            </Button>
-            <Button variant="primary" onClick={() => openNewProject(true)} title="New project (N)">
-              <FolderPlus size={16} /> New project
-            </Button>
-            <Button onClick={() => info.refetch()} disabled={info.isFetching} aria-label="Refresh sites">
-              <RefreshCw size={15} className={clsx(info.isFetching && "animate-spin")} />
-            </Button>
-          </>
-        }
-      />
-
       <div className="mb-5 space-y-3 empty:mb-0">
         {data?.needsApply && (
           <Banner
@@ -225,7 +245,7 @@ export default function Sites() {
           </Card>
         )
       ) : (
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(240px,290px)_minmax(0,1fr)]">
+        <div className="grid items-start gap-5 md:grid-cols-[minmax(200px,240px)_minmax(0,1fr)] xl:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
           <Card className="min-w-0 overflow-hidden lg:sticky lg:top-4">
             <div className="space-y-2.5 border-b border-line p-3">
               <div className="flex items-center justify-between px-1">
@@ -272,7 +292,7 @@ export default function Sites() {
             {shown.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-muted">No projects match.</p>
             ) : (
-              <ul className="scrollbar-thin space-y-0.5 p-1.5 lg:max-h-[calc(100dvh-16rem)] lg:overflow-y-auto lg:overscroll-contain" aria-label="Projects">
+              <ul className="scrollbar-thin space-y-0.5 p-1.5 md:max-h-[calc(100dvh-16rem)] md:overflow-y-auto md:overscroll-contain" aria-label="Projects">
                 {shown.map((site) => (
                   <li key={site.path}>
                     <ProjectRow site={site} status={statuses[site.name]} selected={selectedSite?.path === site.path} onSelect={() => setSelectedPath(site.path)} />
@@ -283,6 +303,20 @@ export default function Sites() {
           </Card>
           <div className="min-w-0">{selectedSite ? <ProjectDetail key={selectedSite.path} site={selectedSite} info={data} status={statuses[selectedSite.name]} tab={tab} setTab={setTab} onSelect={setSelectedPath} /> : null}</div>
         </div>
+      )}
+      {cloning && (
+        <CloneDialog
+          onClose={() => setCloning(false)}
+          onCloned={async (folder) => {
+            // The new folder is a project once the list is read again; open it there.
+            const fresh = await info.refetch();
+            const site = fresh.data?.sites.find((s) => s.name === folder);
+            if (site) {
+              setSelectedPath(site.path);
+              setTab("overview");
+            }
+          }}
+        />
       )}
     </>
   );
@@ -482,13 +516,14 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
   const activity = processStates.some((s) => s.state === "crashed") || status?.state === "crashed" ? "crashed" : status?.task || processStates.some(isActive) ? "running" : null;
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
+    { id: "git", label: "Git" },
     { id: "commands", label: "Commands" },
     { id: "domains", label: "Domains" },
     { id: "settings", label: "Settings" },
   ];
   // [ and ] step through the project's tabs (listed in SHORTCUTS).
   const step = (by: number) => setTab(tabs[(tabs.findIndex((t) => t.id === tab) + by + tabs.length) % tabs.length].id);
-  useHotkeys({ "[": () => step(-1), "]": () => step(1) });
+  useHotkeys({ "[": () => step(-1), "]": () => step(1), g: () => setTab("git") });
 
   const now = useNow();
   // The one chip next to the name: the framework, else the language.
@@ -522,7 +557,12 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
               </Chip>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted">
-              <span className="flex min-w-0 items-center gap-1.5" title={site.gitBranch ? `Git branch ${site.gitBranch}` : "This project isn't a Git repository"}>
+              <button
+                type="button"
+                onClick={() => setTab("git")}
+                className="flex min-w-0 items-center gap-1.5 rounded hover:text-accent-text"
+                title={site.gitBranch ? `Git branch ${site.gitBranch}: open the Git tab` : "This project isn't a Git repository: open the Git tab to start one"}
+              >
                 <GitBranch size={14} className="shrink-0" aria-hidden />
                 {site.gitBranch ? (
                   <>
@@ -532,7 +572,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
                 ) : (
                   <span>No Git</span>
                 )}
-              </span>
+              </button>
               <button
                 type="button"
                 onClick={() => openPath(site.path).catch(onError)}
@@ -587,6 +627,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
               className={clsx("-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors", tab === t.id ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg")}
             >
               {t.label}
+              {t.id === "git" && !!facts.data?.git?.changes && <span className="size-1.5 rounded-full bg-warn" title={`${facts.data.git.changes} uncommitted`} aria-label="Uncommitted changes" />}
               {t.id === "commands" && activity && (
                 <span
                   className={clsx("size-1.5 rounded-full", activity === "crashed" ? "bg-danger" : "animate-pulse bg-accent")}
@@ -602,6 +643,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
           {tab === "overview" && <Overview site={site} info={info} settings={settings.data} facts={facts.data} status={status} php={php} onCommands={() => setTab("commands")} />}
           {tab === "commands" && <CommandsTab site={site} settings={settings.data} status={status} />}
           {tab === "domains" && <ProjectDomains site={site} settings={settings.data} />}
+          {tab === "git" && <ProjectGit site={site} />}
           {tab === "settings" && <SettingsTab site={site} settings={settings.data} status={status} onRenamed={onSelect} />}
         </div>
 
@@ -889,6 +931,15 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
     },
     onError,
   });
+  const switchTo = useMutation({
+    mutationFn: (engine: "mariadb" | "mysql") => api.switchProjectDatabase(site.name, engine),
+    onSuccess: (_, engine) => {
+      notify("info", `${site.name} now connects to ${engine === "mysql" ? "MySQL" : "MariaDB"} (DB_PORT in .env).`);
+      status.refetch();
+      for (const key of ["project-facts", "sites"]) queryClient.invalidateQueries({ queryKey: [key] });
+    },
+    onError,
+  });
   const s = status.data;
   // phpMyAdmin only manages MariaDB and MySQL.
   const managed = !s || s.engine === "mariadb" || s.engine === "mysql";
@@ -900,11 +951,25 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
     </Button>
   );
   if (s && !s.installed) {
-    note = <span className="text-warn">{s.label} isn't installed</span>;
+    // Say why this server: a Laravel .env with DB_PORT=3306 means MariaDB here, which isn't
+    // obvious to someone who installed only MySQL. Offer the installed one when there is one.
+    note = (
+      <span className="text-warn" title={s.reason ?? undefined}>
+        {s.label} isn't installed{s.port ? ` (the project uses port ${s.port})` : ""}
+        {s.alternative && <span className="text-muted"> · {s.alternative.label} is installed on port {s.alternative.port}</span>}
+      </span>
+    );
     action = (
-      <Button size="sm" onClick={() => navigate("services")}>
-        Install {s.label}
-      </Button>
+      <div className="flex shrink-0 flex-wrap gap-2">
+        {s.alternative && (
+          <Button size="sm" variant="primary" onClick={() => switchTo.mutate(s.alternative!.engine)} disabled={switchTo.isPending} title={`Sets DB_PORT=${s.alternative.port} in the project's .env`}>
+            Use {s.alternative.label}
+          </Button>
+        )}
+        <Button size="sm" onClick={() => navigate("services")}>
+          Install {s.label}
+        </Button>
+      </div>
     );
   } else if (s && !s.running) {
     note = <span className="text-warn">{s.label} is stopped</span>;

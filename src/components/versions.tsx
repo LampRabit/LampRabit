@@ -8,15 +8,39 @@ import { Button } from "./ui";
  * tile, the other installed versions as smaller tiles, and the versions to download.
  */
 
-/** The version in use. `children` are its actions (open folder…). */
-export function ActiveTile({ version, details, children }: { version: string; details?: ReactNode; children?: ReactNode }) {
+/** Whether a service is running, for the badge: "Active" alone read as "running" to users. */
+export type RunState = "running" | "stopped" | "starting" | "stopping" | "error";
+
+const runBadges: Record<RunState, { text: string; className: string; dot: string }> = {
+  running: { text: "Running", className: "border-ok/20 bg-ok/10 text-ok", dot: "bg-ok" },
+  starting: { text: "Starting", className: "border-warn/20 bg-warn/10 text-warn", dot: "bg-warn animate-pulse" },
+  stopping: { text: "Stopping", className: "border-warn/20 bg-warn/10 text-warn", dot: "bg-warn animate-pulse" },
+  stopped: { text: "Stopped", className: "border-line bg-surface-2 text-muted", dot: "bg-muted" },
+  error: { text: "Failed", className: "border-danger/20 bg-danger-soft text-danger-text", dot: "bg-danger" },
+};
+
+/**
+ * The version in use (the one LampRabit runs and its commands call). `state` is given for
+ * runtimes that run as a service, so the tile says whether it's running, not just chosen.
+ * `children` are its actions (open folder…).
+ */
+export function ActiveTile({ version, state, details, children }: { version: string; state?: RunState; details?: ReactNode; children?: ReactNode }) {
+  const badge = state ? runBadges[state] : null;
   return (
     <div className="flex flex-col rounded-2xl border border-line bg-surface p-5 shadow-card">
       <div className="flex items-center justify-between gap-3 border-b border-line pb-3">
-        <h4 className="text-xs font-bold tracking-wider text-muted uppercase">Installed version</h4>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-ok/20 bg-ok/10 px-2 py-1 text-xs font-semibold text-ok">
-          <span className="size-1.5 rounded-full bg-ok" aria-hidden /> Active
-        </span>
+        <h4 className="text-xs font-bold tracking-wider text-muted uppercase" title="The version LampRabit runs and its commands use">
+          Version in use
+        </h4>
+        {badge ? (
+          <span className={clsx("inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold", badge.className)}>
+            <span className={clsx("size-1.5 rounded-full", badge.dot)} aria-hidden /> {badge.text}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-ok/20 bg-ok/10 px-2 py-1 text-xs font-semibold text-ok" title="Installed and selected; it isn't a service that runs on its own">
+            <Check size={12} aria-hidden /> In use
+          </span>
+        )}
       </div>
       <div className="mt-4 font-mono text-3xl font-bold tracking-tight text-fg">{version}</div>
       {details && <div className="mt-2 space-y-1 text-xs text-muted">{details}</div>}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -42,7 +42,8 @@ import UninstallDialog from "../components/UninstallDialog";
 import MoveEnvironmentDialog from "../components/MoveEnvironmentDialog";
 import ApplyBar from "../components/ApplyBar";
 import { portFields, portShown, serverNotes } from "../lib/settingsFields";
-import { Button, Card, PageHeader, Segmented, Switch, inputClass } from "../components/ui";
+import { Button, Card, Segmented, Switch, inputClass } from "../components/ui";
+import { usePageToolbar } from "../components/PageToolbar";
 
 type Os = EnvPaths["os"];
 
@@ -80,17 +81,28 @@ export default function Settings() {
   const navigate = useAppStore((s) => s.navigate);
   const { theme, setTheme } = useTheme();
   const { motion, setMotion } = useMotion();
+  const navEdge = useAppStore((s) => s.navPosition);
+  const setNavEdge = useAppStore((s) => s.setNavPosition);
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
   const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: 5000 });
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const openDiagnostics = useAppStore((s) => s.setDiagnosticsOpen);
+  const openSetupGuide = useAppStore((s) => s.setSetupGuideOpen);
   const [uninstalling, setUninstalling] = useState(false);
   const [moving, setMoving] = useState(false);
   const [draft, setDraft] = useState<SettingsT | null>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
   const [current, setCurrent] = useState<string>("general");
+  // "Find a setting": sections whose text doesn't match are hidden. Read from the rendered
+  // text, so every label, hint and value counts without a separate index.
+  const [find, setFind] = useState("");
+  // Each Section reports whether it matches; the rail lists those that do.
+  const [hits, setHits] = useState<Record<string, boolean>>({});
+  const query = find.trim().toLowerCase();
+  const matches = query ? sections.map((s) => s.id).filter((id) => hits[id] !== false) : null;
+  const findValue = useMemo(() => ({ query, report: (id: string, hit: boolean) => setHits((h) => (h[id] === hit ? h : { ...h, [id]: hit })) }), [query]);
 
   const activeVersions = useMemo<Versions | null>(
     () => (installed.data ? (Object.fromEntries(installed.data.map((i) => [i.runtime, i.active])) as Versions) : null),
@@ -127,6 +139,20 @@ export default function Settings() {
       JSON.stringify({ ...settings.data, versions: null, sites: null, profiles: null, catchDumps: null }) ||
       JSON.stringify(versions) !== JSON.stringify(activeVersions));
 
+  usePageToolbar("settings", {
+    title: "Settings",
+    subtitle: "Configure your local environment.",
+    actions: dirty ? (
+      <span className="flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-warn" role="status">
+        <span className="size-2 rounded-full bg-warn" /> Unsaved
+      </span>
+    ) : (
+      <span className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted" role="status">
+        <CheckCircle2 size={15} className="text-accent-text" /> Saved
+      </span>
+    ),
+  });
+
   const save = useMutation({
     mutationFn: async () => {
       if (!draft || !settings.data) return;
@@ -158,28 +184,20 @@ export default function Settings() {
 
   return (
     <>
-      <PageHeader
-        title="Settings"
-        subtitle="Configure your local environment."
-        actions={
-          <div className="flex items-center gap-4">
-            {dirty ? (
-              <span className="flex items-center gap-2 text-sm text-warn" role="status">
-                <span className="size-2 rounded-full bg-warn" /> Unsaved changes
-              </span>
-            ) : (
-              <span className="flex items-center gap-2 text-sm text-muted" role="status">
-                <CheckCircle2 size={17} className="text-accent-text" /> All changes saved
-              </span>
-            )}
-          </div>
-        }
-      />
-
+      <FindContext.Provider value={findValue}>
       <div className="grid items-start gap-8 lg:grid-cols-[12rem_minmax(0,1fr)]">
         <nav aria-label="Settings sections" className="sticky top-4 hidden lg:block">
+          <input
+            type="search"
+            value={find}
+            onChange={(e) => setFind(e.target.value)}
+            placeholder="Find a setting"
+            aria-label="Find a setting"
+            className={clsx(inputClass, "mb-2 py-1.5")}
+          />
+          {matches && <p className="mb-2 px-1 text-xs text-muted" aria-live="polite">{matches.length === 0 ? "No setting matches." : `${matches.length} of ${sections.length} sections`}</p>}
           <ul className="space-y-0.5">
-            {sections.map((s) => (
+            {sections.filter((s) => !matches || matches.includes(s.id)).map((s) => (
               <li key={s.id}>
                 <button
                   onClick={() => document.getElementById(`settings-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
@@ -197,6 +215,19 @@ export default function Settings() {
         </nav>
 
         <div className="motion-stagger min-w-0 space-y-6">
+          {/* Narrow windows hide the rail; jump between sections from here instead. */}
+          <select
+            aria-label="Go to a settings section"
+            value={current}
+            onChange={(e) => document.getElementById(`settings-${e.target.value}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className={clsx(inputClass, "lg:hidden")}
+          >
+            {sections.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
           <Section id="general" title="General" subtitle="Where your environment lives and how sites are named.">
             <Row label="LampRabit folder" hint="Runtimes, configs, your projects (www), databases and logs. Moving it takes everything along." wide>
               <div className="flex items-center gap-2">
@@ -210,6 +241,11 @@ export default function Settings() {
                   <FolderInput size={15} /> Move…
                 </Button>
               </div>
+            </Row>
+            <Row label="Setup guide" hint="Install a starter stack (PHP, Laravel, WordPress, Node.js, full stack or your own pick) in one go.">
+              <Button onClick={() => openSetupGuide(true)}>
+                <Sparkles size={15} /> Open the setup guide
+              </Button>
             </Row>
             <Row label="Site domain suffix" hint={`Folders in www are served as <name>.${draft.tld || "test"}`}>
               <input
@@ -552,6 +588,37 @@ export default function Settings() {
                 ]}
               />
             </Row>
+            <Row label="Page bar" hint="Where the Home, Sites, Services, Logs and Settings bar sits: an edge, and where along it. You can also drag it there by its grip.">
+              <div className="flex flex-wrap gap-2">
+                <Segmented
+                  value={navEdge.edge}
+                  onChange={(edge) => setNavEdge({ ...navEdge, edge })}
+                  options={[
+                    { value: "bottom", label: "Bottom" },
+                    { value: "top", label: "Top" },
+                    { value: "left", label: "Left" },
+                    { value: "right", label: "Right" },
+                  ]}
+                />
+                <Segmented
+                  value={navEdge.align}
+                  onChange={(align) => setNavEdge({ ...navEdge, align })}
+                  options={
+                    navEdge.edge === "left" || navEdge.edge === "right"
+                      ? [
+                          { value: "start", label: "Top" },
+                          { value: "center", label: "Middle" },
+                          { value: "end", label: "Bottom" },
+                        ]
+                      : [
+                          { value: "start", label: "Left" },
+                          { value: "center", label: "Center" },
+                          { value: "end", label: "Right" },
+                        ]
+                  }
+                />
+              </div>
+            </Row>
           </Section>
 
           <UpdatesSection checkUpdates={draft.checkUpdates} onCheckUpdatesChange={(v) => set({ checkUpdates: v })} />
@@ -577,6 +644,7 @@ export default function Settings() {
           {uninstalling && <UninstallDialog onClose={() => setUninstalling(false)} />}
         </div>
       </div>
+      </FindContext.Provider>
       {moving && settings.data && <MoveEnvironmentDialog current={settings.data.rootDir} onClose={() => setMoving(false)} />}
       <ApplyBar
         dirty={dirty}
@@ -592,9 +660,22 @@ export default function Settings() {
 }
 
 /** A settings group: a heading and rows separated by lines. */
+/** "Find a setting": the query, and how a section says whether its text matches it. */
+const FindContext = createContext<{ query: string; report: (id: string, hit: boolean) => void }>({ query: "", report: () => {} });
+
 function Section({ id, title, subtitle, children }: { id: string; title: string; subtitle?: string; children: ReactNode }) {
+  const { query, report } = useContext(FindContext);
+  const ref = useRef<HTMLElement>(null);
+  const [hit, setHit] = useState(true);
+  // Matched against the rendered text, so every label, hint and value counts without a
+  // separate index; the section hides itself through its own state.
+  useLayoutEffect(() => {
+    const yes = !query || (ref.current?.textContent ?? "").toLowerCase().includes(query);
+    setHit(yes);
+    report(id, yes);
+  }, [query, id, report]);
   return (
-    <section id={`settings-${id}`} aria-labelledby={`settings-${id}-title`} className="scroll-mt-4">
+    <section ref={ref} hidden={!hit} id={`settings-${id}`} aria-labelledby={`settings-${id}-title`} className="scroll-mt-4">
       <h2 id={`settings-${id}-title`} className="text-base font-bold tracking-tight">
         {title}
       </h2>

@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CaseSensitive, ChevronDown, ChevronRight, Copy, Download, EyeOff, FileCode, Pause, Play, Regex, RotateCcw, Search, Trash2, WrapText, X } from "lucide-react";
+import { AlertTriangle, SlidersHorizontal, CaseSensitive, ChevronDown, ChevronRight, Copy, Download, EyeOff, FileCode, Pause, Play, Regex, RotateCcw, Search, Trash2, WrapText, X } from "lucide-react";
 import clsx from "clsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { api, serviceLabels, type Dump, type DumpNode, type LogStream, type ServiceKind } from "../lib/api";
 import type { Level, LogEntry } from "../lib/logparse";
 import { useAppStore } from "../lib/store";
-import { Button, Card, PageHeader, Switch } from "../components/ui";
+import { Button, Card, Switch } from "../components/ui";
+import Menu from "../components/Menu";
+import { usePageToolbar } from "../components/PageToolbar";
+import { useHotkeys } from "../lib/shortcuts";
 
 /** Badge colours for the sources that have one; the rest share a neutral one. */
 const badgeColors: Record<string, string> = {
@@ -65,11 +69,13 @@ const ranges = [
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const stamp = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-const columns = "grid-cols-[9.5rem_5.5rem_4rem_minmax(0,1fr)]";
+const columns = "grid-cols-[9.5rem_7.5rem_4rem_minmax(0,1fr)]";
 
 export default function Logs() {
   const queryClient = useQueryClient();
   const logs = useAppStore((s) => s.logs);
+  const logsDropped = useAppStore((s) => s.logsDropped);
+  const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
   const clearLogs = useAppStore((s) => s.clearLogs);
   const loadHistory = useAppStore((s) => s.loadHistory);
   const notify = useAppStore((s) => s.notify);
@@ -206,13 +212,50 @@ export default function Logs() {
   const shownSources = allSources.filter((s) => !hidden.has(s));
   const sourceSummary =
     shownSources.length === allSources.length ? "All sources" : shownSources.length === 1 ? sourceLabel(shownSources[0]) : shownSources.length === 0 ? "No sources" : `${shownSources.length} sources`;
-  const visible = useMemo(() => {
+  const matched = useMemo(() => {
     const since = Date.now() - ranges.find((r) => r.id === range)!.ms;
     const test = search && "test" in search ? search.test : null;
     return source.filter(
       (l) => !hidden.has(sourceOf(l)) && shownLevels.has(l.level) && shownStreams.has(l.stream) && l.time.getTime() >= since && (!test || test(l.message) !== exclude),
     );
   }, [source, hidden, search, exclude, shownLevels, shownStreams, range]);
+  // Repeats folded into one row with a count: a database restarted ten times, or a worker
+  // printing the same line every second, otherwise buries the line that matters. Numbers
+  // (times, pids, ids) don't make a line different.
+  const [foldRepeats, setFoldRepeats] = useState(true);
+  const { visible, repeats } = useMemo(() => {
+    const repeats = new Map<number, number>();
+    if (!foldRepeats) return { visible: matched, repeats };
+    const shape = (l: LogEntry) => `${sourceOf(l)}|${l.level}|${l.message.replace(/\d+/g, "#")}`;
+    const out: LogEntry[] = [];
+    let last = "";
+    for (const l of matched) {
+      const key = shape(l);
+      if (key === last && out.length > 0) {
+        // The newest copy stands for the run, so its time is the latest one.
+        const first = out[out.length - 1];
+        repeats.set(l.id, (repeats.get(first.id) ?? 1) + 1);
+        repeats.delete(first.id);
+        out[out.length - 1] = l;
+      } else out.push(l);
+      last = key;
+    }
+    return { visible: out, repeats };
+  }, [matched, foldRepeats]);
+  const problems = useMemo(() => {
+    let errors = 0;
+    let warnings = 0;
+    for (const l of matched) {
+      if (l.level === "error") errors++;
+      else if (l.level === "warn") warnings++;
+    }
+    return { errors, warnings };
+  }, [matched]);
+  const onlyProblems = shownLevels.size === 2 && shownLevels.has("error") && shownLevels.has("warn");
+  const showLevels = (only: Level[] | null) => setShownLevels(new Set(only ?? levelOrder));
+  // Listed in SHORTCUTS under Logs.
+  const searchBox = useRef<HTMLInputElement>(null);
+  useHotkeys({ "/": () => searchBox.current?.focus(), p: () => showLevels(onlyProblems ? null : ["error", "warn"]) });
 
   const toggleIn = <T,>(set: (f: (s: Set<T>) => Set<T>) => void, value: T) =>
     set((current) => {
@@ -223,6 +266,16 @@ export default function Logs() {
     });
   const solo = (id: string) => setHidden(new Set(allSources.filter((s) => s !== id)));
   const filtered = hidden.size > 0 || !!query.trim() || shownLevels.size !== levelOrder.length || shownStreams.size !== streams.length || range !== "all";
+  // Severity, stream and folding sit behind Filters; the count says when any of them narrows the view.
+  const [showFilters, setShowFilters] = useState(false);
+  const activeFilters = (shownLevels.size !== levelOrder.length ? 1 : 0) + (shownStreams.size !== streams.length ? 1 : 0) + (foldRepeats ? 0 : 1);
+  const filterSummary = [
+    ...(hidden.size > 0 ? [sourceSummary] : []),
+    ...(query.trim() ? [`${exclude ? "without" : "matching"} "${query.trim()}"`] : []),
+    ...(shownLevels.size !== levelOrder.length ? [onlyProblems ? "errors and warnings" : [...shownLevels].join(", ")] : []),
+    ...(shownStreams.size !== streams.length ? [streams.filter((x) => shownStreams.has(x.id)).map((x) => x.label).join(", ") || "no streams"] : []),
+    ...(range !== "all" ? [ranges.find((r) => r.id === range)!.label.toLowerCase()] : []),
+  ];
   const resetFilters = () => {
     setHidden(new Set());
     setQuery("");
@@ -232,7 +285,7 @@ export default function Logs() {
     setRange("all");
   };
 
-  const asText = () => visible.map((l) => `[${stamp(l.time)}] [${sourceLabel(sourceOf(l))}] ${l.level.padEnd(6)} | ${l.message}`).join("\n");
+  const asText = () => matched.map((l) => `[${stamp(l.time)}] [${sourceLabel(sourceOf(l))}] ${l.level.padEnd(6)} | ${l.message}`).join("\n");
   const exportLogs = async () => {
     const path = await save({
       defaultPath: `lamprabit-logs-${stamp(new Date()).replace(/[: ]/g, "-")}.log`,
@@ -241,7 +294,7 @@ export default function Logs() {
     if (!path) return;
     try {
       await api.saveText(path, asText() + "\n");
-      notify("info", `Exported ${visible.length} lines`);
+      notify("info", `Exported ${matched.length} lines`);
     } catch (e) {
       notify("error", String(e));
     }
@@ -254,6 +307,57 @@ export default function Logs() {
       notify("error", String(e));
     }
   };
+
+  const clearLogsAction = confirmClear ? (
+    <>
+      <Button size="sm" variant="danger" onClick={() => void clear()} aria-label="Confirm clear all logs" title="Delete all log files">
+        <Trash2 size={14} /> <span className="hidden xl:inline">Clear now</span>
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => setConfirmClear(false)} aria-label="Cancel clearing logs" title="Cancel">
+        <X size={14} />
+      </Button>
+    </>
+  ) : (
+    <Button size="sm" variant="ghost" onClick={() => setConfirmClear(true)} aria-label="Clear all logs" title="Clear all logs">
+      <Trash2 size={14} /> <span className="hidden xl:inline">Clear</span>
+    </Button>
+  );
+  usePageToolbar("logs", {
+    title: "Logs",
+    subtitle: "Live output from your services and projects, and what your code dumps.",
+    actions: (
+      <>
+        <Button size="sm" variant="ghost" onClick={() => copyText(asText(), `${matched.length} log ${matched.length === 1 ? "line" : "lines"}`)} aria-label={`Copy ${matched.length} matching log lines`} title={`Copy ${matched.length} matching lines`}>
+          <Copy size={14} /> <span className="hidden xl:inline">Copy</span>
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => void exportLogs()} aria-label="Export logs" title="Export logs">
+          <Download size={14} /> <span className="hidden xl:inline">Export</span>
+        </Button>
+        {clearLogsAction}
+      </>
+    ),
+    menuActions: (
+      <>
+        <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => copyText(asText(), `${matched.length} log ${matched.length === 1 ? "line" : "lines"}`)}>
+          <Copy size={14} /> Copy {matched.length} matching lines
+        </Button>
+        <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => void exportLogs()}>
+          <Download size={14} /> Export logs
+        </Button>
+        {confirmClear ? (
+          <div className="flex flex-col gap-2 border-t border-line pt-2">
+            <span className="px-2 text-xs text-danger-text">Delete all log files?</span>
+            <Button size="sm" variant="danger" className="w-full justify-start" onClick={() => void clear()}><Trash2 size={14} /> Clear all logs</Button>
+            <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => setConfirmClear(false)}><X size={14} /> Cancel</Button>
+          </div>
+        ) : (
+          <Button size="sm" variant="ghost" className="w-full justify-start border-t border-line pt-2" onClick={() => setConfirmClear(true)}>
+            <Trash2 size={14} /> Clear all logs
+          </Button>
+        )}
+      </>
+    ),
+  });
 
   // Only the rows in view are drawn, so thousands of lines stay quick.
   const rows = useVirtualizer({
@@ -282,8 +386,6 @@ export default function Logs() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden motion-stagger">
-      <PageHeader title="Logs" subtitle="Live output from your services and projects, and what your code dumps." />
-
       <Card className="mb-3 shrink-0 space-y-2.5 p-3">
         <div className="flex flex-wrap items-center gap-2">
           {/* On narrow screens the sources are a menu; wider ones have the sidebar. */}
@@ -320,6 +422,7 @@ export default function Logs() {
               onChange={(e) => setQuery(e.target.value)}
               placeholder={useRegex ? "Regular expression, e.g. error|fail" : "Search log messages"}
               aria-label="Search log messages"
+              ref={searchBox}
               className={clsx("w-full bg-transparent text-sm outline-none placeholder:text-muted", useRegex && "font-mono")}
             />
             {query && (
@@ -372,33 +475,55 @@ export default function Logs() {
               </>
             )}
           </button>
-          <Button variant="ghost" onClick={() => setWrapLines((current) => !current)} aria-pressed={wrapLines} title={wrapLines ? "One line per entry (the full text is in its details)" : "Wrap long lines"}>
-            <WrapText size={15} /> {wrapLines ? "Wrap" : "No wrap"}
-          </Button>
-          <Button variant="ghost" onClick={() => copyText(asText(), `${visible.length} log ${visible.length === 1 ? "line" : "lines"}`)} disabled={visible.length === 0}>
-            <Copy size={14} /> Copy
-          </Button>
-          <Button variant="ghost" onClick={exportLogs} disabled={visible.length === 0}>
-            <Download size={14} /> Export
-          </Button>
-          {confirmClear ? (
-            <div className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger-soft px-2 py-1">
-              <span className="text-xs text-danger-text">Delete all log files?</span>
-              <Button size="sm" variant="danger" onClick={() => clear()}>
-                Clear
-              </Button>
-              <Button size="sm" onClick={() => setConfirmClear(false)}>
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <Button variant="ghost" onClick={() => setConfirmClear(true)}>
-              <Trash2 size={14} /> Clear
-            </Button>
-          )}
+          <button
+            type="button"
+            onClick={() => setShowFilters((v) => !v)}
+            aria-expanded={showFilters}
+            className={clsx(
+              "flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-medium",
+              showFilters || activeFilters > 0 ? "border-accent/50 bg-accent-soft/40 text-fg" : "border-line bg-surface text-fg hover:bg-surface-2",
+            )}
+          >
+            <SlidersHorizontal size={14} /> Filters
+            {activeFilters > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] text-accent-fg tabular-nums">{activeFilters}</span>}
+          </button>
+          <Menu
+            label="More log actions"
+            items={[
+              { label: wrapLines ? "Don't wrap long lines" : "Wrap long lines", icon: <WrapText size={14} />, onSelect: () => setWrapLines((current) => !current) },
+            ]}
+          />
         </div>
 
+        {!showFilters && filtered && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-line pt-2.5 text-xs text-muted" aria-live="polite">
+            <span className="font-semibold">Showing</span>
+            {filterSummary.map((f) => (
+              <span key={f} className="rounded-full bg-surface-2 px-2 py-0.5 text-fg">
+                {f}
+              </span>
+            ))}
+            <button type="button" onClick={resetFilters} className="ml-1 flex items-center gap-1 font-medium text-accent-text hover:underline">
+              <RotateCcw size={12} /> Reset
+            </button>
+          </div>
+        )}
+        {showFilters && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-2.5">
+          <div className="flex items-center gap-0.5 rounded-lg border border-line bg-bg p-1" role="group" aria-label="Quick view">
+            <button type="button" onClick={() => showLevels(null)} aria-pressed={shownLevels.size === levelOrder.length} className={toggleChip(shownLevels.size === levelOrder.length)}>
+              Everything
+            </button>
+            <button
+              type="button"
+              onClick={() => showLevels(["error", "warn"])}
+              aria-pressed={onlyProblems}
+              title="Only errors and warnings, from every source"
+              className={toggleChip(onlyProblems)}
+            >
+              <AlertTriangle size={12} /> Problems
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-muted">Severity</span>
             <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-line bg-bg p-1" role="group" aria-label="Filter by severity">
@@ -420,6 +545,10 @@ export default function Logs() {
               ))}
             </div>
           </div>
+          <label className="flex items-center gap-2 text-xs font-semibold text-muted" title="Show consecutive lines that differ only in numbers (times, ids) as one line with a count">
+            <Switch checked={foldRepeats} onChange={setFoldRepeats} label="Fold repeated lines" />
+            Fold repeats
+          </label>
           <span className="ml-auto flex items-center gap-3 text-xs tabular-nums text-muted">
             {search && "error" in search && <span className="text-danger-text">Invalid expression: {search.error}</span>}
             {filtered && (
@@ -429,6 +558,7 @@ export default function Logs() {
             )}
           </span>
         </div>
+        )}
       </Card>
 
       <div className="flex min-h-0 flex-1 gap-3">
@@ -465,10 +595,32 @@ export default function Logs() {
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-terminal text-slate-200 shadow-float" aria-label="Log output">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-terminal-2 px-4 py-2.5 text-xs">
             <span className="font-semibold text-slate-200">Log output</span>
-            <span className="text-slate-400">
-              {sourceSummary} · {visible.length} {visible.length === 1 ? "line" : "lines"}
+            <span className="flex items-center gap-3 text-slate-400">
+              {problems.errors > 0 && (
+                <button type="button" onClick={() => showLevels(["error"])} className="flex items-center gap-1.5 text-red-300 hover:underline" title="Show only errors">
+                  <span className="size-1.5 rounded-full bg-red-400" aria-hidden /> {problems.errors} {problems.errors === 1 ? "error" : "errors"}
+                </button>
+              )}
+              {problems.warnings > 0 && (
+                <button type="button" onClick={() => showLevels(["warn"])} className="flex items-center gap-1.5 text-amber-300 hover:underline" title="Show only warnings">
+                  <span className="size-1.5 rounded-full bg-amber-400" aria-hidden /> {problems.warnings} {problems.warnings === 1 ? "warning" : "warnings"}
+                </button>
+              )}
+              <span>
+                {sourceSummary} · {matched.length} {matched.length === 1 ? "line" : "lines"}
+                {visible.length < matched.length && ` (${matched.length - visible.length} repeats folded)`}
+              </span>
             </span>
           </div>
+          {/* The view keeps the newest lines only; a busy day's earliest ones are then only in the files. */}
+          {logsDropped > 0 && (
+            <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-200" role="status">
+              Showing the newest {logs.length.toLocaleString()} lines; {logsDropped.toLocaleString()} older {logsDropped === 1 ? "line is" : "lines are"} only in the log files.
+              <button type="button" onClick={() => paths.data && openPath(paths.data.logs).catch(onError)} className="font-medium underline">
+                Open the logs folder
+              </button>
+            </div>
+          )}
           <div ref={scroller} className="selectable scrollbar-none min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3 font-mono text-[12px] leading-6">
             <div className={clsx("sticky top-0 z-10 grid border-b border-white/10 bg-terminal-2 px-4 py-2 text-[11px] font-semibold tracking-wide text-slate-400 uppercase", columns)}>
               <span>Timestamp</span>
@@ -498,11 +650,18 @@ export default function Logs() {
                         "absolute top-0 left-0 grid w-full cursor-pointer items-start px-4 py-1.5 hover:bg-white/5",
                         columns,
                         l.stream === "command" && "bg-white/3",
+                        // Errors stand out in a long scroll; warnings only by their colour.
+                        l.level === "error" && "border-l-2 border-red-400/70 bg-red-500/8",
                         l.id === selected && "bg-white/10 hover:bg-white/10",
                       )}
                       style={{ transform: `translateY(${item.start}px)` }}
                     >
-                      <span className="whitespace-nowrap pr-3 text-slate-400">{stamp(l.time)}</span>
+                      <span
+                        className={clsx("whitespace-nowrap pr-3", l.timed ? "text-slate-400" : "text-slate-500 italic")}
+                        title={l.timed ? undefined : "This line has no time of its own: it shows the time of the line next to it in the same log"}
+                      >
+                        {stamp(l.time)}
+                      </span>
                       <span className="min-w-0 pr-3">
                         <span className={clsx("inline-flex max-w-full truncate rounded-md px-1 text-[10px]", l.service === "project" ? projectBadge : (badgeColors[l.service] ?? neutralBadge))} title={sourceLabel(src)}>
                           {sourceLabel(src)}
@@ -514,6 +673,11 @@ export default function Logs() {
                       </span>
                       <span className={clsx("min-w-0", wrapLines ? "wrap-break-word whitespace-pre-wrap" : "truncate whitespace-pre", l.stream === "command" && "text-violet-200", l.service === "dumps" && "text-fuchsia-200")}>
                         {l.message}
+                        {(repeats.get(l.id) ?? 1) > 1 && (
+                          <span className="ml-2 rounded bg-white/10 px-1.5 font-sans text-[10px] text-slate-300" title="Consecutive lines like this one, folded">
+                            ×{repeats.get(l.id)}
+                          </span>
+                        )}
                       </span>
                     </div>
                   );
@@ -612,7 +776,7 @@ function LineDetails({ line, lines, dumps, onClose, onCopy, onOpenFile }: {
   return (
     <div className="flex max-h-[50%] min-h-32 shrink-0 flex-col border-t border-white/10 bg-terminal-2">
       <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-2 text-xs">
-        <span className="text-slate-400">{stamp(line.time)}</span>
+        <span className="text-slate-400">{stamp(line.time)}{!line.timed && " (no time of its own in the log)"}</span>
         <span className={clsx("rounded-md px-1 text-[10px]", line.service === "project" ? projectBadge : (badgeColors[line.service] ?? neutralBadge))}>{sourceLabel(src)}</span>
         <span className={clsx("capitalize", levels[line.level].text)}>{line.level}</span>
         <span className="flex-1" />

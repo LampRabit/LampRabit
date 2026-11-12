@@ -11,6 +11,7 @@ mod dumps;
 mod error;
 mod extensions;
 mod facts;
+mod git;
 mod langver;
 mod layout;
 mod logs;
@@ -122,7 +123,7 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         Runtime::N8n => &[ServiceKind::N8n],
         Runtime::Rabbitmq | Runtime::Erlang => &[ServiceKind::Rabbitmq],
         // Languages run from the terminal and projects' own processes.
-        Runtime::Go | Runtime::Rust | Runtime::Maven | Runtime::Gradle => &[],
+        Runtime::Go | Runtime::Rust | Runtime::Maven | Runtime::Gradle | Runtime::Git => &[],
         // Projects run Python themselves; pgAdmin keeps the Python it was installed with.
         Runtime::Python => &[],
         Runtime::Phppgadmin => &ServiceKind::WEB,
@@ -1891,6 +1892,235 @@ async fn create_project_database(app: AppHandle, state: State<'_, AppState>, nam
     Ok(())
 }
 
+/// Git, for a project's folder (git.rs).
+#[tauri::command]
+async fn git_version(state: State<'_, AppState>) -> Result<Option<String>> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    Ok(git::version().await)
+}
+
+#[tauri::command]
+async fn git_status(state: State<'_, AppState>, name: String) -> Result<git::Status> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::status(&project_dir(&layout, &name)?).await
+}
+
+#[tauri::command]
+async fn git_diff(state: State<'_, AppState>, name: String, path: String, staged: bool, untracked: bool) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::diff(&project_dir(&layout, &name)?, &path, staged, untracked).await
+}
+
+#[tauri::command]
+async fn git_stage(state: State<'_, AppState>, name: String, paths: Vec<String>, stage: bool) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::stage(&project_dir(&layout, &name)?, &paths, stage).await
+}
+
+#[tauri::command]
+async fn git_discard(app: AppHandle, state: State<'_, AppState>, name: String, paths: Vec<String>) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::discard(&project_dir(&layout, &name)?, &paths).await?;
+    logs::system(&app, logs::Level::Info, format!("Discarded changes to {} in {name}", paths.join(", ")));
+    Ok(())
+}
+
+#[tauri::command]
+async fn git_commit(app: AppHandle, state: State<'_, AppState>, name: String, message: String, amend: bool, all: Option<bool>) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    let out = git::commit(&project_dir(&layout, &name)?, &message, amend, all.unwrap_or(false)).await?;
+    logs::system(&app, logs::Level::Info, format!("{} in {name}: {}", if amend { "Amended the last commit" } else { "Committed" }, message.lines().next().unwrap_or_default()));
+    Ok(out)
+}
+
+#[tauri::command]
+async fn git_branches(state: State<'_, AppState>, name: String) -> Result<Vec<git::Branch>> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::branches(&project_dir(&layout, &name)?).await
+}
+
+/// Branch actions; a switch or merge changes the files, so the site's facts refresh.
+#[tauri::command]
+async fn git_branch(app: AppHandle, state: State<'_, AppState>, name: String, action: git::BranchAction) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    let what = format!("{action:?}");
+    let out = git::branch(&project_dir(&layout, &name)?, action).await?;
+    logs::system(&app, logs::Level::Info, format!("Git in {name}: {what}"));
+    Ok(out)
+}
+
+#[tauri::command]
+async fn git_abort(state: State<'_, AppState>, name: String) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::abort(&project_dir(&layout, &name)?).await
+}
+
+#[tauri::command]
+async fn git_continue(state: State<'_, AppState>, name: String) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::continue_operation(&project_dir(&layout, &name)?).await
+}
+
+#[tauri::command]
+async fn git_log(state: State<'_, AppState>, name: String, skip: u32, limit: u32, path: Option<String>) -> Result<Vec<git::Commit>> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::log(&project_dir(&layout, &name)?, skip, limit, path.as_deref()).await
+}
+
+#[tauri::command]
+async fn git_commit_details(state: State<'_, AppState>, name: String, hash: String) -> Result<git::CommitDetails> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::details(&project_dir(&layout, &name)?, &hash).await
+}
+
+#[tauri::command]
+async fn git_commit_file_diff(state: State<'_, AppState>, name: String, hash: String, path: String) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::commit_file_diff(&project_dir(&layout, &name)?, &hash, &path).await
+}
+
+#[tauri::command]
+async fn git_repo_settings(state: State<'_, AppState>, name: String) -> Result<git::RepoSettings> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    Ok(git::repo_settings(&project_dir(&layout, &name)?).await)
+}
+
+#[tauri::command]
+async fn git_set_repo_settings(state: State<'_, AppState>, name: String, settings: git::RepoSettings) -> Result<()> {
+    let (app_settings, layout) = state.snapshot().await;
+    git::configure(&app_settings, &layout);
+    git::set_repo_settings(&project_dir(&layout, &name)?, &settings).await
+}
+
+#[tauri::command]
+async fn git_sync(app: AppHandle, state: State<'_, AppState>, name: String, action: git::Sync, op: Option<String>) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    let op = op.unwrap_or_else(|| format!("{name}:{action:?}"));
+    let out = git::sync(&app, &op, &project_dir(&layout, &name)?, action).await?;
+    logs::system(&app, logs::Level::Info, format!("Git {action:?} in {name} finished"));
+    Ok(out)
+}
+
+#[tauri::command]
+async fn git_remote(state: State<'_, AppState>, name: String, action: git::RemoteAction) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::remote(&project_dir(&layout, &name)?, action).await
+}
+
+#[tauri::command]
+async fn git_set_identity(state: State<'_, AppState>, name: String, user: String, email: String) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::set_identity(&project_dir(&layout, &name)?, &user, &email).await
+}
+
+#[tauri::command]
+async fn git_init(state: State<'_, AppState>, name: String) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::init(&project_dir(&layout, &name)?).await
+}
+
+/// Clones a repository into www/; the folder becomes a project like any other.
+#[tauri::command]
+async fn git_clone(app: AppHandle, state: State<'_, AppState>, url: String, folder: Option<String>, op: Option<String>) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    let folder = folder.map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).unwrap_or_else(|| git::folder_for(&url));
+    manage::check_project_name(&layout, &folder)?;
+    logs::system(&app, logs::Level::Info, format!("Cloning into www/{folder}"));
+    git::clone(&app, op.as_deref().unwrap_or("clone"), &layout.www(), &url, &folder).await?;
+    logs::system(&app, logs::Level::Info, format!("Cloned www/{folder}"));
+    Ok(folder)
+}
+
+#[tauri::command]
+async fn git_stashes(state: State<'_, AppState>, name: String) -> Result<Vec<git::Stash>> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::stashes(&project_dir(&layout, &name)?).await
+}
+
+#[tauri::command]
+async fn git_stash(state: State<'_, AppState>, name: String, action: git::StashAction) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::stash(&project_dir(&layout, &name)?, action).await
+}
+
+#[tauri::command]
+async fn git_stage_hunk(state: State<'_, AppState>, name: String, path: String, hunk: usize, unstage: bool) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::stage_hunk(&project_dir(&layout, &name)?, &path, hunk, unstage).await
+}
+
+#[tauri::command]
+async fn git_resolve(state: State<'_, AppState>, name: String, path: String, theirs: bool) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::resolve(&project_dir(&layout, &name)?, &path, theirs).await
+}
+
+#[tauri::command]
+async fn git_tags(state: State<'_, AppState>, name: String) -> Result<Vec<git::Tag>> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::tags(&project_dir(&layout, &name)?).await
+}
+
+#[tauri::command]
+async fn git_tag(state: State<'_, AppState>, name: String, action: git::TagAction) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::tag(&project_dir(&layout, &name)?, action).await
+}
+
+#[tauri::command]
+async fn git_revert(app: AppHandle, state: State<'_, AppState>, name: String, hash: String) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    let out = git::revert(&project_dir(&layout, &name)?, &hash).await?;
+    logs::system(&app, logs::Level::Info, format!("Reverted {} in {name}", &hash[..hash.len().min(8)]));
+    Ok(out)
+}
+
+#[tauri::command]
+async fn git_restore_file(state: State<'_, AppState>, name: String, hash: String, path: String) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::restore_file(&project_dir(&layout, &name)?, &hash, &path).await
+}
+
+/// Stops a clone, fetch, pull or push in progress.
+#[tauri::command]
+fn git_cancel(op: String) -> bool {
+    git::cancel(&op)
+}
+
+/// Points a project at the other MySQL-family server (its .env's DB_PORT).
+#[tauri::command]
+async fn switch_project_database(state: State<'_, AppState>, name: String, engine: manage::Engine) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    manage::switch_database(&settings, &project_dir(&layout, &name)?, engine)
+}
+
 /// Changes one of the .env settings the Overview shows (APP_URL…).
 #[tauri::command]
 async fn set_project_env(state: State<'_, AppState>, name: String, key: String, value: String) -> Result<()> {
@@ -2537,6 +2767,15 @@ fn save_text(path: PathBuf, contents: String) -> Result<()> {
     Ok(())
 }
 
+/// A small text file the user picked (an exported profile list); refuses large files.
+#[tauri::command]
+fn read_text(path: PathBuf) -> Result<String> {
+    if std::fs::metadata(&path)?.len() > 1024 * 1024 {
+        return Err(Error::msg("That file is over 1 MB; pick the file LampRabit exported."));
+    }
+    Ok(std::fs::read_to_string(path)?)
+}
+
 /// A Markdown report of everything useful for troubleshooting.
 #[tauri::command]
 async fn diagnostics(state: State<'_, AppState>, redact: bool) -> Result<String> {
@@ -2698,6 +2937,13 @@ fn runtime_info() -> catalog::Catalog {
 async fn runtime_requirements(app: AppHandle, state: State<'_, AppState>, runtime: Runtime, version: Option<String>) -> Result<Vec<catalog::Requirement>> {
     let (settings, layout) = state.snapshot().await;
     catalog::requirements(&app, &state.http, &settings, &layout, runtime, version).await
+}
+
+/// What installing a starter stack would do, for the first-run wizard.
+#[tauri::command]
+async fn starter_plan(state: State<'_, AppState>, runtimes: Vec<String>) -> Result<Vec<catalog::StarterItem>> {
+    let (settings, layout) = state.snapshot().await;
+    Ok(catalog::starter(&state.http, &settings, &layout, &runtimes).await)
 }
 
 #[tauri::command]
@@ -2942,6 +3188,60 @@ fn run_smoke_test(mut context: tauri::Context<tauri::Wry>, options: smoke::Optio
     app.run(|_, _| {});
 }
 
+/// `--pg-elevated <pg_ctl> <data> <port> <log>`: starts PostgreSQL through pg_ctl (which
+/// drops administrator rights PostgreSQL refuses to run with), then prints the server's log
+/// as it grows and exits when the server does, so the supervisor can treat this process as
+/// the server: output, health, crash restarts. Stopping goes through `pg_ctl stop`.
+fn pg_elevated(args: Vec<String>) -> i32 {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let [pg_ctl, data, port, log] = args.as_slice() else {
+        eprintln!("usage: --pg-elevated <pg_ctl> <data> <port> <log>");
+        return 2;
+    };
+    let start = std::fs::metadata(log).map(|m| m.len()).unwrap_or(0);
+    let options = format!("-p {port} -c listen_addresses=127.0.0.1 -c unix_socket_directories=");
+    let mut cmd = std::process::Command::new(pg_ctl);
+    cmd.args(["start", "-w", "-t", "60", "-D", data, "-l", log, "-o", &options]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let started = cmd.status();
+    let mut file = std::fs::File::open(log).ok();
+    let mut offset = start;
+    let mut echo = |file: &mut Option<std::fs::File>| {
+        if let Some(f) = file.as_mut() {
+            let mut chunk = String::new();
+            if f.seek(SeekFrom::Start(offset)).is_ok() && f.read_to_string(&mut chunk).is_ok() && !chunk.is_empty() {
+                offset += chunk.len() as u64;
+                print!("{chunk}");
+                let _ = std::io::stdout().flush();
+            }
+        }
+    };
+    if !started.is_ok_and(|s| s.success()) {
+        echo(&mut file);
+        eprintln!("PostgreSQL didn't start (pg_ctl start failed); its log is above.");
+        return 1;
+    }
+    let pid: Option<u32> = std::fs::read_to_string(std::path::Path::new(data).join("postmaster.pid")).ok().and_then(|t| t.lines().next()?.trim().parse().ok());
+    let Some(pid) = pid else {
+        echo(&mut file);
+        eprintln!("PostgreSQL started but wrote no postmaster.pid.");
+        return 1;
+    };
+    while procgroup::alive(pid) {
+        if file.is_none() {
+            file = std::fs::File::open(log).ok();
+        }
+        echo(&mut file);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    echo(&mut file);
+    0
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // The Windows uninstaller's cleanup: no window, and before the single-instance plugin,
@@ -2949,6 +3249,10 @@ pub fn run() {
     if std::env::args().any(|a| a == "--uninstall-cleanup") {
         uninstall::cli();
         return;
+    }
+    // PostgreSQL under an elevated LampRabit (services.rs): no window, no single instance.
+    if std::env::args().nth(1).as_deref() == Some("--pg-elevated") {
+        std::process::exit(pg_elevated(std::env::args().skip(2).collect()));
     }
     let context = tauri::generate_context!();
     // Also before the single-instance plugin: a LampRabit already open must not take it.
@@ -3089,6 +3393,18 @@ pub fn run() {
             });
 
             setup_tray(app)?;
+            // A window bigger than the screen (1280×860 on a 1024×768 display) would open
+            // partly off it, hiding its controls: fit it to the screen's work area first.
+            if let Some(w) = app.get_webview_window("main") {
+                if let (Ok(Some(monitor)), Ok(size)) = (w.current_monitor(), w.outer_size()) {
+                    let area = monitor.work_area().size;
+                    if size.width > area.width || size.height > area.height {
+                        let fitted = tauri::PhysicalSize::new(size.width.min(area.width * 95 / 100), size.height.min(area.height * 95 / 100));
+                        let _ = w.set_size(fitted);
+                        let _ = w.center();
+                    }
+                }
+            }
             // Started with the OS: stay in the tray.
             if std::env::args().any(|a| a == "--minimized") {
                 if let Some(w) = app.get_webview_window("main") {
@@ -3123,6 +3439,36 @@ pub fn run() {
             save_project_file,
             database_status,
             create_project_database,
+            switch_project_database,
+            git_version,
+            git_status,
+            git_diff,
+            git_stage,
+            git_discard,
+            git_commit,
+            git_branches,
+            git_branch,
+            git_abort,
+            git_continue,
+            git_log,
+            git_commit_details,
+            git_commit_file_diff,
+            git_repo_settings,
+            git_set_repo_settings,
+            git_sync,
+            git_remote,
+            git_set_identity,
+            git_init,
+            git_clone,
+            git_cancel,
+            git_stashes,
+            git_stash,
+            git_stage_hunk,
+            git_resolve,
+            git_tags,
+            git_tag,
+            git_revert,
+            git_restore_file,
             set_project_env,
             ports_listening,
             set_site_php_ini,
@@ -3171,6 +3517,7 @@ pub fn run() {
             clear_problem,
             diagnostics,
             save_text,
+            read_text,
             log_history,
             clear_logs,
             restart_service,
@@ -3218,6 +3565,7 @@ pub fn run() {
             runtime_catalog,
             installed_runtimes,
             install_runtime,
+            starter_plan,
             remove_runtime,
             set_active_version,
         ])

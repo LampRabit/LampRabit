@@ -5,6 +5,32 @@
 @custom-variant still (&:where([data-motion="reduced"] *, [data-motion="off"] *));
 
 /* Side lists that scroll on their own: a slim scrollbar that still shows there's more. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 42%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 42%, transparent);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 68%, transparent);
+  background-clip: padding-box;
+}
+
 .scrollbar-thin {
   scrollbar-width: thin;
 }
@@ -75,7 +101,7 @@
   --surface-2: #232a34;
   --line: #2d3540;
   --fg: #e7ecf1;
-  --muted: #8d98a7;
+  --muted: #9ea9b7;
   --accent: #59d1a2;
   --accent-hover: #74dcb4;
   --accent-fg: #0e1a15;
@@ -101,7 +127,7 @@
     --surface-2: #232a34;
     --line: #2d3540;
     --fg: #e7ecf1;
-    --muted: #8d98a7;
+    --muted: #9ea9b7;
     --accent: #59d1a2;
     --accent-hover: #74dcb4;
     --accent-fg: #0e1a15;
@@ -321,4 +347,26 @@ input,
 textarea,
 .selectable {
   @apply select-text;
+}
+
+/* A visible focus ring for keyboard users on every control. In the base layer, so a
+   component's own focus style (inputs' ring) still wins; mouse clicks don't show it. */
+@layer base {
+  :where(button, a, summary, [role="tab"], [role="radio"], [tabindex]:not([tabindex="-1"]), input[type="checkbox"], input[type="radio"]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+/* Dropdowns look the same in every engine: WebKit (the macOS app's WKWebView) draws its
+   own grey button otherwise. Ones that draw their own chevron opt out with appearance-none. */
+@layer base {
+  select:not(.appearance-none) {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a94a3' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    padding-right: 1.9rem;
+  }
 }

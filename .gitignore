@@ -26,3 +26,4 @@ dist-ssr
 # Linux runtime builds (build/linux/build-*.sh) run from the repo root
 /out/
 /work/
+scripts/screenshots/out/

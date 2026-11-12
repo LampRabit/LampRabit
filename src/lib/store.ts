@@ -1,12 +1,43 @@
 import { create } from "zustand";
 import type { InstallProgress, LogHistory, LogService, RawLogLine } from "./api";
 import { parseLog, type LogEntry } from "./logparse";
+import { explain } from "./explain";
 
 // The Logs page draws only the rows in view, so it can keep this many.
 const MAX_LOG_LINES = 10000;
 const MAX_ACTIVITY = 100;
 
 export type PageId = "overview" | "sites" | "services" | "logs" | "settings";
+/** Where the page tab bar docks: an edge, and where along it (BottomNav, App). */
+export type NavEdge = "top" | "bottom" | "left" | "right";
+export type NavAlign = "start" | "center" | "end";
+export interface NavPlacement {
+  edge: NavEdge;
+  align: NavAlign;
+}
+
+/**
+ * The saved placement ("right-start"). Older saves load too: a bare edge ("left"), or the
+ * first version's { edge, x, y } (a free-floating one goes to the bottom), its position along
+ * the edge kept as the nearest third.
+ */
+function loadNavPlacement(): NavPlacement {
+  const raw = readPref("navPosition");
+  const fallback: NavPlacement = { edge: "bottom", align: "center" };
+  if (!raw) return fallback;
+  const isEdge = (e: unknown): e is NavEdge => e === "top" || e === "bottom" || e === "left" || e === "right";
+  const isAlign = (a: unknown): a is NavAlign => a === "start" || a === "center" || a === "end";
+  const [edge, align] = raw.split("-");
+  if (isEdge(edge)) return { edge, align: isAlign(align) ? align : "center" };
+  try {
+    const old = JSON.parse(raw) as { edge?: unknown; x?: number; y?: number };
+    if (!isEdge(old?.edge)) return fallback;
+    const t = old.edge === "left" || old.edge === "right" ? old.y : old.x;
+    return { edge: old.edge, align: typeof t !== "number" ? "center" : t < 1 / 3 ? "start" : t > 2 / 3 ? "end" : "center" };
+  } catch {
+    return fallback;
+  }
+}
 
 export interface Notice {
   id: number;
@@ -14,6 +45,8 @@ export interface Notice {
   text: string;
   /** Output lines shown under the text (a crash's last lines). */
   detail?: string[];
+  /** What to do about it, in plain words (lib/explain). */
+  hint?: string | null;
 }
 
 export interface Activity {
@@ -29,6 +62,11 @@ export const installKey = (runtime: string, version: string) => `${runtime}@${ve
 interface AppStore {
   page: PageId;
   navigate: (page: PageId) => void;
+  /** Opens a project on the Sites page (from Home); Sites picks it up and clears it. */
+  siteFocus: string | null;
+  openSite: (path: string | null) => void;
+  /** When Logs was last on screen, for the "new errors" dot on its tab. */
+  logsSeenAt: number;
   /** Service the Logs page opens filtered to, set by "View logs" on a service. */
   /** A service, or "project:<name>". */
   logFilter: string | null;
@@ -38,6 +76,9 @@ interface AppStore {
   setDiagnosticsOpen: (open: boolean) => void;
   newProjectOpen: boolean;
   setNewProjectOpen: (open: boolean) => void;
+  /** The setup guide (starter stacks), reopened from Settings; the first run opens it itself. */
+  setupGuideOpen: boolean;
+  setSetupGuideOpen: (open: boolean) => void;
   /** The template editor: open on some YAML (a project's), and whether New project opened it. */
   templateEditor: { yaml?: string; fromWizard?: boolean } | null;
   openTemplateEditor: (editor: { yaml?: string; fromWizard?: boolean }) => void;
@@ -51,7 +92,11 @@ interface AppStore {
   /** The stack profile Start acts on; null means every installed service. */
   activeProfile: string | null;
   setActiveProfile: (name: string | null) => void;
+  navPosition: NavPlacement;
+  setNavPosition: (placement: NavPlacement) => void;
   logs: LogEntry[];
+  /** Lines that fell out of the view because it keeps only the newest ones. */
+  logsDropped: number;
   notices: Notice[];
   activity: Activity[];
   /** In-flight installs keyed by installKey(). */
@@ -91,13 +136,19 @@ let logCursor = 0;
 
 export const useAppStore = create<AppStore>((set) => ({
   page: "overview",
-  navigate: (page) => set({ page }),
+  // Leaving or entering Logs counts as having seen its errors.
+  navigate: (page) => set((s) => ({ page, logsSeenAt: page === "logs" || s.page === "logs" ? Date.now() : s.logsSeenAt })),
+  siteFocus: null,
+  openSite: (siteFocus) => set(siteFocus ? { siteFocus, page: "sites" } : { siteFocus }),
+  logsSeenAt: Date.now(),
   logFilter: null,
   showLogs: (logFilter) => set({ page: "logs", logFilter }),
   diagnosticsOpen: false,
   setDiagnosticsOpen: (diagnosticsOpen) => set({ diagnosticsOpen }),
   newProjectOpen: false,
   setNewProjectOpen: (newProjectOpen) => set({ newProjectOpen }),
+  setupGuideOpen: false,
+  setSetupGuideOpen: (setupGuideOpen) => set({ setupGuideOpen }),
   templateEditor: null,
   openTemplateEditor: (templateEditor) => set({ templateEditor }),
   closeTemplateEditor: () => set({ templateEditor: null }),
@@ -113,7 +164,13 @@ export const useAppStore = create<AppStore>((set) => ({
     writePref("activeProfile", activeProfile);
     set({ activeProfile });
   },
+  navPosition: loadNavPlacement(),
+  setNavPosition: (navPosition) => {
+    writePref("navPosition", `${navPosition.edge}-${navPosition.align}`);
+    set({ navPosition });
+  },
   logs: [],
+  logsDropped: 0,
   notices: [],
   activity: [{ id: nextId++, at: new Date(), text: "Environment ready", source: "System", tone: "info" }],
   installs: {},
@@ -126,7 +183,7 @@ export const useAppStore = create<AppStore>((set) => ({
       return { installs };
     }),
   pushLog: (line) =>
-    set((s) => (line.id <= logCursor ? s : { logs: [...s.logs.slice(-(MAX_LOG_LINES - 1)), parseLog(line)] })),
+    set((s) => (line.id <= logCursor ? s : { logs: [...s.logs.slice(-(MAX_LOG_LINES - 1)), parseLog(line)], logsDropped: s.logsDropped + (s.logs.length >= MAX_LOG_LINES ? 1 : 0) })),
   loadHistory: ({ lines, cursor }) =>
     set((s) => {
       logCursor = cursor;
@@ -134,27 +191,40 @@ export const useAppStore = create<AppStore>((set) => ({
       // Lines without their own timestamp (stack traces, MariaDB's "Version:" line) take the
       // time of the line before them in the same file.
       const lastTime: Record<string, Date> = {};
+      const fileOf = (l: { service: string; stream: string; project?: string }) => `${l.service}/${l.project ?? ""}/${l.stream}`;
       const history = lines.map((l, i) => {
         const entry = parseLog({ ...l, id: -(i + 1) });
-        const file = `${l.service}/${l.stream}`;
+        const file = fileOf(l);
         if (entry.timed) lastTime[file] = entry.time;
         else if (lastTime[file]) entry.time = lastTime[file];
+        else entry.time = new Date(NaN);
         return entry;
       });
+      // Lines at the top of a file with nothing timed before them take the next timed line's
+      // time; a file with no timestamps at all keeps "when read", which the page marks. They
+      // used to all show the current time, so days-old errors looked like they just happened.
+      const nextTime: Record<string, Date> = {};
+      for (let i = history.length - 1; i >= 0; i--) {
+        const entry = history[i];
+        const file = fileOf(entry);
+        if (entry.timed) nextTime[file] = entry.time;
+        else if (Number.isNaN(entry.time.getTime())) entry.time = nextTime[file] ?? new Date();
+      }
       const live = s.logs.filter((l) => l.id > cursor);
       const merged = [...history, ...live].sort((a, b) => a.time.getTime() - b.time.getTime());
-      return { logs: merged.slice(-MAX_LOG_LINES) };
+      return { logs: merged.slice(-MAX_LOG_LINES), logsDropped: Math.max(0, merged.length - MAX_LOG_LINES) };
     }),
-  clearLogs: () => set({ logs: [] }),
+  clearLogs: () => set({ logs: [], logsDropped: 0 }),
   record: (text, source, tone) =>
     set((s) => ({
       activity: [{ id: nextId++, at: new Date(), text, source, tone }, ...s.activity].slice(0, MAX_ACTIVITY),
     })),
   notify: (tone, text, detail) => {
     const id = nextId++;
-    set((s) => ({ notices: [...s.notices, { id, tone, text, detail }] }));
-    // Ones with output stay longer, to be read.
-    setTimeout(() => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })), detail?.length ? 15000 : 6000);
+    const hint = tone === "error" ? explain([text, ...(detail ?? [])].join("\n")) : null;
+    set((s) => ({ notices: [...s.notices, { id, tone, text, detail, hint }] }));
+    // Ones with output or advice stay longer, to be read.
+    setTimeout(() => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })), detail?.length || hint ? 15000 : 6000);
   },
   dismiss: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
 }));

@@ -36,17 +36,17 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **11. Service foundation and web servers: Caddy, FrankenPHP, Tomcat (with Java)** (2026-11-05: runtime needs and platform gaps from `catalog.rs`; the frontend's runtime and service labels load from it)
 - [x] **12. Projects: several domains, processes, Node.js serving** (2026-11-05: stack profiles list project processes; `lamprabit.toml` saved and applied from a project's Settings)
 - [x] **13. Logs redesign and dump catcher** (2026-11-05: dump catcher, source sidebar, virtualised list, line details, per-source clear, rotation)
-- [ ] **14. Movable tab bar**
-- [ ] **15. More databases: PostgreSQL, MongoDB, SQLite, ClickHouse, Neo4j, backups**
+- [x] **14. Movable tab bar** (2026-11-12: docks to any edge in the layout, drag with animation, Settings → Appearance)
+- [x] **15. More databases: PostgreSQL, MongoDB, SQLite, ClickHouse, Neo4j, backups** (2026-11-12: implemented; see phase details)
 - [x] **16. More services: Meilisearch, Typesense, RustFS, MinIO, OpenSearch/Elasticsearch, RabbitMQ, Ollama, n8n**
 - [x] **17. Templates and more frameworks** (2026-11-05: `processes:` and `domains:` in templates, a template editor, Save as a template)
-- [ ] **18. Onboarding**
+- [x] **18. Onboarding** (2026-11-12: first-run starter setup and reopen from Settings)
 - [ ] **19. Project doctor**
 - [ ] **20. Headless core and the `lamprabit` CLI**
 - [ ] **21. MCP server**
-- [ ] **22. Git**
+- [x] **22. Git** (2026-11-12: project Git workflow and Git runtime)
 - [ ] **23. Dependency manager** (part of 25)
-- [ ] **24. Languages: Python, Go, Rust, Java**
+- [x] **24. Languages: Python, Go, Rust, Java** (2026-11-12: runtime, project and template support)
 - [ ] **25. Package managers: npm, pnpm, Yarn, Bun, Deno, pip, conda, uv, Maven, Gradle, Cargo**
 - [x] **26. Movable environment folder** (2026-11-05: the first run asks where the folder goes)
 - [ ] **Later**: Git workflow builder, deployment checklists
@@ -134,7 +134,7 @@ FlyEnv (BSD-3) supports nearly all of these, but it downloads from its own mirro
 - Runtimes declare what they need (Tomcat, Neo4j, Maven → Java; n8n → Node; RabbitMQ → Erlang), and the UI offers to install what's missing.
 - A platform gap is a reason string per runtime, shown in the UI instead of hiding the runtime.
 
-**Done (2026-11-01):** the `Versions` map, `ServiceKind::def()`, `web_servers` (with migration and a Settings UI: a switch per server and a primary picker), and Caddy end to end (catalog, Caddyfile, validate, reload, stop, health, ports, Sites/New project pickers). Then Java (Temurin, shims with JAVA_HOME), FrankenPHP (the Caddy renderer with `php_server`, conf.d ini through `PHP_INI_SCAN_DIR`, no LampRabit PHP pools) and Tomcat 9/10.1/11 (Java checked per line, `CATALINA_BASE` in etc/tomcat, one `<Host>` per Java project found by `sites::java_webapp`, proxied from the site's web server, restarted when the apps change). FrankenPHP worker mode per site done (2026-11-04: a switch in the project's settings, Octane's worker or index.php, "Restart workers" through the admin API). Still to do for the foundation: declared dependencies between runtimes, platform-gap reasons, and the frontend reading a backend catalog instead of its own tables.
+**Done (2026-11-01):** the `Versions` map, `ServiceKind::def()`, `web_servers` (with migration and a Settings UI: a switch per server and a primary picker), and Caddy end to end (catalog, Caddyfile, validate, reload, stop, health, ports, Sites/New project pickers). Then Java (Temurin, shims with JAVA_HOME), FrankenPHP (the Caddy renderer with `php_server`, conf.d ini through `PHP_INI_SCAN_DIR`, no LampRabit PHP pools) and Tomcat 9/10.1/11 (Java checked per line, `CATALINA_BASE` in etc/tomcat, one `<Host>` per Java project found by `sites::java_webapp`, proxied from the site's web server, restarted when the apps change). FrankenPHP worker mode per site done (2026-11-04: a switch in the project's settings, Octane's worker or index.php, "Restart workers" through the admin API). Foundation done too (checked 2026-11-12): `catalog.rs` declares each runtime's needs (versions per release) and why it can't run on a platform, the Services page reads groups, labels and needs from it, and installs ask through `RequirementsDialog`. Phase 11 is complete.
 
 **Web servers.** Caddy, FrankenPHP and Tomcat run next to Apache and Nginx: each site picks its server when more than one is enabled, and each extra server gets its own ports.
 - **Caddy**: single binary from GitHub releases (all three OSes). LampRabit writes a Caddyfile: one site block per site, `php_fastcgi` to the existing PHP pools (so per-site PHP and the extension manager keep working), `reverse_proxy` for proxied sites/tools, `tls <cert> <key>` with LampRabit's CA and `auto_https off` so Caddy doesn't create a second CA. `caddy validate` before start (like `httpd -t`), `caddy reload` when sites change.
@@ -186,15 +186,17 @@ restart = "on-failure"
 
 ## Phase 13: logs redesign and dump catcher
 
+**Done (2026-11-05, finished 2026-11-12):** sources sidebar, virtualised list, line details, per-source clear, regex/case/exclude search, severity, stream and time-range filters, pause, copy and export, rotation (Settings → Logs) and the dump catcher. Then, from user reports: every service's timestamp format is parsed (MySQL 8, PostgreSQL, MongoDB, Redis, Caddy, Elasticsearch, Tomcat, RabbitMQ, Go and Rust loggers; before, their lines showed the load time), lines without their own time borrow the nearest one and are shown in italics, repeats fold into one line with a count, a Problems view and error/warning counts, and error rows stand out.
+
 - **Sources**: every service, every project process (phase 12; `LogLine.service` becomes an owned name like `shop/queue`), PHP errors, web-server access/error logs, and dumps.
 - **Dump catcher**: PHP `dump()` and `dd()` appear in Logs as their own source, with the project, file:line, time and a collapsible tree of the value. Route: an `auto_prepend_file` in the generated php.ini sets Symfony VarDumper's server mode (`VAR_DUMPER_FORMAT=server`, `VAR_DUMPER_SERVER=127.0.0.1:<port>`), and LampRabit listens on that port. The dump-server payload is PHP-serialized, so spike the decoding: a small PHP receiver that re-emits JSON, or a LampRabit dumper class set as the handler. A setting decides whether dumps still show in the page too. Plain `var_dump` can't be intercepted; the UI says that.
 - **Redesign**: source list (services, projects → processes, dumps) next to the stream; filters for level, source, time range and text (regex optional); highlighted matches; pause/follow; virtualised list so large logs don't block the UI; click a line for context (surrounding lines, full text, copy); export the filtered view; per-source clear.
 - **Retention**: size cap per log file and total, configurable in Settings; old files rotated.
 - Errors that need action (fatal, failed start) are highlighted; warnings aren't treated as failures.
 
-## Phase 14: movable tab bar
+## Phase 14: movable tab bar — done (2026-11-12)
 
-The page tab bar (`BottomNav`) can sit at the bottom (default), top, left or right: a setting, plus dragging the bar to an edge with a drop preview. Vertical positions stack the tabs and move the page content aside. The position is saved per device, `Escape`/a reset action puts it back, and it never ends up off-screen. Check both themes, Motion settings, and the full-width wrapper pitfall (`pointer-events-none`).
+The page tab bar (`BottomNav`) docks to one of twelve places, an edge (top, right, bottom, left) and a position along it (start, center, end; bottom center by default), and takes its own space there (App lays the body out with `navLayout`), so it never covers a page. Drag it by its grip or anywhere on it: it floats under the pointer in the shape it will have, the target edge lights up, and on release it glides into place while the page slides over (Web Animations, skipped when Motion is reduced or off). Escape cancels a drag; on the grip, the arrow keys dock to that edge, Shift+arrows move it along the edge and Escape puts it back at the bottom center. Its size is published as `--nav-*` so the Apply bar and notices stay clear of it. Settings → Appearance → Page bar sets it too; the edge is saved per device (older saved positions load as their edge). Pages put their title and actions in the title bar (`PageToolbar`).
 
 ## Phase 15: more databases
 
@@ -226,13 +228,15 @@ Same standards as existing runtimes: catalog per OS/arch with checksums, data un
 
 ## Phase 17: templates and more frameworks
 
-Done (2026-10-30): YAML templates (`src-tauri/templates/`, user ones in `<root>/templates/`, reference in docs/templates.md) with variables, optional steps, `if:` conditions, requirement checks, risky-step approval for user templates, and the steps `composer`, `php`, `run`, `download`, `write`, `append`, `copy`, `env`, `replace`, `create_database`, `git_init`. Built in: the five presets plus CakePHP, CodeIgniter, Drupal and Statamic, each verified by creating a project in WSL. The site records `template = "id@version"`. Since then: Magento, and Node templates (Vite, Next.js, Nuxt, Astro, Express, NestJS) whose variables mirror each CLI's own questions (labelled options, conditions, flags, multi-select). Still to do: extra domains, the template creation wizard, recording a setup as a template.
+Done (2026-10-30): YAML templates (`src-tauri/templates/`, user ones in `<root>/templates/`, reference in docs/templates.md) with variables, optional steps, `if:` conditions, requirement checks, risky-step approval for user templates, and the steps `composer`, `php`, `run`, `download`, `write`, `append`, `copy`, `env`, `replace`, `create_database`, `git_init`. Built in: the five presets plus CakePHP, CodeIgniter, Drupal and Statamic, each verified by creating a project in WSL. The site records `template = "id@version"`. Since then: Magento, and Node templates (Vite, Next.js, Nuxt, Astro, Express, NestJS) whose variables mirror each CLI's own questions (labelled options, conditions, flags, multi-select). Since then (2026-11-05): `processes:` and `domains:` in templates, the template editor (`TemplateEditor.tsx`) and Save as template from a project (`templategen.rs`). Phase 17 is complete.
 
 - The hard-coded `Preset` enum becomes declarative, versioned templates (built in plus a user folder): variables with defaults and validation, prerequisites (PHP ≥, extensions, Node, a database), steps (`composer create-project`, commands, `.env` keys, create database, domains/processes from phase 12, git init), live output, cleanup on failure. The five current presets are ported first, behaving the same.
 - New: CakePHP, CodeIgniter 4, Drupal, Statamic; Vite (React/Vue/Svelte), Next.js, Express API; Laravel + Vite. Magento last, with a requirements check (Adobe auth keys, OpenSearch from phase 16, memory).
 - The project records which template and version created it.
 
 ## Phase 18: onboarding
+
+**Done (2026-11-12):** the first run goes from the folder question to a starter (PHP, Laravel, WordPress, Node.js, full stack, custom): each component shows installed / the download and its size (`starter_plan`, same choice as needs, HEAD for the size) / why it can't run here, installs one by one with progress and retry (Node through NVM), then offers a first project. Settings → General reopens it. Stack profiles export to and import from JSON (Home → Stack Profiles).
 
 First-run wizard: what LampRabit does, a starter (PHP, Laravel, WordPress, Node.js, full stack, custom), each component with download size and platform notes, install with progress and retry, optionally create a first project. Already-installed runtimes are detected and skipped. Stack profiles gain export/import. Can be re-opened from Settings.
 
@@ -252,6 +256,8 @@ Built on `diagnose.rs`. Per project: PHP version vs `composer.json`, missing ext
 `lamprabit mcp` (stdio) on top of the phase 20 backend: list projects, services and their health, read filtered logs and dumps, run the doctor, start/stop, create a project from a template, git status. Read-only tools by default; tools that change things are marked so the client asks first; credentials and keys are never returned, only connection metadata.
 
 ## Phase 22: Git
+
+**Done (2026-11-12):** `git.rs` and the project card's Git tab: changes with diffs, stage/unstage/discard, commit and amend, history with diffs, branches (create, switch incl. remote ones, merge, rename, delete), fetch/pull/push (first push sets the upstream), merge/rebase in progress with Continue/Abort, remotes, the repository's own identity, init, and Clone on Sites. Never prompts on a terminal; credentials are stripped from URLs and messages. Since (2026-11-12): editor-style diffs, commit all, next-step actions, commit details, HTTPS/SSH remotes with push URLs and sync settings, progress and Cancel for network operations, stash, hunk staging, conflict resolution, tags, revert and restore, and Git itself as a runtime (MinGit on Windows). Phase 22 is complete.
 
 Decided 2026-11-01: Git installed by LampRabit plus a Git panel per project; no local Git server (Forgejo). Windows: MinGit/portable Git for Windows from GitHub (SHA-256) under `bin/git`. Linux/macOS: the system git. When it's missing, LampRabit installs it the easiest way the OS offers: `xcode-select --install` on macOS (Apple's own install dialog), and on Linux the distro's package (`apt`/`dnf`/`pacman`/`zypper`, detected) through pkexec, showing the command first. If neither works, it links the official download page. A `git` shim like the others.
 

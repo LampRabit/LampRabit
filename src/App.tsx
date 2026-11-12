@@ -22,7 +22,8 @@ import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
 import Services from "./pages/Services";
 import Notices from "./components/Notices";
-import BottomNav from "./components/BottomNav";
+import BottomNav, { navLayout } from "./components/BottomNav";
+import { PageToolbarProvider } from "./components/PageToolbar";
 import Titlebar from "./components/Titlebar";
 import Diagnostics from "./components/Diagnostics";
 import NewProject from "./components/NewProject";
@@ -68,6 +69,8 @@ function useBackendEvents() {
         setInstall(payload);
         if (payload.stage === "done" || payload.stage === "error") {
           queryClient.invalidateQueries({ queryKey: ["installed"] });
+          // Installing Git (MinGit) makes the Git tab usable without a restart.
+          if (payload.runtime === "git") queryClient.invalidateQueries({ queryKey: ["git-version"] });
           queryClient.invalidateQueries({ queryKey: ["services"] });
         }
         if (payload.stage === "done") {
@@ -129,6 +132,7 @@ const pages: Record<PageId, ReactNode> = {
 
 export default function App() {
   const page = useAppStore((s) => s.page);
+  const nav = navLayout(useAppStore((s) => s.navPosition));
   useGlobalShortcuts();
   useStartupUpdateCheck();
   const scroller = useRef<HTMLDivElement>(null);
@@ -144,35 +148,44 @@ export default function App() {
   }, [page]);
 
   return (
-    <div className="flex h-full flex-col">
-      <Titlebar />
-      <div
-        ref={scroller}
-        onScroll={(e) => (scrolls.current[page] = e.currentTarget.scrollTop)}
-        className={clsx("min-h-0 flex-1 overflow-x-hidden", page === "logs" ? "overflow-hidden" : "overflow-y-auto")}
-      >
-        {visited.map((id) => (
-          <main
-            key={id}
-            hidden={id !== page}
-            className={clsx(
-              "motion-page mx-auto px-6 pt-8 pb-26 sm:px-10",
-              id === "overview" ? "max-w-[90rem]" : id === "logs" ? "h-full min-h-0 max-w-7xl overflow-hidden pt-4 pb-20" : "max-w-7xl",
-            )}
+    <PageToolbarProvider>
+      <div className="flex h-full flex-col">
+        <Titlebar />
+        {/* The tab bar takes its own space at its edge (order puts it before or after the
+            pages), so it never covers them; the pages' element stays the same when it moves. */}
+        <div data-app-body className={clsx("flex min-h-0 flex-1", nav.direction === "row" ? "flex-row" : "flex-col")}>
+          <div
+            ref={scroller}
+            data-page-scroller
+            onScroll={(e) => (scrolls.current[page] = e.currentTarget.scrollTop)}
+            className={clsx("order-2 min-h-0 min-w-0 flex-1 overflow-x-hidden", page === "logs" ? "overflow-hidden" : "overflow-y-auto")}
           >
-            <PageActiveContext.Provider value={id === page}>
-              <PageBoundary>{pages[id]}</PageBoundary>
-            </PageActiveContext.Provider>
-          </main>
-        ))}
+            {visited.map((id) => (
+              <main
+                key={id}
+                hidden={id !== page}
+                className={clsx(
+                  "motion-page mx-auto px-6 pb-10 sm:px-10",
+                  id === "overview" ? "max-w-[90rem] pt-8" : id === "sites" ? "max-w-[90rem] pt-4" : id === "logs" ? "h-full min-h-0 max-w-7xl overflow-hidden pt-4 pb-3" : "max-w-7xl pt-4",
+                )}
+              >
+                <PageActiveContext.Provider value={id === page}>
+                  <PageBoundary>{pages[id]}</PageBoundary>
+                </PageActiveContext.Provider>
+              </main>
+            ))}
+          </div>
+          <div className={clsx(nav.wrapper, nav.navFirst ? "order-1" : "order-3")}>
+            <BottomNav />
+          </div>
+        </div>
+        <Notices />
+        <Diagnostics />
+        <NewProject />
+        <TemplateEditor />
+        <FirstRunDialog />
+        <ShortcutsDialog />
       </div>
-      <BottomNav />
-      <Notices />
-      <Diagnostics />
-      <NewProject />
-      <TemplateEditor />
-      <FirstRunDialog />
-      <ShortcutsDialog />
-    </div>
+    </PageToolbarProvider>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FolderOpen, Hexagon, Play, Puzzle, RefreshCw, RotateCw, Share2, Square, Trash2 } from "lucide-react";
+import { ExternalLink, FolderOpen, Hexagon, Search, X, Play, Puzzle, RefreshCw, RotateCw, Share2, Square, Trash2 } from "lucide-react";
 import ExtensionsDialog from "../components/ExtensionsDialog";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import clsx from "clsx";
@@ -13,11 +13,12 @@ import {
 } from "../lib/api";
 import { infoFor, labelFor, meet, needsNote, unmet, useCatalog } from "../lib/catalog";
 import RequirementsDialog from "../components/RequirementsDialog";
-import { installKey, useAppStore } from "../lib/store";
+import { installKey, readPref, useAppStore, writePref } from "../lib/store";
 import { toolUrl } from "../lib/tools";
 import { useRuntimeUpdates } from "../lib/updates";
 import { runtimeTiles, tileFor } from "../components/runtimes";
-import { Button, Card, IconTile, PageHeader } from "../components/ui";
+import { Button, Card, IconTile } from "../components/ui";
+import { usePageToolbar } from "../components/PageToolbar";
 import NodeCard from "../components/NodeCard";
 import ServiceSettings from "../components/ServiceSettings";
 import RelatedPanel from "../components/RelatedPanel";
@@ -37,6 +38,13 @@ const newestFirst = (a: string, b: string) => {
 /** A runtime id from the backend's catalog, or the two lists that aren't runtimes. */
 type ServiceSelection = Runtime | "node" | "tunnels";
 
+/**
+ * What a PHP site needs, and the usual companions: what the list shows in Essentials, next to
+ * anything already installed. The full catalog (forty-odd entries) hid the basic path from
+ * new users.
+ */
+const ESSENTIALS: ServiceSelection[] = ["apache", "nginx", "php", "composer", "node", "git", "mariadb", "mysql", "mailpit", "redis", "phpmyadmin"];
+
 export default function Services() {
   const notify = useAppStore((s) => s.notify);
   const [selected, setSelected] = useState<ServiceSelection>("apache");
@@ -44,11 +52,30 @@ export default function Services() {
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const ollamaElsewhere = useQuery({ queryKey: ["ollama-elsewhere"], queryFn: api.ollamaElsewhere, staleTime: 60_000 });
+  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const catalog = useCatalog();
-  const groups = catalog.data?.groups ?? [];
   const find = (r: Runtime) => installed.data?.find((i) => i.runtime === r);
+  const [scope, setScopeState] = useState<"essentials" | "all">(() => (readPref("services-scope") === "all" ? "all" : "essentials"));
+  const setScope = (v: "essentials" | "all") => {
+    setScopeState(v);
+    writePref("services-scope", v);
+  };
+  const [filter, setFilter] = useState("");
+  const allGroups = catalog.data?.groups ?? [];
+  // Essentials keeps what's installed too, so nothing in use disappears from the list.
+  const groups = allGroups
+    .map((g) => ({
+      ...g,
+      items: (g.items as ServiceSelection[]).filter((item) => {
+        const q = filter.trim().toLowerCase();
+        if (q) return `${item} ${labelFor(catalog.data, item)} ${g.title}`.toLowerCase().includes(q);
+        return scope === "all" || ESSENTIALS.includes(item) || (item !== "node" && item !== "tunnels" && (find(item)?.versions.length ?? 0) > 0);
+      }),
+    }))
+    .filter((g) => g.items.length > 0);
+  const hiddenCount = allGroups.reduce((n, g) => n + g.items.length, 0) - groups.reduce((n, g) => n + g.items.length, 0);
   const defaultDb = settings.data?.defaultDatabase ?? "mariadb";
-  const selectedGroup = groups.find((g) => g.items.includes(selected));
+  const selectedGroup = allGroups.find((g) => g.items.includes(selected));
   const isRuntime = selected !== "node" && selected !== "tunnels";
   const runtime = isRuntime ? selected as Runtime : null;
 
@@ -77,7 +104,14 @@ export default function Services() {
     if (item === "tunnels") return "Public URLs";
     if (installed.isLoading) return "Checking…";
     const info = find(item);
-    return info?.active ? `Active · ${info.active}` : info?.versions.length ? `${info.versions.length} installed` : "Not installed";
+    // This catalog entry installs LampRabit's portable MinGit. Project Git can still
+    // use a system Git executable, so the generic status sounds more absolute than it is.
+    if (item === "git" && !info?.active && !info?.versions.length) return "MinGit not installed";
+    if (!info?.active) return info?.versions.length ? `${info.versions.length} installed` : "Not installed";
+    // "In use" is the version chosen; for services, whether it's running comes after it.
+    const svc = services.data?.find((s) => s.kind === item);
+    const run = svc ? (svc.state === "running" ? " · running" : svc.state === "error" ? " · failed" : svc.state === "stopped" ? " · stopped" : ` · ${svc.state}`) : "";
+    return `${info.active} in use${run}`;
   };
   const icon = (item: ServiceSelection) =>
     item === "node" ? <Hexagon size={16} strokeWidth={1.75} /> : item === "tunnels" ? <Share2 size={16} strokeWidth={1.75} /> : tileFor(item).icon(16);
@@ -85,12 +119,50 @@ export default function Services() {
     item === "node" ? "bg-lime-600/10 text-lime-600" : item === "tunnels" ? "bg-violet-500/10 text-violet-600" : tileFor(item).className;
   const itemLabel = (item: ServiceSelection) => (item === "tunnels" ? "Active tunnels" : labelFor(catalog.data, item));
 
+  usePageToolbar("services", {
+    title: "Services",
+    subtitle: "Choose a service to manage its versions, settings, and tools.",
+  });
+
   return (
     <>
-      <PageHeader title="Services" subtitle="Choose a service to manage its versions, settings, and tools." />
       <div className="grid items-start gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
         {/* Sized to the space under the header (title bar, page header, room for the tab bar), so the list scrolls on its own and the page only when a service's details are taller. */}
-        <nav aria-label="Services" className="scrollbar-thin hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+        <nav aria-label="Services" className="scrollbar-thin hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+          <div className="mb-4 space-y-2">
+            <label className="flex h-9 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 focus-within:border-accent">
+              <Search size={14} className="shrink-0 text-muted" aria-hidden />
+              <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Find a service" aria-label="Find a service" className="w-full bg-transparent text-sm outline-none placeholder:text-muted" />
+              {filter && (
+                <button type="button" onClick={() => setFilter("")} aria-label="Clear" className="rounded p-0.5 text-muted hover:text-fg">
+                  <X size={13} />
+                </button>
+              )}
+            </label>
+            <div className="grid grid-cols-2 gap-0.5 rounded-lg border border-line bg-bg p-1 text-xs font-medium" role="group" aria-label="Which services to list">
+              {(["essentials", "all"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setScope(v)}
+                  aria-pressed={scope === v}
+                  className={clsx("rounded-md px-2 py-1", scope === v ? "bg-surface text-fg shadow-card" : "text-muted hover:text-fg")}
+                  title={v === "essentials" ? "A web server, PHP, a database and the usual tools, plus everything installed" : "Every service LampRabit can install"}
+                >
+                  {v === "essentials" ? "Essentials" : "Everything"}
+                </button>
+              ))}
+            </div>
+            {scope === "essentials" && !filter && hiddenCount > 0 && (
+              <p className="px-1 text-[11px] text-muted">
+                Start with a web server, PHP and a database.{" "}
+                <button type="button" onClick={() => setScope("all")} className="font-medium text-accent-text hover:underline">
+                  {hiddenCount} more services
+                </button>
+              </p>
+            )}
+            {filter && groups.length === 0 && <p className="px-1 text-xs text-muted">No service matches "{filter}".</p>}
+          </div>
           <div className="space-y-6">
             {groups.map((group) => (
               <section key={group.id} aria-labelledby={`service-group-${group.id}`}>
@@ -125,7 +197,7 @@ export default function Services() {
           <div className="mb-4 lg:hidden">
             <label className="block text-xs font-bold text-muted uppercase" htmlFor="service-picker">Service</label>
             <select id="service-picker" value={selected} onChange={(e) => setSelected(e.target.value as ServiceSelection)} className="mt-1 h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm">
-              {groups.map((group) => <optgroup key={group.id} label={group.title}>{(group.items as ServiceSelection[]).map((item) => <option key={item} value={item}>{itemLabel(item)}</option>)}</optgroup>)}
+              {allGroups.map((group) => <optgroup key={group.id} label={group.title}>{(group.items as ServiceSelection[]).map((item) => <option key={item} value={item}>{itemLabel(item)}</option>)}</optgroup>)}
             </select>
           </div>
           <div className="mb-3">
@@ -345,6 +417,7 @@ function RuntimeCard({
           active ? (
             <ActiveTile
               version={active}
+              state={service?.installed ? service.state : undefined}
               details={
                 <>
                   {(catalog.data?.find((r) => r.version === active)?.label || have.length > 1) && (

@@ -59,7 +59,7 @@ fn groups() -> Vec<Group> {
         g("queues", "Queues", "Message brokers for background jobs and events.", &["rabbitmq", "erlang"]),
         g("ai", "AI and automation", "Run language models locally and automate workflows.", &["ollama", "n8n"]),
         g("cache", "Cache", "In-memory stores for caches, sessions and queues.", &["redis", "memcached"]),
-        g("tools", "Developer tools", "Mail catching and web interfaces for your databases and caches.", &["mailpit", "phpmyadmin", "adminer", "phppgadmin", "pgadmin", "phpredisadmin", "compass", "mongosh", "mongotools"]),
+        g("tools", "Developer tools", "Mail catching and web interfaces for your databases and caches.", &["git", "mailpit", "phpmyadmin", "adminer", "phppgadmin", "pgadmin", "phpredisadmin", "compass", "mongosh", "mongotools"]),
         g("sharing", "Sharing", "Put a project or local port on a public URL.", &["cloudflared", "ngrok", "tunnels"]),
     ]
 }
@@ -95,14 +95,15 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         Runtime::Mariadb => (
             "MariaDB",
             "Stores your data",
-            "Official MariaDB releases",
-            mac.then_some("MariaDB publishes no macOS builds, and LampRabit doesn't build its own yet. Use PostgreSQL, or MariaDB from Homebrew on its own port."),
+            if mac { "LampRabit's builds of MariaDB's LTS releases (MariaDB publishes none for macOS)" } else { "Official MariaDB releases" },
+            None,
         ),
         Runtime::Mysql => (
             "MySQL",
             "Stores your data",
             "Official MySQL releases; runs next to MariaDB on its own port",
-            mac.then_some("MySQL on macOS isn't supported by LampRabit yet. Use PostgreSQL, or MySQL from Homebrew on its own port."),
+            // Oracle's macOS archives are built for a recent macOS (15 today).
+            None,
         ),
         Runtime::Postgres => ("PostgreSQL", "Stores your data", "PostgreSQL built from source for every OS by theseus-rs (checksum checked); psql and pg_dump work in LampRabit's terminal", None),
         Runtime::Mongodb => ("MongoDB", "Stores your documents", "Official MongoDB Community Server releases (checksum checked); each major version keeps its own data folder", None),
@@ -131,7 +132,12 @@ fn info(runtime: Runtime) -> RuntimeInfo {
             "Official OpenSearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory",
             mac.then_some("OpenSearch has no macOS build. Use Elasticsearch, which works the same for most apps."),
         ),
-        Runtime::Rustfs => ("RustFS", "S3 object storage", "RustFS from its GitHub releases (checksum checked): S3-compatible, with a web console. Access key lamprabit, secret lamprabit-secret", None),
+        Runtime::Rustfs => (
+            "RustFS",
+            "S3 object storage",
+            "RustFS from its GitHub releases (checksum checked): S3-compatible, with a web console. Access key lamprabit, secret lamprabit-secret",
+            (mac && cfg!(target_arch = "x86_64")).then_some("RustFS has no build for Intel Macs. Use MinIO for S3 storage there."),
+        ),
         Runtime::Minio => (
             "MinIO",
             "S3 object storage",
@@ -173,6 +179,12 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         ),
         Runtime::Composer => ("Composer", "PHP packages", "PHP's package manager; run composer from the LampRabit terminal", None),
         Runtime::Maven => ("Maven", "Java builds", "Apache Maven from Apache's mirror (SHA-512 checked); mvn works in LampRabit's terminal on the active Java", None),
+        Runtime::Git => (
+            "Git",
+            "Version control",
+            "MinGit, Git for Windows' official portable build (SHA-256 checked), for the Git tab, Clone and LampRabit's terminal. A Git already installed on the computer works too",
+            (!win).then_some("LampRabit uses your system's Git here: install it with your package manager (sudo apt install git), or xcode-select --install on macOS."),
+        ),
         Runtime::Gradle => ("Gradle", "Java builds", "Gradle's official distribution from services.gradle.org (SHA-256 checked); gradle works in LampRabit's terminal on the active Java", None),
         Runtime::Phpredisadmin => ("phpRedisAdmin", "Redis admin", "Browse and edit Redis keys in the browser, like phpMyAdmin", None),
         Runtime::Memcached => (
@@ -448,6 +460,46 @@ async fn node_action(app: &AppHandle, client: &reqwest::Client, need: &Need) -> 
     }
 }
 
+/// One component of a starter stack on the first run: how it gets met (like a need, with no
+/// version bounds) and the download's size when it's a download.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StarterItem {
+    pub runtime: &'static str,
+    pub label: &'static str,
+    pub blurb: &'static str,
+    pub action: Action,
+    /// Bytes, from the server's Content-Length; None when it doesn't say.
+    pub size: Option<u64>,
+}
+
+/// The plan for a starter stack: each runtime's installed version, or the download that
+/// would be used (LTS lines first, as for needs). Node.js isn't here: it comes through NVM,
+/// which the wizard sets up itself.
+pub async fn starter(client: &reqwest::Client, settings: &Settings, layout: &Layout, ids: &[String]) -> Vec<StarterItem> {
+    let plans = ids.iter().filter_map(|id| Runtime::from_id(id)).map(|runtime| async move {
+        let meta = info(runtime);
+        let need = Need { runtime: runtime.id(), min: None, max: None, prefer: None, why: "" };
+        let system_git = if runtime == Runtime::Git && settings.versions.get("git").is_none() { crate::git::system_version().await } else { None };
+        let action = match system_git {
+            Some(version) => Action::Ready { version: format!("{version} (already on this computer)") },
+            None => runtime_action(client, settings, layout, &need, meta.label).await,
+        };
+        let size = match &action {
+            Action::Install { release } => download_size(client, &release.url).await,
+            _ => None,
+        };
+        StarterItem { runtime: runtime.id(), label: meta.label, blurb: meta.blurb, action, size }
+    });
+    futures_util::future::join_all(plans).await
+}
+
+/// A download's size from a HEAD request (redirects followed); a few seconds at most.
+async fn download_size(client: &reqwest::Client, url: &str) -> Option<u64> {
+    let response = tokio::time::timeout(std::time::Duration::from_secs(6), client.head(url).send()).await.ok()?.ok()?;
+    response.headers().get(reqwest::header::CONTENT_LENGTH)?.to_str().ok()?.parse().ok().filter(|n| *n > 0)
+}
+
 fn newest<'a>(versions: impl Iterator<Item = &'a str>, need: &Need) -> Option<&'a str> {
     versions.filter(|v| need.fits(v)).max_by(|a, b| cmp(&parts(a), &parts(b)).then(parts(a).len().cmp(&parts(b).len())))
 }
@@ -455,6 +507,17 @@ fn newest<'a>(versions: impl Iterator<Item = &'a str>, need: &Need) -> Option<&'
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Writes the default settings and the catalog as JSON for the UI screenshot harness
+    /// (scripts/screenshots): `cargo test --lib write_ui_fixtures -- --ignored`.
+    #[test]
+    #[ignore]
+    fn write_ui_fixtures() {
+        let out = serde_json::json!({ "settings": Settings::default(), "catalog": catalog() });
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/screenshots/fixtures.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_string_pretty(&out).unwrap()).unwrap();
+    }
 
     #[test]
     fn ranges_compare_by_the_bounds_parts() {

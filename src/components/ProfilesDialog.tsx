@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Layers } from "lucide-react";
+import { Download, Layers, Upload } from "lucide-react";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import clsx from "clsx";
 import { api, serviceLabels, type ServiceKind, type StackProfile } from "../lib/api";
 import { useAppStore } from "../lib/store";
@@ -133,5 +134,71 @@ export default function ProfilesDialog({
         )}
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * Export the stack profiles to a JSON file and import them on another machine. An imported
+ * profile with the same name replaces the one here; services this LampRabit doesn't know
+ * are dropped (an older version), and so are processes of projects that aren't here.
+ */
+export function ProfilesTransfer() {
+  const queryClient = useQueryClient();
+  const notify = useAppStore((s) => s.notify);
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const profiles = settings.data?.profiles ?? [];
+  const exportAll = useMutation({
+    mutationFn: async () => {
+      const path = await saveDialog({ defaultPath: "lamprabit-profiles.json", filters: [{ name: "LampRabit profiles", extensions: ["json"] }] });
+      if (!path) return false;
+      await api.saveText(path, JSON.stringify({ lamprabitProfiles: 1, profiles }, null, 2) + "\n");
+      return true;
+    },
+    onSuccess: (done) => done && notify("info", `Exported ${profiles.length} ${profiles.length === 1 ? "profile" : "profiles"}`),
+    onError: (e) => notify("error", String(e)),
+  });
+  const importFile = useMutation({
+    mutationFn: async () => {
+      const path = await openDialog({ multiple: false, directory: false, filters: [{ name: "LampRabit profiles", extensions: ["json"] }] });
+      if (!path || !settings.data) return null;
+      let data: unknown;
+      try {
+        data = JSON.parse(await api.readText(path));
+      } catch {
+        throw new Error("That file isn't a LampRabit profile export (it isn't JSON).");
+      }
+      const list = (data as { profiles?: unknown })?.profiles;
+      if (!Array.isArray(list)) throw new Error("That file isn't a LampRabit profile export (no profiles in it).");
+      const known = new Set<string>(Object.keys(serviceLabels));
+      const processes = new Set(Object.entries(settings.data.sites ?? {}).flatMap(([project, own]) => (own.processes ?? []).map((p) => `${project}/${p.name}`)));
+      const incoming: StackProfile[] = [];
+      for (const raw of list as { name?: unknown; services?: unknown; processes?: unknown }[]) {
+        const name = typeof raw?.name === "string" ? raw.name.trim() : "";
+        const services = (Array.isArray(raw?.services) ? raw.services : []).filter((s): s is ServiceKind => typeof s === "string" && known.has(s));
+        if (!name || services.length === 0) continue;
+        const procs = (Array.isArray(raw?.processes) ? raw.processes : []).filter((p): p is string => typeof p === "string" && processes.has(p));
+        incoming.push({ name, services, processes: procs });
+      }
+      if (incoming.length === 0) throw new Error("No usable profiles in that file: each needs a name and services this LampRabit knows.");
+      const names = new Set(incoming.map((p) => p.name.toLowerCase()));
+      const merged = [...settings.data.profiles.filter((p) => !names.has(p.name.toLowerCase())), ...incoming];
+      return { saved: await api.saveSettings({ ...settings.data, profiles: merged }), count: incoming.length };
+    },
+    onSuccess: (result) => {
+      if (!result) return;
+      queryClient.setQueryData(["settings"], result.saved);
+      notify("info", `Imported ${result.count} ${result.count === 1 ? "profile" : "profiles"}`);
+    },
+    onError: (e) => notify("error", String(e)),
+  });
+  return (
+    <div className="flex items-center gap-1">
+      <Button size="sm" variant="ghost" onClick={() => importFile.mutate()} disabled={importFile.isPending || !settings.data} title="Add profiles from a file exported on another machine">
+        <Upload size={13} /> Import
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => exportAll.mutate()} disabled={exportAll.isPending || profiles.length === 0} title="Save the profiles to a file">
+        <Download size={13} /> Export
+      </Button>
+    </div>
   );
 }

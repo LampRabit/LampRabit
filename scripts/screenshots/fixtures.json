@@ -1,0 +1,667 @@
+{
+  "catalog": {
+    "groups": [
+      {
+        "blurb": "Apache, Nginx, Caddy or FrankenPHP serve your sites; Tomcat runs Java web apps behind them. Several can run side by side.",
+        "id": "web",
+        "items": [
+          "apache",
+          "nginx",
+          "caddy",
+          "frankenphp",
+          "tomcat"
+        ],
+        "title": "Web and app servers"
+      },
+      {
+        "blurb": "Several versions side by side; projects pick theirs.",
+        "id": "languages",
+        "items": [
+          "php",
+          "java",
+          "python",
+          "go",
+          "rust",
+          "node"
+        ],
+        "title": "Languages"
+      },
+      {
+        "blurb": "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH.",
+        "id": "packages",
+        "items": [
+          "composer",
+          "maven",
+          "gradle"
+        ],
+        "title": "Package managers"
+      },
+      {
+        "blurb": "They can all run side by side, each on its own port.",
+        "id": "databases",
+        "items": [
+          "mariadb",
+          "mysql",
+          "postgres",
+          "mongodb",
+          "clickhouse",
+          "neo4j",
+          "sqlite"
+        ],
+        "title": "Databases"
+      },
+      {
+        "blurb": "Full-text search engines for your apps.",
+        "id": "search",
+        "items": [
+          "meilisearch",
+          "typesense",
+          "elasticsearch",
+          "opensearch"
+        ],
+        "title": "Search"
+      },
+      {
+        "blurb": "S3-compatible object storage. Their storage folder can be anywhere, even outside the LampRabit folder.",
+        "id": "storage",
+        "items": [
+          "rustfs",
+          "minio"
+        ],
+        "title": "Storage"
+      },
+      {
+        "blurb": "Message brokers for background jobs and events.",
+        "id": "queues",
+        "items": [
+          "rabbitmq",
+          "erlang"
+        ],
+        "title": "Queues"
+      },
+      {
+        "blurb": "Run language models locally and automate workflows.",
+        "id": "ai",
+        "items": [
+          "ollama",
+          "n8n"
+        ],
+        "title": "AI and automation"
+      },
+      {
+        "blurb": "In-memory stores for caches, sessions and queues.",
+        "id": "cache",
+        "items": [
+          "redis",
+          "memcached"
+        ],
+        "title": "Cache"
+      },
+      {
+        "blurb": "Mail catching and web interfaces for your databases and caches.",
+        "id": "tools",
+        "items": [
+          "git",
+          "mailpit",
+          "phpmyadmin",
+          "adminer",
+          "phppgadmin",
+          "pgadmin",
+          "phpredisadmin",
+          "compass",
+          "mongosh",
+          "mongotools"
+        ],
+        "title": "Developer tools"
+      },
+      {
+        "blurb": "Put a project or local port on a public URL.",
+        "id": "sharing",
+        "items": [
+          "cloudflared",
+          "ngrok",
+          "tunnels"
+        ],
+        "title": "Sharing"
+      }
+    ],
+    "runtimes": [
+      {
+        "blurb": "Serves your sites",
+        "id": "apache",
+        "label": "Apache",
+        "needs": [],
+        "source": "Apache Lounge builds",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Serves your sites",
+        "id": "nginx",
+        "label": "Nginx",
+        "needs": [],
+        "source": "Official nginx.org Windows builds (PGP-signed, no checksum)",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Runs your code",
+        "id": "php",
+        "label": "PHP",
+        "needs": [],
+        "source": "Thread-safe builds from windows.php.net",
+        "suggests": [
+          "composer"
+        ],
+        "unavailable": null
+      },
+      {
+        "blurb": "Stores your data",
+        "id": "mariadb",
+        "label": "MariaDB",
+        "needs": [],
+        "source": "Official MariaDB releases",
+        "suggests": [
+          "phpmyadmin",
+          "adminer"
+        ],
+        "unavailable": null
+      },
+      {
+        "blurb": "Catches outgoing mail",
+        "id": "mailpit",
+        "label": "Mailpit",
+        "needs": [],
+        "source": "Local SMTP server with a web inbox",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Database admin",
+        "id": "adminer",
+        "label": "Adminer",
+        "needs": [
+          "php"
+        ],
+        "source": "A single-file database manager",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Database admin",
+        "id": "phpmyadmin",
+        "label": "phpMyAdmin",
+        "needs": [
+          "php"
+        ],
+        "source": "The classic MySQL/MariaDB web interface",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Public tunnels",
+        "id": "ngrok",
+        "label": "Ngrok",
+        "needs": [],
+        "source": "Share sites on a public URL (free account needed)",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Public tunnels",
+        "id": "cloudflared",
+        "label": "Cloudflare Tunnel",
+        "needs": [],
+        "source": "Cloudflare quick tunnels, no account needed",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Cache and queues",
+        "id": "redis",
+        "label": "Redis",
+        "needs": [],
+        "source": "Real Redis from the community redis-windows build (Redis has no official Windows build), with redis-cli",
+        "suggests": [
+          "phpredisadmin"
+        ],
+        "unavailable": null
+      },
+      {
+        "blurb": "PHP packages",
+        "id": "composer",
+        "label": "Composer",
+        "needs": [
+          "php"
+        ],
+        "source": "PHP's package manager; run composer from the LampRabit terminal",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Stores your data",
+        "id": "mysql",
+        "label": "MySQL",
+        "needs": [],
+        "source": "Official MySQL releases; runs next to MariaDB on its own port",
+        "suggests": [
+          "phpmyadmin",
+          "adminer"
+        ],
+        "unavailable": null
+      },
+      {
+        "blurb": "Redis admin",
+        "id": "phpredisadmin",
+        "label": "phpRedisAdmin",
+        "needs": [
+          "redis",
+          "php"
+        ],
+        "source": "Browse and edit Redis keys in the browser, like phpMyAdmin",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Memory cache",
+        "id": "memcached",
+        "label": "Memcached",
+        "needs": [],
+        "source": "nono303's Windows build of Memcached (no official one exists), checked and repackaged by LampRabit",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Serves your sites",
+        "id": "caddy",
+        "label": "Caddy",
+        "needs": [],
+        "source": "Official Caddy releases from GitHub; uses LampRabit's certificates and PHP, not its own",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Runs Java apps",
+        "id": "java",
+        "label": "Java",
+        "needs": [],
+        "source": "Eclipse Temurin JDKs from Adoptium (checksum checked); java, javac and jar work in LampRabit's terminal, with JAVA_HOME set",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Runs Java web apps",
+        "id": "tomcat",
+        "label": "Tomcat",
+        "needs": [
+          "java"
+        ],
+        "source": "Official Apache Tomcat releases (SHA-512 checked); runs on the active Java and serves Java projects behind your web server",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Serves your sites",
+        "id": "frankenphp",
+        "label": "FrankenPHP",
+        "needs": [],
+        "source": "Official FrankenPHP releases: Caddy with its own PHP built in, so LampRabit's PHP versions and extensions don't apply to its sites",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Stores your data",
+        "id": "postgres",
+        "label": "PostgreSQL",
+        "needs": [],
+        "source": "PostgreSQL built from source for every OS by theseus-rs (checksum checked); psql and pg_dump work in LampRabit's terminal",
+        "suggests": [
+          "adminer",
+          "phppgadmin",
+          "pgadmin"
+        ],
+        "unavailable": null
+      },
+      {
+        "blurb": "Runs Python code",
+        "id": "python",
+        "label": "Python",
+        "needs": [],
+        "source": "python-build-standalone (the builds uv uses, checksum checked); python and pip work in LampRabit's terminal",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "PostgreSQL admin",
+        "id": "phppgadmin",
+        "label": "phpPgAdmin",
+        "needs": [
+          "postgres",
+          "php"
+        ],
+        "source": "The PostgreSQL web interface in PHP (ReimuHakurei's maintained fork for PHP 8); log in as root without a password",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "PostgreSQL admin",
+        "id": "pgadmin",
+        "label": "pgAdmin",
+        "needs": [
+          "python",
+          "postgres"
+        ],
+        "source": "PostgreSQL's official admin tool from PyPI, in its own Python environment (needs Python 3.10–3.14); LampRabit's PostgreSQL is added for you",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Stores your documents",
+        "id": "mongodb",
+        "label": "MongoDB",
+        "needs": [],
+        "source": "Official MongoDB Community Server releases (checksum checked); each major version keeps its own data folder",
+        "suggests": [
+          "mongosh",
+          "compass",
+          "mongotools"
+        ],
+        "unavailable": null
+      },
+      {
+        "blurb": "MongoDB shell",
+        "id": "mongosh",
+        "label": "mongosh",
+        "needs": [
+          "mongodb"
+        ],
+        "source": "MongoDB's shell from its GitHub releases; mongosh works in LampRabit's terminal, and MongoDB uses it to shut down cleanly",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "MongoDB backups",
+        "id": "mongotools",
+        "label": "MongoDB Database Tools",
+        "needs": [
+          "mongodb"
+        ],
+        "source": "MongoDB's mongodump and mongorestore (checksum checked); LampRabit's MongoDB backups use them",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "MongoDB GUI",
+        "id": "compass",
+        "label": "MongoDB Compass",
+        "needs": [
+          "mongodb"
+        ],
+        "source": "MongoDB's desktop app from its GitHub releases; opens connected to LampRabit's MongoDB",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "File databases",
+        "id": "sqlite",
+        "label": "SQLite",
+        "needs": [],
+        "source": "The sqlite3 shell from sqlite.org (SHA3 checked). PHP has SQLite built in, so projects don't need this to use it; backups use it to copy safely",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Analytics database",
+        "id": "clickhouse",
+        "label": "ClickHouse",
+        "needs": [],
+        "source": "Official ClickHouse builds from GitHub. Its web console is at /play on its HTTP port",
+        "suggests": [],
+        "unavailable": "ClickHouse has no Windows build. Run it in WSL, or use LampRabit on Linux or macOS."
+      },
+      {
+        "blurb": "Graph database",
+        "id": "neo4j",
+        "label": "Neo4j",
+        "needs": [
+          "java"
+        ],
+        "source": "Neo4j Community from dist.neo4j.org (checksum checked); runs on Java 21+, Neo4j Browser at neo4j.test",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Search engine",
+        "id": "meilisearch",
+        "label": "Meilisearch",
+        "needs": [],
+        "source": "Official Meilisearch Community builds from GitHub (checksum checked); runs in development mode, with its search preview at its URL",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Search engine",
+        "id": "typesense",
+        "label": "Typesense",
+        "needs": [],
+        "source": "Official Typesense builds from dl.typesense.org (no checksums published). API key: lamprabit",
+        "suggests": [],
+        "unavailable": "Typesense has no Windows build. Run it in WSL, or use Meilisearch."
+      },
+      {
+        "blurb": "S3 object storage",
+        "id": "rustfs",
+        "label": "RustFS",
+        "needs": [],
+        "source": "RustFS from its GitHub releases (checksum checked): S3-compatible, with a web console. Access key lamprabit, secret lamprabit-secret",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Local AI models",
+        "id": "ollama",
+        "label": "Ollama",
+        "needs": [],
+        "source": "Ollama's own builds from GitHub (a large download). Models go to LampRabit's data folder; the ollama command uses this server",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "S3 object storage",
+        "id": "minio",
+        "label": "MinIO",
+        "needs": [],
+        "source": "MinIO's last release (October 2025), built from its source by LampRabit's CI: the project is archived, so there are no security fixes. Access key lamprabit, secret lamprabit-secret",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Search engine",
+        "id": "elasticsearch",
+        "label": "Elasticsearch",
+        "needs": [],
+        "source": "Official Elasticsearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Search engine",
+        "id": "opensearch",
+        "label": "OpenSearch",
+        "needs": [],
+        "source": "Official OpenSearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Workflow automation",
+        "id": "n8n",
+        "label": "n8n",
+        "needs": [
+          "node"
+        ],
+        "source": "n8n from npm, installed into its own folder and run on NVM's Node.js (24 or newer). Editor at n8n.test",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Message queue",
+        "id": "rabbitmq",
+        "label": "RabbitMQ",
+        "needs": [
+          "erlang"
+        ],
+        "source": "Official RabbitMQ releases (checksum checked) with the management console (user guest, password guest)",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Runs RabbitMQ",
+        "id": "erlang",
+        "label": "Erlang",
+        "needs": [],
+        "source": "Official Erlang/OTP builds for Windows (checksum checked)",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Runs Go code",
+        "id": "go",
+        "label": "Go",
+        "needs": [],
+        "source": "Official Go releases from go.dev (checksum checked); go and gofmt work in LampRabit's terminal",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Runs Rust code",
+        "id": "rust",
+        "label": "Rust",
+        "needs": [],
+        "source": "Rust stable through rustup, kept inside LampRabit's folder (not your ~/.cargo), with the GNU toolchain, which needs no Visual Studio",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Java builds",
+        "id": "maven",
+        "label": "Maven",
+        "needs": [
+          "java"
+        ],
+        "source": "Apache Maven from Apache's mirror (SHA-512 checked); mvn works in LampRabit's terminal on the active Java",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Java builds",
+        "id": "gradle",
+        "label": "Gradle",
+        "needs": [
+          "java"
+        ],
+        "source": "Gradle's official distribution from services.gradle.org (SHA-256 checked); gradle works in LampRabit's terminal on the active Java",
+        "suggests": [],
+        "unavailable": null
+      },
+      {
+        "blurb": "Version control",
+        "id": "git",
+        "label": "Git",
+        "needs": [],
+        "source": "MinGit, Git for Windows' official portable build (SHA-256 checked), for the Git tab, Clone and LampRabit's terminal. A Git already installed on the computer works too",
+        "suggests": [],
+        "unavailable": null
+      }
+    ]
+  },
+  "settings": {
+    "addToPath": false,
+    "autoRestart": [
+      "n8n"
+    ],
+    "catchDumps": false,
+    "checkUpdates": true,
+    "closeToTray": true,
+    "defaultDatabase": "mariadb",
+    "editor": "code",
+    "httpsByDefault": true,
+    "logKeep": 3,
+    "logMaxMb": 10,
+    "logTotalMb": 500,
+    "manageHosts": true,
+    "phpExtensions": {},
+    "phpWorkers": 4,
+    "ports": {
+      "apacheHttp": 8081,
+      "apacheHttps": 8444,
+      "caddyAdmin": 2019,
+      "caddyHttp": 8082,
+      "caddyHttps": 8445,
+      "clickhouseHttp": 8123,
+      "clickhouseTcp": 19000,
+      "dumps": 9912,
+      "elasticsearch": 9200,
+      "elasticsearchTransport": 9300,
+      "frankenphpAdmin": 2020,
+      "frankenphpHttp": 8083,
+      "frankenphpHttps": 8446,
+      "http": 80,
+      "https": 443,
+      "mailSmtp": 1025,
+      "mailUi": 8025,
+      "meilisearch": 7700,
+      "memcached": 11211,
+      "minio": 9110,
+      "minioConsole": 9111,
+      "mongodb": 27017,
+      "mysql": 3306,
+      "mysqlServer": 3307,
+      "n8n": 5678,
+      "neo4jBolt": 7687,
+      "neo4jHttp": 7474,
+      "nginxHttp": 8080,
+      "nginxHttps": 8443,
+      "ollama": 11434,
+      "opensearch": 9201,
+      "opensearchTransport": 9301,
+      "pgadmin": 5050,
+      "phpFpm": 9000,
+      "postgres": 5432,
+      "rabbitmq": 5672,
+      "rabbitmqManagement": 15672,
+      "redis": 6379,
+      "rustfs": 9100,
+      "rustfsConsole": 9101,
+      "tomcatHttp": 8180,
+      "tomcatShutdown": 8105,
+      "typesense": 8108
+    },
+    "profiles": [],
+    "rootDir": "C:\\lampRabit",
+    "routeMail": true,
+    "sites": {},
+    "startServicesOnLaunch": false,
+    "storage": {},
+    "tld": "test",
+    "versions": {
+      "adminer": null,
+      "apache": null,
+      "cloudflared": null,
+      "composer": null,
+      "mailpit": null,
+      "mariadb": null,
+      "memcached": null,
+      "mysql": null,
+      "nginx": null,
+      "ngrok": null,
+      "php": null,
+      "phpmyadmin": null,
+      "phpredisadmin": null,
+      "redis": null
+    },
+    "webServers": [
+      "apache"
+    ]
+  }
+}

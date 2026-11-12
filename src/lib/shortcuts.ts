@@ -41,8 +41,17 @@ export const SHORTCUTS: { group: string; items: { keys: string[]; label: string 
   {
     group: "Sites: a project",
     items: [
-      { keys: ["["], label: "Previous tab (Overview, Commands, Domains, Settings)" },
+      { keys: ["["], label: "Previous tab (Overview, Git, Commands, Domains, Settings)" },
       { keys: ["]"], label: "Next tab" },
+      { keys: ["G"], label: "Open its Git tab" },
+      { keys: ["Ctrl", "Enter"], label: "Commit (in the Git tab's message box)" },
+    ],
+  },
+  {
+    group: "Logs",
+    items: [
+      { keys: ["/"], label: "Search the logs" },
+      { keys: ["P"], label: "Problems only, or everything again" },
     ],
   },
 

@@ -104,10 +104,13 @@ pub enum Runtime {
     Gradle,
     /// Rust through rustup, with its homes inside LampRabit's folder.
     Rust,
+    /// Git for the Git tab and the terminal when the computer has none: MinGit, Git for
+    /// Windows' official portable build. Linux and macOS use the system's Git.
+    Git,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 43] = [
+    pub const ALL: [Runtime; 44] = [
         Runtime::Apache,
         Runtime::Nginx,
         Runtime::Php,
@@ -151,6 +154,7 @@ impl Runtime {
         Runtime::Rust,
         Runtime::Maven,
         Runtime::Gradle,
+        Runtime::Git,
     ];
 
     pub fn from_id(id: &str) -> Option<Self> {
@@ -202,6 +206,7 @@ impl Runtime {
             Self::Rust => "rust",
             Self::Maven => "maven",
             Self::Gradle => "gradle",
+            Self::Git => "git",
         }
     }
 
@@ -260,6 +265,7 @@ impl Runtime {
             Self::Rust => PathBuf::from("installed.txt"),
             Self::Maven => Path::new("bin").join("mvn"),
             Self::Gradle => Path::new("bin").join("gradle"),
+            Self::Git => Path::new("cmd").join("git.exe"),
         }
     }
 }
@@ -409,6 +415,7 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         Runtime::Rust => rust_releases(client).await?,
         Runtime::Maven => maven_releases(client).await?,
         Runtime::Gradle => gradle_releases(client).await?,
+        Runtime::Git => git_releases(client).await?,
     };
     releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
     Ok(releases)
@@ -567,6 +574,10 @@ async fn apache_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
 
 /// The MariaDB REST API lists stable series and the files of their latest release.
 async fn mariadb_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    // MariaDB publishes no macOS builds; LampRabit's CI builds the LTS lines from source.
+    if cfg!(target_os = "macos") {
+        return own_builds(client, Runtime::Mariadb).await;
+    }
     let (suffix, archive) = if cfg!(windows) {
         ("winx64.zip", Archive::Zip)
     } else if cfg!(target_os = "linux") {
@@ -1285,7 +1296,28 @@ async fn meilisearch_releases(client: &reqwest::Client) -> Result<Vec<Release>> 
         ("macos", true) => "meilisearch-macos-apple-silicon",
         _ => return Err(unsupported("Meilisearch")),
     };
-    github_latest(client, Runtime::Meilisearch, "meilisearch/meilisearch", Archive::File, |n, _| n == name).await
+    github_newest_with(client, Runtime::Meilisearch, "meilisearch/meilisearch", Archive::File, name).await
+}
+
+/// Like `github_latest`, but the newest of the recent releases that has the file: a release
+/// sometimes ships without one platform's build (Meilisearch 1.56.2 had no Apple silicon file).
+async fn github_newest_with(client: &reqwest::Client, runtime: Runtime, repo: &str, archive: Archive, name: &str) -> Result<Vec<Release>> {
+    let list = get_json(client, &format!("https://api.github.com/repos/{repo}/releases?per_page=10")).await?;
+    for release in list.as_array().into_iter().flatten().filter(|r| r["prerelease"] == false && r["draft"] == false) {
+        let Some(asset) = release["assets"].as_array().into_iter().flatten().find(|a| a["name"] == name) else { continue };
+        return Ok(vec![Release {
+            runtime,
+            version: release["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string(),
+            url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
+            sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
+            sha512: None,
+            md5: None,
+            sha3_256: None,
+            archive,
+            label: None,
+        }]);
+    }
+    Err(Error::msg(format!("No recent {repo} release has a download for this platform ({name}).")))
 }
 
 /// Typesense's server from dl.typesense.org (its GitHub releases have no files). No
@@ -1762,6 +1794,29 @@ fn ngrok_releases() -> Vec<Release> {
     }]
 }
 
+/// MinGit from Git for Windows' latest release (GitHub's SHA-256 digest checked). The tag
+/// is "v2.47.1.windows.1"; the version shown is Git's own ("2.47.1", or "2.47.1.2" for a
+/// Windows-only follow-up release).
+async fn git_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    if !cfg!(windows) {
+        return Err(Error::msg("Use your system's Git: install it with your package manager, or xcode-select --install on macOS."));
+    }
+    let suffix = if cfg!(target_arch = "aarch64") { "-arm64.zip" } else { "-64-bit.zip" };
+    let mut releases = github_latest(client, Runtime::Git, "git-for-windows/git", Archive::Zip, |n, _| n.starts_with("MinGit-") && n.ends_with(suffix) && !n.contains("busybox")).await?;
+    for r in &mut releases {
+        r.version = git_version_from_tag(&r.version);
+    }
+    Ok(releases)
+}
+
+fn git_version_from_tag(tag: &str) -> String {
+    match tag.split_once(".windows.") {
+        Some((base, "1")) => base.to_string(),
+        Some((base, n)) => format!("{base}.{n}"),
+        None => tag.to_string(),
+    }
+}
+
 async fn cloudflared_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
     let (name, archive) = match std::env::consts::OS {
@@ -1782,34 +1837,33 @@ async fn adminer_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
 /// comes from the official Docker image's metadata (maintained with every release), and
 /// the archives from MySQL's CDN, which publishes an MD5 next to each.
 async fn mysql_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let (suffix, archive) = match std::env::consts::OS {
-        "windows" => ("winx64.zip", Archive::Zip),
+    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
+    // Candidates in order; the first with a published checksum is the download. macOS
+    // archives carry the macOS version they're built for (macos15 today), which moves on,
+    // and not every line has both architectures.
+    let (suffixes, archive): (Vec<String>, Archive) = match std::env::consts::OS {
+        "windows" => (vec!["winx64.zip".into()], Archive::Zip),
         // "minimal": stripped of debug symbols and tests, about a tenth of the full archive.
-        "linux" if cfg!(target_arch = "x86_64") => ("linux-glibc2.28-x86_64-minimal.tar.xz", Archive::TarXz),
-        "linux" => ("linux-glibc2.28-aarch64-minimal.tar.xz", Archive::TarXz),
+        "linux" if cfg!(target_arch = "x86_64") => (vec!["linux-glibc2.28-x86_64-minimal.tar.xz".into()], Archive::TarXz),
+        "linux" => (vec!["linux-glibc2.28-aarch64-minimal.tar.xz".into()], Archive::TarXz),
+        "macos" => (["macos26", "macos15", "macos14"].iter().map(|m| format!("{m}-{arch}.tar.gz")).collect(), Archive::TarGz),
         _ => return Err(unsupported("MySQL")),
     };
+    let suffixes = &suffixes;
     let lines = get_json(client, "https://raw.githubusercontent.com/docker-library/mysql/master/versions.json").await?;
     let fetches = lines.as_object().into_iter().flatten().filter_map(|(line, info)| {
         let version = info["version"].as_str()?.to_string();
         let label = Some(if line == "innovation" { "Innovation".to_string() } else { "LTS".to_string() });
         Some(async move {
             let series = version.rsplit_once('.').map_or(version.as_str(), |(s, _)| s).to_string();
-            let url = format!("https://cdn.mysql.com/Downloads/MySQL-{series}/mysql-{version}-{suffix}");
-            let md5 = client
-                .get(format!("{url}.md5"))
-                .send()
-                .await
-                .and_then(|r| r.error_for_status())
-                .ok()?
-                .text()
-                .await
-                .ok()?
-                .split_whitespace()
-                .next()
-                .map(str::to_string);
-            md5.as_ref()?;
-            Some(Release { runtime: Runtime::Mysql, version, url, sha256: None, sha512: None, md5, sha3_256: None, archive, label })
+            for suffix in suffixes {
+                let url = format!("https://cdn.mysql.com/Downloads/MySQL-{series}/mysql-{version}-{suffix}");
+                let md5 = async { client.get(format!("{url}.md5")).send().await.and_then(|r| r.error_for_status()).ok()?.text().await.ok()?.split_whitespace().next().map(str::to_string) }.await;
+                if md5.is_some() {
+                    return Some(Release { runtime: Runtime::Mysql, version, url, sha256: None, sha512: None, md5, sha3_256: None, archive, label });
+                }
+            }
+            None
         })
     });
     let releases: Vec<Release> = futures_util::future::join_all(fetches.collect::<Vec<_>>()).await.into_iter().flatten().collect();
@@ -2109,7 +2163,12 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
         for (expected, actual) in checks {
             if let Some(expected) = expected {
                 if !actual.eq_ignore_ascii_case(expected) {
-                    return Err(Error::msg(format!("checksum mismatch for {name}: download is corrupt")));
+                    let head = std::fs::read(&archive_path).map(|b| b.into_iter().take(512).collect::<Vec<u8>>()).unwrap_or_default();
+                    let page = String::from_utf8_lossy(&head).to_ascii_lowercase();
+                    if page.contains("<html") || page.contains("<!doctype") {
+                        return Err(Error::msg(format!("{name}: the server sent a web page instead of the file (it may block automated downloads, or be updating it). Try again in a few minutes.")));
+                    }
+                    return Err(Error::msg(format!("checksum mismatch for {name}: the download doesn't match its published checksum (the file may have been replaced upstream moments ago). Try again in a few minutes.")));
                 }
             }
         }
@@ -2189,6 +2248,12 @@ fn extract_into(archive: &Path, kind: Archive, scratch: &Path, dest: &Path, mark
         std::fs::remove_dir_all(dest)?;
     }
     std::fs::rename(root, dest)?;
+    // macOS marks what a quarantined app downloads, and Gatekeeper then blocks each binary
+    // on first run ("can't be opened"). The download was checksum-checked, so the mark goes.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("xattr").args(["-dr", "com.apple.quarantine"]).arg(dest).status();
+    }
     Ok(())
 }
 
@@ -2256,7 +2321,7 @@ pub struct UpdateNotice {
 /// Newer patch releases for installed versions: same "major.minor" line (for example
 /// PHP 8.4.27 → 8.4.30), never a jump to a new minor that could change behaviour.
 pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNotice> {
-    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama, Runtime::Minio, Runtime::Elasticsearch, Runtime::Opensearch, Runtime::N8n, Runtime::Rabbitmq, Runtime::Erlang, Runtime::Go, Runtime::Maven, Runtime::Gradle]
+    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama, Runtime::Minio, Runtime::Elasticsearch, Runtime::Opensearch, Runtime::N8n, Runtime::Rabbitmq, Runtime::Erlang, Runtime::Go, Runtime::Maven, Runtime::Gradle, Runtime::Git]
         .into_iter()
         .map(|runtime| async move {
             let installed = installed(layout, runtime);
@@ -2280,6 +2345,13 @@ pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNot
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_git_for_windows_tags() {
+        assert_eq!(git_version_from_tag("2.47.1.windows.1"), "2.47.1");
+        assert_eq!(git_version_from_tag("2.47.1.windows.2"), "2.47.1.2");
+        assert_eq!(git_version_from_tag("2.48.0-rc1.windows.1"), "2.48.0-rc1");
+    }
 
     #[test]
     fn mongodb_build_follows_the_linux_distribution() {

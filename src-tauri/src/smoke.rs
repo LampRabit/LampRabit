@@ -183,7 +183,13 @@ async fn install(app: &AppHandle, runtime: Runtime) -> std::result::Result<Strin
     if let Some(why) = unavailable {
         return Err(Outcome::Skipped(why.to_string()));
     }
-    let releases = runtimes::available(&state.http, runtime, true).await?;
+    // LampRabit's own builds publish from main, after a pull request's smoke test: a runtime
+    // whose builds aren't published yet (MariaDB for macOS, before its first merge) is
+    // skipped, not failed, or the pull request that adds it could never pass.
+    let releases = match runtimes::available(&state.http, runtime, true).await {
+        Err(e) if e.to_string().contains(" builds of ") && e.to_string().ends_with(" yet") => return Err(Outcome::Skipped(format!("{e} (LampRabit's builds publish from main)"))),
+        other => other?,
+    };
     // Python 3.13 for the same reason the requirements prefer it: pgAdmin's wheels.
     let preferred = |r: &&Release| if runtime == Runtime::Python { r.version.starts_with("3.13.") } else { r.label.as_deref() == Some("LTS") };
     let release = releases.iter().find(preferred).or(releases.first()).cloned().ok_or_else(|| Outcome::Skipped("no download for this platform".into()))?;
