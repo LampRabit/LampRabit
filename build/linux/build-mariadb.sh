@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Builds MariaDB for macOS from the source release: MariaDB publishes no macOS binaries, and
-# Linux and Windows use its official archives (see runtimes.rs). TLS (WolfSSL), zlib, PCRE2
-# and fmt are the bundled copies, and Homebrew's libraries are kept out, so the result needs
-# only macOS's own libraries.
+# Linux and Windows use its official archives (see runtimes.rs). OpenSSL is compiled in
+# (static, as for Apache): the bundled WolfSSL covers the server but not its client library,
+# which then wants GnuTLS. zlib, PCRE2 and fmt are MariaDB's bundled copies, and Homebrew's
+# libraries are kept out, so the result needs only macOS's own libraries.
 #   build-mariadb.sh <version>   ->  out/mariadb-<version>-macos-<arch>.tar.gz
 . "$(dirname "$0")/lib.sh"
 VERSION="$1"
@@ -19,6 +20,11 @@ export PATH="$(brew --prefix bison)/bin:$PATH"
 # CMAKE_IGNORE_PREFIX_PATH doesn't cover.
 export PKG_CONFIG_PATH="" PKG_CONFIG_LIBDIR="/nonexistent"
 
+log "MariaDB $VERSION ($OS $ARCH): OpenSSL $OPENSSL_VERSION (static)"
+ssl="$WORK/deps-mariadb"
+rm -rf "$ssl"
+(cd "$(openssl_src)" && ./Configure --prefix="$ssl" --libdir=lib no-shared no-tests -fPIC >/dev/null && make -j"$JOBS" >/dev/null && make install_sw >/dev/null)
+
 log "MariaDB $VERSION ($OS $ARCH): compiling"
 src="$(unpack "$(fetch "https://archive.mariadb.org/mariadb-$VERSION/source/mariadb-$VERSION.tar.gz" "${!sum_var}")")"
 stage="$WORK/stage-mariadb-$VERSION"
@@ -32,8 +38,8 @@ cmake -S "$src" -B "$WORK/build-mariadb" \
     -DCMAKE_INSTALL_PREFIX="$stage" \
     -DCMAKE_IGNORE_PREFIX_PATH="/opt/homebrew;/usr/local" \
     -DINSTALL_LAYOUT=STANDALONE \
-    -DWITH_SSL=bundled -DWITH_ZLIB=bundled -DWITH_PCRE=bundled -DWITH_LIBFMT=bundled \
-    -DCMAKE_DISABLE_FIND_PACKAGE_GnuTLS=ON \
+    -DWITH_SSL="$ssl" -DOPENSSL_ROOT_DIR="$ssl" -DOPENSSL_USE_STATIC_LIBS=ON \
+    -DWITH_ZLIB=bundled -DWITH_PCRE=bundled -DWITH_LIBFMT=bundled \
     -DWITH_UNIT_TESTS=OFF -DWITH_EMBEDDED_SERVER=OFF -DWITH_MARIABACKUP=ON \
     -DPLUGIN_ROCKSDB=NO -DPLUGIN_MROONGA=NO -DPLUGIN_SPIDER=NO -DPLUGIN_CONNECT=NO \
     -DPLUGIN_COLUMNSTORE=NO -DPLUGIN_S3=NO -DPLUGIN_OQGRAPH=NO -DPLUGIN_TOKUDB=NO \
@@ -48,7 +54,7 @@ cmake --install "$WORK/build-mariadb" >/dev/null
 rm -rf "$stage/mariadb-test" "$stage/mysql-test" "$stage/sql-bench" "$stage/man" "$stage/docs"
 find "$stage/bin" "$stage/lib" -type f \( -perm -u+x -o -name '*.so' -o -name '*.dylib' \) -exec strip -x {} \; 2>/dev/null || true
 cp "$src"/COPYING* "$src"/README* "$stage/" 2>/dev/null || true
-licenses "$stage" "$src/extra/wolfssl/wolfssl" "$src/zlib" "$src/libmariadb"
+licenses "$stage" "$WORK/openssl-$OPENSSL_VERSION" "$src/zlib" "$src/libmariadb"
 check_deps "$stage/bin/mariadbd" "$stage/bin/mariadb" "$stage/bin/mariadb-dump" "$stage/bin/mariadb-admin"
 "$stage/bin/mariadbd" --version
 # A first database must initialise from the archive's own layout, as LampRabit does it.
