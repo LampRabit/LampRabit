@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CaseSensitive, ChevronDown, ChevronRight, Copy, Download, EyeOff, FileCode, Pause, Play, Regex, RotateCcw, Search, Trash2, WrapText, X } from "lucide-react";
+import { AlertTriangle, CaseSensitive, ChevronDown, ChevronRight, Copy, Download, EyeOff, FileCode, Pause, Play, Regex, RotateCcw, Search, Trash2, WrapText, X } from "lucide-react";
 import clsx from "clsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
@@ -206,13 +206,47 @@ export default function Logs() {
   const shownSources = allSources.filter((s) => !hidden.has(s));
   const sourceSummary =
     shownSources.length === allSources.length ? "All sources" : shownSources.length === 1 ? sourceLabel(shownSources[0]) : shownSources.length === 0 ? "No sources" : `${shownSources.length} sources`;
-  const visible = useMemo(() => {
+  const matched = useMemo(() => {
     const since = Date.now() - ranges.find((r) => r.id === range)!.ms;
     const test = search && "test" in search ? search.test : null;
     return source.filter(
       (l) => !hidden.has(sourceOf(l)) && shownLevels.has(l.level) && shownStreams.has(l.stream) && l.time.getTime() >= since && (!test || test(l.message) !== exclude),
     );
   }, [source, hidden, search, exclude, shownLevels, shownStreams, range]);
+  // Repeats folded into one row with a count: a database restarted ten times, or a worker
+  // printing the same line every second, otherwise buries the line that matters. Numbers
+  // (times, pids, ids) don't make a line different.
+  const [foldRepeats, setFoldRepeats] = useState(true);
+  const { visible, repeats } = useMemo(() => {
+    const repeats = new Map<number, number>();
+    if (!foldRepeats) return { visible: matched, repeats };
+    const shape = (l: LogEntry) => `${sourceOf(l)}|${l.level}|${l.message.replace(/\d+/g, "#")}`;
+    const out: LogEntry[] = [];
+    let last = "";
+    for (const l of matched) {
+      const key = shape(l);
+      if (key === last && out.length > 0) {
+        // The newest copy stands for the run, so its time is the latest one.
+        const first = out[out.length - 1];
+        repeats.set(l.id, (repeats.get(first.id) ?? 1) + 1);
+        repeats.delete(first.id);
+        out[out.length - 1] = l;
+      } else out.push(l);
+      last = key;
+    }
+    return { visible: out, repeats };
+  }, [matched, foldRepeats]);
+  const problems = useMemo(() => {
+    let errors = 0;
+    let warnings = 0;
+    for (const l of matched) {
+      if (l.level === "error") errors++;
+      else if (l.level === "warn") warnings++;
+    }
+    return { errors, warnings };
+  }, [matched]);
+  const onlyProblems = shownLevels.size === 2 && shownLevels.has("error") && shownLevels.has("warn");
+  const showLevels = (only: Level[] | null) => setShownLevels(new Set(only ?? levelOrder));
 
   const toggleIn = <T,>(set: (f: (s: Set<T>) => Set<T>) => void, value: T) =>
     set((current) => {
@@ -232,7 +266,7 @@ export default function Logs() {
     setRange("all");
   };
 
-  const asText = () => visible.map((l) => `[${stamp(l.time)}] [${sourceLabel(sourceOf(l))}] ${l.level.padEnd(6)} | ${l.message}`).join("\n");
+  const asText = () => matched.map((l) => `[${stamp(l.time)}] [${sourceLabel(sourceOf(l))}] ${l.level.padEnd(6)} | ${l.message}`).join("\n");
   const exportLogs = async () => {
     const path = await save({
       defaultPath: `lamprabit-logs-${stamp(new Date()).replace(/[: ]/g, "-")}.log`,
@@ -241,7 +275,7 @@ export default function Logs() {
     if (!path) return;
     try {
       await api.saveText(path, asText() + "\n");
-      notify("info", `Exported ${visible.length} lines`);
+      notify("info", `Exported ${matched.length} lines`);
     } catch (e) {
       notify("error", String(e));
     }
@@ -375,10 +409,10 @@ export default function Logs() {
           <Button variant="ghost" onClick={() => setWrapLines((current) => !current)} aria-pressed={wrapLines} title={wrapLines ? "One line per entry (the full text is in its details)" : "Wrap long lines"}>
             <WrapText size={15} /> {wrapLines ? "Wrap" : "No wrap"}
           </Button>
-          <Button variant="ghost" onClick={() => copyText(asText(), `${visible.length} log ${visible.length === 1 ? "line" : "lines"}`)} disabled={visible.length === 0}>
+          <Button variant="ghost" onClick={() => copyText(asText(), `${matched.length} log ${matched.length === 1 ? "line" : "lines"}`)} disabled={matched.length === 0}>
             <Copy size={14} /> Copy
           </Button>
-          <Button variant="ghost" onClick={exportLogs} disabled={visible.length === 0}>
+          <Button variant="ghost" onClick={exportLogs} disabled={matched.length === 0}>
             <Download size={14} /> Export
           </Button>
           {confirmClear ? (
@@ -399,6 +433,20 @@ export default function Logs() {
         </div>
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-2.5">
+          <div className="flex items-center gap-0.5 rounded-lg border border-line bg-bg p-1" role="group" aria-label="Quick view">
+            <button type="button" onClick={() => showLevels(null)} aria-pressed={shownLevels.size === levelOrder.length} className={toggleChip(shownLevels.size === levelOrder.length)}>
+              Everything
+            </button>
+            <button
+              type="button"
+              onClick={() => showLevels(["error", "warn"])}
+              aria-pressed={onlyProblems}
+              title="Only errors and warnings, from every source"
+              className={toggleChip(onlyProblems)}
+            >
+              <AlertTriangle size={12} /> Problems
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-muted">Severity</span>
             <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-line bg-bg p-1" role="group" aria-label="Filter by severity">
@@ -420,6 +468,10 @@ export default function Logs() {
               ))}
             </div>
           </div>
+          <label className="flex items-center gap-2 text-xs font-semibold text-muted" title="Show consecutive lines that differ only in numbers (times, ids) as one line with a count">
+            <Switch checked={foldRepeats} onChange={setFoldRepeats} label="Fold repeated lines" />
+            Fold repeats
+          </label>
           <span className="ml-auto flex items-center gap-3 text-xs tabular-nums text-muted">
             {search && "error" in search && <span className="text-danger-text">Invalid expression: {search.error}</span>}
             {filtered && (
@@ -465,8 +517,21 @@ export default function Logs() {
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-terminal text-slate-200 shadow-float" aria-label="Log output">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-terminal-2 px-4 py-2.5 text-xs">
             <span className="font-semibold text-slate-200">Log output</span>
-            <span className="text-slate-400">
-              {sourceSummary} · {visible.length} {visible.length === 1 ? "line" : "lines"}
+            <span className="flex items-center gap-3 text-slate-400">
+              {problems.errors > 0 && (
+                <button type="button" onClick={() => showLevels(["error"])} className="flex items-center gap-1.5 text-red-300 hover:underline" title="Show only errors">
+                  <span className="size-1.5 rounded-full bg-red-400" aria-hidden /> {problems.errors} {problems.errors === 1 ? "error" : "errors"}
+                </button>
+              )}
+              {problems.warnings > 0 && (
+                <button type="button" onClick={() => showLevels(["warn"])} className="flex items-center gap-1.5 text-amber-300 hover:underline" title="Show only warnings">
+                  <span className="size-1.5 rounded-full bg-amber-400" aria-hidden /> {problems.warnings} {problems.warnings === 1 ? "warning" : "warnings"}
+                </button>
+              )}
+              <span>
+                {sourceSummary} · {matched.length} {matched.length === 1 ? "line" : "lines"}
+                {visible.length < matched.length && ` (${matched.length - visible.length} repeats folded)`}
+              </span>
             </span>
           </div>
           <div ref={scroller} className="selectable scrollbar-none min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3 font-mono text-[12px] leading-6">
@@ -502,7 +567,12 @@ export default function Logs() {
                       )}
                       style={{ transform: `translateY(${item.start}px)` }}
                     >
-                      <span className="whitespace-nowrap pr-3 text-slate-400">{stamp(l.time)}</span>
+                      <span
+                        className={clsx("whitespace-nowrap pr-3", l.timed ? "text-slate-400" : "text-slate-500 italic")}
+                        title={l.timed ? undefined : "This line has no time of its own: it shows the time of the line next to it in the same log"}
+                      >
+                        {stamp(l.time)}
+                      </span>
                       <span className="min-w-0 pr-3">
                         <span className={clsx("inline-flex max-w-full truncate rounded-md px-1 text-[10px]", l.service === "project" ? projectBadge : (badgeColors[l.service] ?? neutralBadge))} title={sourceLabel(src)}>
                           {sourceLabel(src)}
@@ -514,6 +584,11 @@ export default function Logs() {
                       </span>
                       <span className={clsx("min-w-0", wrapLines ? "wrap-break-word whitespace-pre-wrap" : "truncate whitespace-pre", l.stream === "command" && "text-violet-200", l.service === "dumps" && "text-fuchsia-200")}>
                         {l.message}
+                        {(repeats.get(l.id) ?? 1) > 1 && (
+                          <span className="ml-2 rounded bg-white/10 px-1.5 font-sans text-[10px] text-slate-300" title="Consecutive lines like this one, folded">
+                            ×{repeats.get(l.id)}
+                          </span>
+                        )}
                       </span>
                     </div>
                   );
@@ -612,7 +687,7 @@ function LineDetails({ line, lines, dumps, onClose, onCopy, onOpenFile }: {
   return (
     <div className="flex max-h-[50%] min-h-32 shrink-0 flex-col border-t border-white/10 bg-terminal-2">
       <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-2 text-xs">
-        <span className="text-slate-400">{stamp(line.time)}</span>
+        <span className="text-slate-400">{stamp(line.time)}{!line.timed && " (no time of its own in the log)"}</span>
         <span className={clsx("rounded-md px-1 text-[10px]", line.service === "project" ? projectBadge : (badgeColors[line.service] ?? neutralBadge))}>{sourceLabel(src)}</span>
         <span className={clsx("capitalize", levels[line.level].text)}>{line.level}</span>
         <span className="flex-1" />

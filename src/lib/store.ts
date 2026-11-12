@@ -134,13 +134,25 @@ export const useAppStore = create<AppStore>((set) => ({
       // Lines without their own timestamp (stack traces, MariaDB's "Version:" line) take the
       // time of the line before them in the same file.
       const lastTime: Record<string, Date> = {};
+      const fileOf = (l: { service: string; stream: string; project?: string }) => `${l.service}/${l.project ?? ""}/${l.stream}`;
       const history = lines.map((l, i) => {
         const entry = parseLog({ ...l, id: -(i + 1) });
-        const file = `${l.service}/${l.stream}`;
+        const file = fileOf(l);
         if (entry.timed) lastTime[file] = entry.time;
         else if (lastTime[file]) entry.time = lastTime[file];
+        else entry.time = new Date(NaN);
         return entry;
       });
+      // Lines at the top of a file with nothing timed before them take the next timed line's
+      // time; a file with no timestamps at all keeps "when read", which the page marks. They
+      // used to all show the current time, so days-old errors looked like they just happened.
+      const nextTime: Record<string, Date> = {};
+      for (let i = history.length - 1; i >= 0; i--) {
+        const entry = history[i];
+        const file = fileOf(entry);
+        if (entry.timed) nextTime[file] = entry.time;
+        else if (Number.isNaN(entry.time.getTime())) entry.time = nextTime[file] ?? new Date();
+      }
       const live = s.logs.filter((l) => l.id > cursor);
       const merged = [...history, ...live].sort((a, b) => a.time.getTime() - b.time.getTime());
       return { logs: merged.slice(-MAX_LOG_LINES) };
