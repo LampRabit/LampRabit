@@ -1,8 +1,10 @@
 //! The project doctor: what stands between a project and working, each problem with why it
 //! matters and, where LampRabit can, a fix that's previewed before it runs. Checks read
 //! what's already known (the project's files, its database's state, the services, the
-//! hosts file and certificate state) plus `php -m` for the extensions. Nothing is changed
-//! here; lib.rs applies a fix by its issue id, after recomputing the issues.
+//! hosts file and certificate state) plus `php -m` for the extensions. Each language gets its
+//! own runtime checks: PHP against composer.json, Node against .nvmrc and `engines.node`,
+//! Python, Java and Go against their version files, and a dev server that should be running.
+//! Nothing is changed here; lib.rs applies a fix by its issue id, after recomputing the issues.
 
 use std::{path::Path, process::Stdio, time::Duration};
 
@@ -57,6 +59,46 @@ pub enum FixAction {
     SetEnv { key: String, value: String },
     ApplySites,
     TrustCa,
+    /// Installs a Node version with NVM.
+    InstallNode { version: String },
+    /// Runs the project's processes on this installed Node version.
+    SetNode { version: String },
+    /// Starts the project's dev server.
+    StartApp,
+}
+
+/// A Node project's runtime.
+pub struct NodeInput {
+    /// Installed Node versions, newest first.
+    pub installed: Vec<String>,
+    pub nvm: bool,
+    /// The version asked for, and where: (spec, "its .nvmrc" / "its settings").
+    pub wanted: Option<(String, &'static str)>,
+    /// The version it runs on, when that resolves.
+    pub version: Option<String>,
+    /// package.json's `engines.node`.
+    pub engines: Option<String>,
+}
+
+/// The runtime of a Python, Java or Go project.
+pub struct RuntimeInput {
+    pub label: &'static str,
+    pub installed: bool,
+    /// What its version file asks for, and that file.
+    pub request: Option<(String, &'static str)>,
+    /// Whether an installed version matches the request.
+    pub matched: bool,
+    /// The version it runs on instead.
+    pub version: Option<String>,
+}
+
+/// A project served by its own dev server.
+pub struct AppInput {
+    /// stopped, starting, running, crashed.
+    pub state: &'static str,
+    pub exit_code: Option<i32>,
+    /// Something listens for the domain anyway (a dev server started in a terminal).
+    pub routed: bool,
 }
 
 /// What lib.rs knows about a project, for the checks.
@@ -84,6 +126,12 @@ pub struct Input<'a> {
     pub ca_trusted: Option<bool>,
     /// Some when it's a Git repository: whether Git knows a name and email to commit with.
     pub git_identity: Option<bool>,
+    /// Set for Node projects.
+    pub node: Option<NodeInput>,
+    /// Set for Python, Java and Go projects.
+    pub runtime: Option<RuntimeInput>,
+    /// Set when the domain is served by the project's own dev server.
+    pub app: Option<AppInput>,
 }
 
 pub async fn check(input: &Input<'_>) -> Vec<Issue> {
@@ -106,6 +154,15 @@ pub async fn check(input: &Input<'_>) -> Vec<Issue> {
 
     if input.language == "php" {
         php_checks(input, &mut add).await;
+    }
+    if let Some(node) = &input.node {
+        node_checks(node, &mut add);
+    }
+    if let Some(rt) = &input.runtime {
+        runtime_checks(rt, &mut add);
+    }
+    if let Some(app) = &input.app {
+        app_checks(input, app, &mut add);
     }
 
     // Dependencies: vendor/ or node_modules missing, or older than the lock file.
@@ -264,6 +321,83 @@ async fn php_checks(input: &Input<'_>, add: &mut impl FnMut(&str, Severity, Stri
     }
 }
 
+/// Node installed, the version the project asks for, and that version against `engines.node`.
+fn node_checks(node: &NodeInput, add: &mut impl FnMut(&str, Severity, String, String, Option<Fix>)) {
+    // A spec NVM can install by number ("20", "20.11.1"); "lts/*" and names aren't.
+    let installable = |spec: &str| node.nvm && spec.split('.').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+    let install_fix = |spec: &str| {
+        installable(spec).then(|| Fix {
+            label: format!("Install Node {spec}"),
+            preview: format!("Installs Node {spec} with NVM; the project picks it up the next time it starts."),
+            action: FixAction::InstallNode { version: spec.to_string() },
+        })
+    };
+    if node.installed.is_empty() {
+        let (detail, fix) = match &node.wanted {
+            Some((spec, _)) => (format!("The project is Node, and no Node version is installed. It asks for {spec}."), install_fix(spec)),
+            None => ("The project is Node, and no Node version is installed. Install one on Services → Node.js.".to_string(), None),
+        };
+        add("node-missing", Severity::Error, "Node.js isn't installed".into(), detail, fix);
+        return;
+    }
+    if let (Some((spec, source)), None) = (&node.wanted, &node.version) {
+        add(
+            "node-version-missing",
+            Severity::Error,
+            format!("Node {spec} isn't installed"),
+            format!("{} asks for Node {spec}, so its dev server and commands won't start until it's installed (or another version is picked in its Settings).", title_case(source)),
+            install_fix(spec),
+        );
+        return;
+    }
+    let (Some(version), Some(engines)) = (&node.version, &node.engines) else { return };
+    if satisfies(version, engines) != Some(false) {
+        return;
+    }
+    let fitting = node.installed.iter().find(|v| satisfies(v, engines) == Some(true));
+    let hint = if fitting.is_some() { "" } else { " None of the installed versions does: install one on Services → Node.js." };
+    add(
+        "node-engines",
+        Severity::Warning,
+        format!("Node {version} doesn't match the project"),
+        format!("package.json's engines asks for Node {engines}; packages may refuse to install or behave differently.{hint}"),
+        fitting.map(|v| Fix {
+            label: format!("Use Node {v}"),
+            preview: format!("Runs the project's dev server and commands on Node {v} (saved in its settings; .nvmrc isn't changed)."),
+            action: FixAction::SetNode { version: v.clone() },
+        }),
+    );
+}
+
+/// Python, Java and Go: installed at all, and the version the project's file asks for.
+fn runtime_checks(rt: &RuntimeInput, add: &mut impl FnMut(&str, Severity, String, String, Option<Fix>)) {
+    let label = rt.label;
+    if !rt.installed {
+        add("runtime-missing", Severity::Error, format!("{label} isn't installed"), format!("The project is {label}, and no {label} version is installed. Install one on the Services page."), None);
+        return;
+    }
+    if let (Some((want, file)), false) = (&rt.request, rt.matched) {
+        let runs_on = rt.version.as_deref().map(|v| format!(" It runs on {label} {v} instead.")).unwrap_or_default();
+        add("runtime-version", Severity::Warning, format!("{label} {want} isn't installed"), format!("{file} asks for {label} {want}.{runs_on} Install it on the Services page."), None);
+    }
+}
+
+/// The dev server that serves the domain: crashed, or not started.
+fn app_checks(input: &Input<'_>, app: &AppInput, add: &mut impl FnMut(&str, Severity, String, String, Option<Fix>)) {
+    if app.routed || matches!(app.state, "running" | "starting") {
+        return;
+    }
+    let start = |label: &str| Some(Fix { label: label.into(), preview: format!("Starts {}'s dev server; its output shows under Commands.", input.name), action: FixAction::StartApp });
+    if app.state == "crashed" {
+        let code = app.exit_code.map(|c| format!(" (exit code {c})")).unwrap_or_default();
+        add("app-crashed", Severity::Error, "The dev server stopped with an error".into(), format!("It exited{code}, so {} shows a \"not running\" page. Its last lines are under Commands.", input.url), start("Start it again"));
+    } else {
+        // Dev servers never start on their own (they're started by hand, with a profile or at
+        // launch), so this is worth knowing rather than a fault.
+        add("app-stopped", Severity::Info, "The dev server isn't running".into(), format!("{} shows a \"not running\" page until it starts.", input.url), start("Start the dev server"));
+    }
+}
+
 fn install_command(manager: &str, package_manager: &str) -> String {
     if manager == "composer" {
         "composer install".into()
@@ -403,5 +537,47 @@ mod tests {
         std::fs::write(dir.join("composer.json"), r#"{"require":{"php":"^8.2","ext-intl":"*","ext-PDO":"*","laravel/framework":"^11"},"require-dev":{"ext-xdebug":"*"}}"#).unwrap();
         assert_eq!(composer_extensions(&dir), ["intl", "pdo"]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn node_issues(node: NodeInput) -> Vec<(String, Option<FixAction>)> {
+        let mut out = Vec::new();
+        node_checks(&node, &mut |id: &str, _, _, _, fix: Option<Fix>| out.push((id.to_string(), fix.map(|f| f.action))));
+        out
+    }
+
+    fn node(installed: &[&str], wanted: Option<&str>, version: Option<&str>, engines: Option<&str>) -> NodeInput {
+        NodeInput {
+            installed: installed.iter().map(|s| s.to_string()).collect(),
+            nvm: true,
+            wanted: wanted.map(|w| (w.to_string(), "its .nvmrc")),
+            version: version.map(str::to_string),
+            engines: engines.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn node_projects() {
+        // Nothing installed: offer the .nvmrc version, but not "lts/*", which NVM names differently.
+        let issues = node_issues(node(&[], Some("20"), None, None));
+        assert!(matches!(&issues[..], [(id, Some(FixAction::InstallNode { version }))] if id == "node-missing" && version == "20"));
+        assert!(matches!(&node_issues(node(&[], Some("lts/*"), None, None))[..], [(_, None)]));
+        // The .nvmrc version isn't installed.
+        let issues = node_issues(node(&["22.11.0"], Some("18"), None, Some(">=18")));
+        assert!(matches!(&issues[..], [(id, Some(FixAction::InstallNode { .. }))] if id == "node-version-missing"));
+        // engines.node: npm ranges, and the newest installed version that fits.
+        let issues = node_issues(node(&["22.11.0", "20.18.0", "18.20.4"], None, Some("22.11.0"), Some("^18.18 || ^20.9")));
+        assert!(matches!(&issues[..], [(id, Some(FixAction::SetNode { version }))] if id == "node-engines" && version == "20.18.0"), "{issues:?}");
+        assert!(node_issues(node(&["22.11.0"], None, Some("22.11.0"), Some(">=18.0.0"))).is_empty());
+        // A range the matcher can't read ("18 - 20") is no claim either way.
+        assert!(node_issues(node(&["22.11.0"], None, Some("22.11.0"), Some("18 - 20"))).is_empty());
+    }
+
+    #[test]
+    fn other_runtimes() {
+        let mut out = Vec::new();
+        let rt = RuntimeInput { label: "Python", installed: true, request: Some(("3.12".into(), ".python-version")), matched: false, version: Some("3.13.1".into()) };
+        runtime_checks(&rt, &mut |id: &str, _, _, detail: String, _| out.push((id.to_string(), detail)));
+        assert_eq!(out[0].0, "runtime-version");
+        assert!(out[0].1.contains("runs on Python 3.13.1"), "{}", out[0].1);
     }
 }

@@ -2140,6 +2140,42 @@ async fn project_doctor(state: State<'_, AppState>, name: String) -> Result<Vec<
         None
     };
     let language = serde_json::to_value(site.language).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+    // The runtime besides PHP: Node from its settings or version file, the others from theirs.
+    let node = (site.language == sites::Language::Node).then(|| {
+        let chosen = own.and_then(|s| s.app.as_ref()).and_then(|a| a.node.clone());
+        let file = [".nvmrc", ".node-version"].into_iter().find(|f| dir.join(f).is_file()).map_or("its .nvmrc", |f| if f == ".nvmrc" { "its .nvmrc" } else { "its .node-version" });
+        let wanted = chosen.clone().map(|v| (v, "its settings")).or_else(|| node::project_version(&dir).map(|v| (v, file)));
+        doctor::NodeInput {
+            installed: node::installed_versions(),
+            nvm: node::nvm_installed(),
+            wanted,
+            version: node::for_project(chosen.as_deref(), &dir).ok().map(|(v, _)| v),
+            engines: facts.node_requirement.clone(),
+        }
+    });
+    let runtime = match site.language {
+        sites::Language::Python => Some(("Python", Runtime::Python)),
+        sites::Language::Java => Some(("Java", Runtime::Java)),
+        sites::Language::Go => Some(("Go", Runtime::Go)),
+        // rustup installs the toolchain a project names by itself.
+        _ => None,
+    }
+    .map(|(label, rt)| {
+        let installed = runtimes::installed(&layout, rt);
+        doctor::RuntimeInput {
+            label,
+            installed: !installed.is_empty(),
+            matched: site.version_request.as_ref().is_some_and(|r| langver::matching(&installed, &r.version).is_some()),
+            request: site.version_request.as_ref().map(|r| (r.version.clone(), r.file)),
+            version: site.language_version.clone(),
+        }
+    });
+    let app = if site.serve_mode == config::ServeMode::Dynamic && !matches!(site.language, sites::Language::Php | sites::Language::Static) {
+        let status = state.apps.status(&name).await;
+        Some(doctor::AppInput { state: status.state, exit_code: status.exit_code, routed: site.route.is_some() })
+    } else {
+        None
+    };
     let input = doctor::Input {
         name: &name,
         dir: &dir,
@@ -2159,6 +2195,9 @@ async fn project_doctor(state: State<'_, AppState>, name: String) -> Result<Vec<
         needs_apply: info.needs_apply,
         ca_trusted: info.ca_trusted,
         git_identity,
+        node,
+        runtime,
+        app,
     };
     Ok(doctor::check(&input).await)
 }
@@ -2206,6 +2245,18 @@ async fn doctor_fix(app: AppHandle, state: State<'_, AppState>, name: String, id
             if let Some(note) = trust_ca(app, state).await? {
                 return Ok(note);
             }
+        }
+        A::InstallNode { version } => node_install(app, version).await?,
+        A::SetNode { version } => {
+            // The project's saved run settings (or what it would start with) on that version.
+            let (settings, layout) = state.snapshot().await;
+            let dir = project_dir(&layout, &name)?;
+            let mut config = settings.sites.get(&name).and_then(|s| s.app.clone()).unwrap_or_else(|| apps::suggest(&dir, 0));
+            config.node = Some(version);
+            app_save(app, state, name, config).await?
+        }
+        A::StartApp => {
+            app_start(app, state, name).await?;
         }
     }
     Ok(fix.label)
@@ -3661,6 +3712,19 @@ pub fn run() {
                 let root = app.state::<AppState>().settings.try_read().map(|s| s.root_dir.clone()).unwrap_or_default();
                 logs::set_system_file(app.handle(), Layout::new(root).logs().join("lampRabit.log"));
             }
+            {
+                // Assistants' LampRabit entries follow this build: the copy they run (Windows)
+                // is refreshed, and entries pointing at another program are pointed here.
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(e) = mcp_clients::refresh_launcher() {
+                        logs::system(&handle, logs::Level::Warn, format!("Couldn't update the copy of LampRabit that AI assistants run: {e}"));
+                    }
+                    for name in mcp_clients::repoint() {
+                        logs::system(&handle, logs::Level::Info, format!("{name}'s LampRabit entry now runs this LampRabit; restart {name} to use it."));
+                    }
+                });
+            }
             logs::system(app.handle(), logs::Level::Info, format!("LampRabit {} started on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS));
             for w in &warnings {
                 logs::system(app.handle(), logs::Level::Warn, w.clone());
@@ -3712,19 +3776,6 @@ pub fn run() {
                     polls = polls.wrapping_add(1);
                     if polls % 150 == 1 {
                         let mb = |n: u32| u64::from(n.max(1)) * 1024 * 1024;
-            {
-                // Assistants' LampRabit entries follow this build: the copy they run (Windows)
-                // is refreshed, and entries pointing at another program are pointed here.
-                let handle = app.handle().clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    if let Err(e) = mcp_clients::refresh_launcher() {
-                        logs::system(&handle, logs::Level::Warn, format!("Couldn't update the copy of LampRabit that AI assistants run: {e}"));
-                    }
-                    for name in mcp_clients::repoint() {
-                        logs::system(&handle, logs::Level::Info, format!("{name}'s LampRabit entry now runs this LampRabit; restart {name} to use it."));
-                    }
-                });
-            }
                         let (max, keep, total) = (mb(settings.log_max_mb), settings.log_keep, mb(settings.log_total_mb));
                         let dir2 = dir.clone();
                         let rotated = tauri::async_runtime::spawn_blocking(move || logs::rotate(&dir2, max, keep, total)).await.unwrap_or(0);

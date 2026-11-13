@@ -86,6 +86,11 @@ fn nvm_windows() -> Option<(PathBuf, String)> {
     exe.exists().then(|| (exe, env_var("NVM_SYMLINK").unwrap_or_default()))
 }
 
+/// NVM (nvm-windows, or nvm-sh elsewhere) is there to install Node versions with.
+pub fn nvm_installed() -> bool {
+    if cfg!(windows) { nvm_windows().is_some() } else { nvm_sh_dir().is_some() }
+}
+
 fn nvm_sh_dir() -> Option<PathBuf> {
     let dir = env_var("NVM_DIR").map(PathBuf::from).or_else(|| dirs::home_dir().map(|h| h.join(".nvm")))?;
     dir.join("nvm.sh").exists().then_some(dir)

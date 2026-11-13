@@ -19,6 +19,22 @@ const tone = {
   info: { icon: Info, text: "text-accent-text", ring: "border-line bg-surface-2/40" },
 };
 
+const runtimeName: Partial<Record<Site["language"], string>> = { php: "PHP", node: "Node.js", python: "Python", java: "Java", go: "Go", rust: "Rust" };
+
+/** What the doctor looked at for this project, for the all-clear line. */
+function checked(site: Site) {
+  const parts = [
+    runtimeName[site.language],
+    site.language !== "static" && "dependencies",
+    site.serveMode === "dynamic" && site.language !== "php" && site.language !== "static" && "dev server",
+    ".env",
+    site.database && "database",
+    "domain",
+    site.ssl && "certificate",
+  ].filter((p): p is string => !!p);
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`.replace(/^./, (c) => c.toUpperCase());
+}
+
 export default function ProjectDoctor({ site, onCommands }: { site: Site; onCommands: () => void }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
@@ -59,7 +75,7 @@ export default function ProjectDoctor({ site, onCommands }: { site: Site; onComm
       {doctor.isError && <p className="px-4 py-3 text-sm text-danger-text">{String(doctor.error)}</p>}
       {issues.length === 0 && !doctor.isLoading && !doctor.isError && (
         <p className="flex items-center gap-2 px-4 py-3 text-sm text-muted">
-          <CheckCircle2 size={15} className="text-ok" aria-hidden /> PHP, dependencies, .env, database, domain and certificate all look right.
+          <CheckCircle2 size={15} className="text-ok" aria-hidden /> {checked(site)} all look right.
         </p>
       )}
       {issues.length > 0 && (
