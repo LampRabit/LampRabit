@@ -3,7 +3,8 @@ import { create } from "zustand";
 /** "system" follows the OS reduce-motion setting; "reduced" keeps fades but drops movement. */
 export type Motion = "system" | "full" | "reduced" | "off";
 
-const reduceQuery = () => window.matchMedia("(prefers-reduced-motion: reduce)");
+// jsdom (component tests) has no matchMedia: treat it as no preference.
+const reduceQuery = () => window.matchMedia?.("(prefers-reduced-motion: reduce)") ?? ({ matches: false, addEventListener() {}, removeEventListener() {} } as unknown as MediaQueryList);
 
 function readMotion(): Motion {
   try {
