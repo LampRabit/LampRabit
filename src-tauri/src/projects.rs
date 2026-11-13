@@ -83,6 +83,9 @@ pub struct Ctx<'a> {
     pub settings: &'a Settings,
     pub layout: &'a Layout,
     pub name: &'a str,
+    /// The database this run created, so a failed run can drop it again: left behind, it
+    /// made the retry stop at "already exists".
+    pub created_database: std::sync::Mutex<Option<String>>,
 }
 
 impl Ctx<'_> {
@@ -299,13 +302,16 @@ pub async fn create_database(ctx: &Ctx<'_>, req: &NewProject, database: &str) ->
         let (client, home, mut args) = psql(ctx)?;
         // template0 so the encoding can be set whatever template1 has.
         args.extend(["-v".into(), "ON_ERROR_STOP=1".into(), "-c".into(), format!("CREATE DATABASE \"{database}\" ENCODING 'UTF8' TEMPLATE template0")]);
-        return run(ctx, &client, &args, &home, &[]).await.map_err(|e| {
-            if e.to_string().contains("already exists") {
-                Error::msg(format!("A database called {database} already exists. Choose another name, or leave the database option off and use the existing one yourself."))
-            } else {
-                e
+        return match run(ctx, &client, &args, &home, &[]).await {
+            Ok(()) => {
+                *ctx.created_database.lock().unwrap() = Some(database.to_string());
+                Ok(())
             }
-        });
+            Err(e) if e.to_string().contains("already exists") => Err(Error::msg(format!(
+                "A database called {database} already exists. Choose another name, or leave the database option off and use the existing one yourself."
+            ))),
+            Err(e) => Err(e),
+        };
     }
     let db = match req.engine {
         Some(DbEngine::Mysql) => Database::Mysql,
@@ -322,13 +328,68 @@ pub async fn create_database(ctx: &Ctx<'_>, req: &NewProject, database: &str) ->
         // migrations there) is worse than asking for a different name.
         format!("CREATE DATABASE `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
     ];
-    run(ctx, &client, &args, &home, &[]).await.map_err(|e| {
-        if e.to_string().contains("1007") {
-            Error::msg(format!("A database called {database} already exists. Choose another name, or leave the database option off and use the existing one yourself."))
-        } else {
-            e
+    match run(ctx, &client, &args, &home, &[]).await {
+        Ok(()) => {
+            *ctx.created_database.lock().unwrap() = Some(database.to_string());
+            Ok(())
         }
-    })
+        // An empty database with this name (no tables: what an earlier failed attempt left)
+        // is taken as it is; one with tables may be another project's, so that still stops.
+        Err(e) if e.to_string().contains("1007") && mysql_database_empty(ctx, db, database) => {
+            ctx.step(format!("{database} already exists and is empty; using it"));
+            Ok(())
+        }
+        Err(e) if e.to_string().contains("1007") => Err(Error::msg(format!(
+            "A database called {database} already exists and has tables. Choose another name, or leave the database option off and use the existing one yourself."
+        ))),
+        Err(e) => Err(e),
+    }
+}
+
+/// Whether a MariaDB/MySQL database has no tables: its data folder holds nothing but
+/// db.opt (MariaDB) or nothing at all (MySQL 8 keeps the options in its dictionary).
+fn mysql_database_empty(ctx: &Ctx<'_>, db: Database, database: &str) -> bool {
+    let data = match db {
+        Database::Mariadb => ctx.layout.data("mariadb"),
+        Database::Mysql => configs::mysql_data(ctx.settings, ctx.layout),
+    };
+    // Database folders encode characters other than letters, digits and _ as @xxxx.
+    let folder: String = database.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c.to_string() } else { format!("@{:04x}", c as u32) }).collect();
+    std::fs::read_dir(data.join(folder)).is_ok_and(|entries| entries.flatten().all(|e| e.file_name() == "db.opt"))
+}
+
+/// Drops the database a failed run created, so trying again starts clean.
+pub async fn drop_created_database(ctx: &Ctx<'_>, req: &NewProject) {
+    use crate::templates::DbEngine;
+    let Some(database) = ctx.created_database.lock().unwrap().take() else { return };
+    let result = if engine(ctx.settings, req) == Some(DbEngine::Postgres) {
+        match psql(ctx) {
+            Ok((client, home, mut args)) => {
+                args.extend(["-c".into(), format!("DROP DATABASE IF EXISTS \"{database}\"")]);
+                run(ctx, &client, &args, &home, &[]).await
+            }
+            Err(e) => Err(e),
+        }
+    } else {
+        let db = match req.engine {
+            Some(DbEngine::Mysql) => Some(Database::Mysql),
+            Some(DbEngine::Mariadb) => Some(Database::Mariadb),
+            _ => ctx.settings.database(),
+        };
+        match db {
+            Some(db) => async {
+                let home = configs::database_home(ctx.settings, ctx.layout, db)?;
+                let client = configs::database_client(ctx.settings, ctx.layout, db)?;
+                let args = vec![format!("--defaults-file={}", configs::write_client_config(ctx.settings, ctx.layout, db)?.display()), "-e".into(), format!("DROP DATABASE IF EXISTS `{database}`")];
+                run(ctx, &client, &args, &home, &[]).await
+            }
+            .await,
+            None => Ok(()),
+        }
+    };
+    if let Err(e) = result {
+        crate::logs::system(ctx.app, crate::logs::Level::Warn, format!("Couldn't drop {database} after the failed project creation: {e}. Drop it in phpMyAdmin or Adminer before trying the same name again."));
+    }
 }
 
 /// Sets `KEY=value` lines in a .env-style file, adding the keys that are missing. Matches
