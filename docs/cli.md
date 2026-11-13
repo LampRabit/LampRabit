@@ -36,7 +36,7 @@ Exit codes: `0` done, `1` the request failed (the message says why), `2` usage, 
 
 No terminal needed: **Settings → AI assistants** does it from the app.
 
-- **Connect** adds LampRabit to Claude Desktop, Claude Code, Cursor, VS Code or Windsurf: it writes a `lamprabit` entry into that assistant's MCP config (keeping everything else, in order, and backing the file up the first time); **Disconnect** removes it. The assistant then starts LampRabit's MCP server itself, with LampRabit open or not.
+- **Connect** adds LampRabit to supported clients from Settings â†’ AI assistants. Integrations include Claude Desktop, Claude Code, Codex, Cursor, VS Code, GitHub Copilot CLI, Windsurf, Gemini CLI, Antigravity, LM Studio, Cline, Roo Code, Kiro and opencode. LampRabit updates the relevant MCP config while preserving other entries; **Disconnect** removes its entry. The client can start LampRabit's MCP server even when the window is closed.
 - **Run the MCP server in LampRabit** serves it over HTTP at `http://127.0.0.1:39813/mcp` (Settings → Ports → MCP server) for assistants that connect by URL. Only this computer can reach it; requests need the token shown there (`Authorization: Bearer …`), and requests from web pages are refused. The section shows the `claude mcp add` command and the JSON to copy.
 
 By hand, `lamprabit mcp` is the same server over stdio, for example:
@@ -54,3 +54,5 @@ The settings aren't exposed, and nothing returns a password or token: local serv
 ## How it works
 
 The app listens on `127.0.0.1` only, on a free port, and writes the port and a random token to `control.json` in its config folder (readable by the user only); requests without the token are refused. Each connection carries one JSON line, `{"token","cmd","args"}`, answered by one line `{"ok":true,"data":…}` or `{"ok":false,"error":"…"}`; `logs.follow` streams `{"line":…}` lines. See `src-tauri/src/control.rs`, `cli.rs` and `mcp.rs`.
+
+The in-app HTTP endpoint is also bound to loopback and requires its bearer token. LampRabit refuses requests with a browser `Origin`, which prevents ordinary web pages from using the local endpoint. MCP tools expose project and service operations, not passwords, tokens or the full settings file.

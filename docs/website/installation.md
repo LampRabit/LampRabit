@@ -1,6 +1,6 @@
 # Installing LampRabit
 
-> **Status:** installers for every platform are on the GitHub Releases page: https://github.com/Shivam-SV/LampRabit/releases/latest. Windows and Linux are fully supported; macOS is in preview (LampRabit's macOS builds of Apache, Nginx and PHP are new, and MariaDB and MySQL can't be downloaded there yet; see the table below).
+> **Status:** installers for every platform are on the GitHub Releases page: https://github.com/Shivam-SV/LampRabit/releases/latest. Windows and Linux are supported; macOS is in preview. Runtime support varies by OS and architecture (see the table and the in-app Services catalog).
 
 ## System requirements
 
@@ -18,8 +18,8 @@
 | Apache | Yes | Preview (LampRabit's builds) | Yes (LampRabit's builds) |
 | Nginx | Yes | Preview (LampRabit's builds) | Yes (LampRabit's builds) |
 | PHP | Yes (8.1–8.5) | Preview (8.1–8.5, LampRabit's static builds) | Yes (8.1–8.5, LampRabit's static builds) |
-| MariaDB | Yes | Coming soon | Yes |
-| MySQL | Yes | Coming soon | Yes (needs the system's libaio and libnuma; LampRabit names the packages if they're missing) |
+| MariaDB | Yes | Preview (LampRabit's builds) | Yes |
+| MySQL | Yes | Preview (verify current release coverage) | Yes (needs the system's libaio and libnuma; LampRabit names the packages if they're missing) |
 | Composer | Yes | Yes | Yes |
 | Redis (with redis-cli) | Yes (community redis-windows build) | Yes (LampRabit's builds) | Yes (LampRabit's builds) |
 | Memcached | Yes (nono303's build) | Preview (LampRabit's builds) | Yes (LampRabit's builds) |
