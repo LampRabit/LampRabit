@@ -220,7 +220,7 @@ export default function Overview() {
         <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
         <div>
           <h1 className="flex items-center gap-3 text-3xl font-extrabold tracking-tight">
-            {greeting.text}, developer
+            {greeting.text}, {settings.data?.developerName?.trim() || "developer"}
             <greeting.icon size={28} strokeWidth={1.75} className="text-accent-text" aria-hidden />
           </h1>
           {/* The service list shows counts; the header only speaks up when something needs doing. */}

@@ -191,7 +191,38 @@ const answers: Record<string, unknown> = {
   ngrok_token_saved: false,
   vc_runtime_status: { applicable: false, installed: true, version: null },
   first_run: q.get("firstRun") === "1",
-  starter_plan: [],
+  // Every component downloads, except the ones installed already.
+  starter_plan: ({ runtimes }: { runtimes: string[] }) =>
+    runtimes.map((runtime) => ({
+      runtime,
+      label: ({ php: "PHP", apache: "Apache", mariadb: "MariaDB", composer: "Composer", mailpit: "Mailpit", phpmyadmin: "phpMyAdmin", git: "Git", redis: "Redis", postgres: "PostgreSQL" } as Record<string, string>)[runtime] ?? runtime,
+      blurb: "",
+      action:
+        runtime in settings.versions
+          ? { kind: "ready", version: (settings.versions as Record<string, string>)[runtime] }
+          : { kind: "install", release: { runtime, version: "8.4.14", url: "", sha256: null, archive: "zip", label: null } },
+      size: 34_000_000,
+    })),
+  import_sources: [
+    {
+      id: "laragon",
+      name: "Laragon",
+      folders: [String.raw`C:\laragon\www`],
+      projects: [
+        { name: "crm", path: String.raw`C:\laragon\www\crm`, framework: "Laravel", database: "crm", target: "crm" },
+        { name: "lampvites", path: String.raw`C:\laragon\www\lampvites`, framework: "Laravel", database: null, target: "lampvites-2" },
+        { name: "landing page", path: String.raw`C:\laragon\www\landing page`, framework: "Static", database: null, target: "landing-page" },
+      ],
+      databases: ["crm", "wp_blog"],
+    },
+    {
+      id: "xampp",
+      name: "XAMPP",
+      folders: [String.raw`C:\xampp\htdocs`],
+      projects: [{ name: "blog", path: String.raw`C:\xampp\htdocs\blog`, framework: "WordPress", database: "wp_blog", target: "blog" }],
+      databases: [],
+    },
+  ],
   ollama_elsewhere: null,
   app_info: { version: "0.2.0" },
   project_folders: [],
@@ -224,6 +255,8 @@ if (q.get("nav")) localStorage.setItem("navPosition", q.get("nav")!);
 const { useAppStore } = await import("../../src/lib/store");
 const page = q.get("page");
 if (page) useAppStore.setState({ page: page as never });
+const guide = q.get("guide");
+if (guide === "guide" || guide === "import") useAppStore.setState({ setupGuideOpen: guide });
 await import("../../src/main");
 
 // Click through to deeper views once the page has drawn: a tab, then a Git view.

@@ -110,7 +110,20 @@ const RESERVED_NAMES: &[&str] = &[
 const SYSTEM_DATABASES: &[&str] = &["mysql", "information_schema", "performance_schema", "sys"];
 
 pub fn validate(req: &NewProject, layout: &Layout) -> Result<()> {
-    let name = req.name.trim();
+    check_name(req.name.trim(), layout)?;
+    if let Some(db) = &req.database {
+        if db.is_empty() || db.len() > 64 || !db.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(Error::msg("Database names can use letters, numbers and underscores (up to 64)."));
+        }
+        if SYSTEM_DATABASES.contains(&db.to_lowercase().as_str()) {
+            return Err(Error::msg(format!("{db} is one of MariaDB's own databases. Choose another name.")));
+        }
+    }
+    Ok(())
+}
+
+/// A name a new folder in www/ can have: it becomes the domain.
+pub fn check_name(name: &str, layout: &Layout) -> Result<()> {
     if name.len() > 63 {
         return Err(Error::msg("Keep the project name to 63 characters or fewer (it becomes the domain)."));
     }
@@ -125,14 +138,6 @@ pub fn validate(req: &NewProject, layout: &Layout) -> Result<()> {
     }
     if layout.www().join(name).exists() {
         return Err(Error::msg(format!("www/{name} already exists.")));
-    }
-    if let Some(db) = &req.database {
-        if db.is_empty() || db.len() > 64 || !db.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            return Err(Error::msg("Database names can use letters, numbers and underscores (up to 64)."));
-        }
-        if SYSTEM_DATABASES.contains(&db.to_lowercase().as_str()) {
-            return Err(Error::msg(format!("{db} is one of MariaDB's own databases. Choose another name.")));
-        }
     }
     Ok(())
 }

@@ -814,6 +814,34 @@ export interface Settings {
   logMaxMb: number;
   logKeep: number;
   logTotalMb: number;
+  /** What Home greets the user with; empty until the setup guide asks. */
+  developerName: string;
+}
+
+/** Another local environment (imports.rs): Laragon, XAMPP, Herd… or a folder the user picked. */
+export interface ImportSource {
+  id: string;
+  name: string;
+  folders: string[];
+  projects: ForeignProject[];
+  /** Databases in its own MySQL/MariaDB; they stay there. */
+  databases: string[];
+}
+
+export interface ForeignProject {
+  name: string;
+  path: string;
+  framework: string | null;
+  database: string | null;
+  /** A free www/ name for it. */
+  target: string;
+}
+
+export interface ImportedProject {
+  name: string;
+  files: number;
+  /** Not copied: dependency folders (reinstalled from lock files) and links. */
+  skipped: string[];
 }
 
 /** One node of a caught dump's value, as dumps.rs renders VarDumper's Data. */
@@ -1016,6 +1044,9 @@ export const api = {
   /** True on the first run, until the LampRabit folder's place is confirmed. */
   firstRun: () => invoke<boolean>("first_run"),
   finishFirstRun: () => invoke<void>("finish_first_run"),
+  importSources: () => invoke<ImportSource[]>("import_sources"),
+  importFolder: (path: string) => invoke<ImportSource>("import_folder", { path }),
+  importProject: (source: string, name: string) => invoke<ImportedProject>("import_project", { source, name }),
   checkMoveTarget: (target: string) => invoke<MoveCheck>("check_move_target", { target }),
   environmentInUse: () => invoke<Holder[]>("environment_in_use"),
   stopEnvironmentHolder: (pid: number) => invoke<void>("stop_environment_holder", { pid }),

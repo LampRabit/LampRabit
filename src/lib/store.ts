@@ -77,8 +77,9 @@ interface AppStore {
   newProjectOpen: boolean;
   setNewProjectOpen: (open: boolean) => void;
   /** The setup guide (starter stacks), reopened from Settings; the first run opens it itself. */
-  setupGuideOpen: boolean;
-  setSetupGuideOpen: (open: boolean) => void;
+  /** The setup guide reopened from Settings: all of it, or only its import step. */
+  setupGuideOpen: false | "guide" | "import";
+  setSetupGuideOpen: (open: false | "guide" | "import") => void;
   /** The template editor: open on some YAML (a project's), and whether New project opened it. */
   templateEditor: { yaml?: string; fromWizard?: boolean } | null;
   openTemplateEditor: (editor: { yaml?: string; fromWizard?: boolean }) => void;

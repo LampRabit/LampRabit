@@ -584,6 +584,7 @@
     "checkUpdates": true,
     "closeToTray": true,
     "defaultDatabase": "mariadb",
+    "developerName": "Sam",
     "editor": "code",
     "httpsByDefault": true,
     "logKeep": 3,

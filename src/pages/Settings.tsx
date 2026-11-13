@@ -246,9 +246,17 @@ export default function Settings() {
                 </Button>
               </div>
             </Row>
-            <Row label="Setup guide" hint="Install a starter stack (PHP, Laravel, WordPress, Node.js, full stack or your own pick) in one go.">
-              <Button onClick={() => openSetupGuide(true)}>
+            <Row label="Your name" hint="Home greets you with it.">
+              <input className={inputClass} value={draft.developerName ?? ""} maxLength={40} placeholder="developer" onChange={(e) => set({ developerName: e.target.value })} aria-label="Your name" />
+            </Row>
+            <Row label="Setup guide" hint="Install the recommended services for what you build (PHP, Laravel, WordPress, JavaScript, Python, Java, Go…) in one go.">
+              <Button onClick={() => openSetupGuide("guide")}>
                 <Sparkles size={15} /> Open the setup guide
+              </Button>
+            </Row>
+            <Row label="Import projects" hint="Copy projects from Laragon, XAMPP, AMPPS, MAMP, Herd, Valet, FlyEnv, EnvKit, WampServer, ServBay, Local or any folder into www. The originals stay where they are.">
+              <Button onClick={() => openSetupGuide("import")}>
+                <FolderInput size={15} /> Import projects…
               </Button>
             </Row>
             <Row label="Site domain suffix" hint={`Folders in www are served as <name>.${draft.tld || "test"}`}>

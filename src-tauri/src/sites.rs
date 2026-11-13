@@ -166,6 +166,25 @@ pub fn language(dir: &Path) -> Language {
     language_of(project_info(dir).0, dir)
 }
 
+/// What a folder holds, as the site list names it ("Laravel", "Next.js", "Static"; None
+/// for an empty or unknown one), and the database its config names.
+pub fn describe(dir: &Path) -> (Option<&'static str>, Option<String>) {
+    let (framework, _, database) = project_info(dir);
+    (refine(framework, language_of(framework, dir), dir), database)
+}
+
+/// The framework for a project's language: PHP's comes from its files, the others' from
+/// their own manifests.
+fn refine(framework: Option<&'static str>, language: Language, path: &Path) -> Option<&'static str> {
+    match language {
+        Language::Node => crate::apps::framework(path),
+        Language::Java => Some(java_framework(path)),
+        Language::Python => Some(python_framework(path)),
+        Language::Go | Language::Rust => Some(deps_framework(path, language)),
+        _ => framework,
+    }
+}
+
 fn language_of(framework: Option<&str>, dir: &Path) -> Language {
     match framework {
         Some(f) if f != "Static" => Language::Php,
@@ -608,15 +627,7 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             let (mut framework, git_branch, database) = project_info(&path);
             let node_project = path.join("package.json").exists();
             let language = language_of(framework, &path);
-            if language == Language::Node {
-                framework = crate::apps::framework(&path);
-            } else if language == Language::Java {
-                framework = Some(java_framework(&path));
-            } else if language == Language::Python {
-                framework = Some(python_framework(&path));
-            } else if language == Language::Go || language == Language::Rust {
-                framework = Some(deps_framework(&path, language));
-            }
+            framework = refine(framework, language, &path);
             let app = own.and_then(|s| s.app.clone());
             // Python, Java, Go and Rust projects can ask for a version in a file of their own.
             let runtime = match language {

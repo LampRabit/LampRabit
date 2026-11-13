@@ -17,6 +17,7 @@ mod error;
 mod extensions;
 mod facts;
 mod git;
+mod imports;
 mod langver;
 mod layout;
 mod logs;
@@ -487,6 +488,44 @@ async fn finish_first_run(app: AppHandle, state: State<'_, AppState>, flag: Stat
     let settings = state.update_settings(|_| {}).await?;
     logs::system(&app, logs::Level::Info, format!("LampRabit's folder is {}", settings.root_dir.display()));
     Ok(())
+}
+
+/// Other local environments found on this computer (Laragon, XAMPP, Herd…), with their projects.
+#[tauri::command]
+async fn import_sources(state: State<'_, AppState>) -> Result<Vec<imports::Source>> {
+    let layout = state.snapshot().await.1;
+    tauri::async_runtime::spawn_blocking(move || imports::detect(&layout)).await.map_err(|e| Error::msg(e.to_string()))
+}
+
+/// The projects in a folder the user picked, for tools LampRabit doesn't look for.
+#[tauri::command]
+async fn import_folder(state: State<'_, AppState>, path: PathBuf) -> Result<imports::Source> {
+    let layout = state.snapshot().await.1;
+    tauri::async_runtime::spawn_blocking(move || imports::from_folder(&path, &layout)).await.map_err(|e| Error::msg(e.to_string()))?
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportProgress {
+    name: String,
+    files: u64,
+}
+
+/// Copies another tool's project into www/<name> (the original stays), then serves it.
+#[tauri::command]
+async fn import_project(app: AppHandle, state: State<'_, AppState>, source: PathBuf, name: String) -> Result<imports::Copied> {
+    use tauri::Emitter;
+    let layout = state.snapshot().await.1;
+    let name = name.trim().to_string();
+    let events = app.clone();
+    let (from, label) = (source.clone(), name.clone());
+    let copied = tauri::async_runtime::spawn_blocking(move || imports::copy_project(&from, &label, &layout, |files| drop(events.emit("import-progress", ImportProgress { name: label.clone(), files }))))
+        .await
+        .map_err(|e| Error::msg(e.to_string()))??;
+    logs::system(&app, logs::Level::Info, format!("Imported {} into www/{name} ({} files)", source.display(), copied.files));
+    let _op = state.ops.lock().await;
+    sync_sites(&app, &state).await?;
+    Ok(copied)
 }
 
 /// Whether a folder can hold the LampRabit folder, and what moving there involves.
@@ -3843,6 +3882,9 @@ pub fn run() {
             set_site_processes,
             first_run,
             finish_first_run,
+            import_sources,
+            import_folder,
+            import_project,
             template_from_project,
             save_template,
             list_dumps,
