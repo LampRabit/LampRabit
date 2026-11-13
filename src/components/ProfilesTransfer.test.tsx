@@ -12,7 +12,7 @@ import type { ServiceKind, Settings, StackProfile } from "../lib/api";
 
 const calls: { cmd: string; args: unknown[] }[] = [];
 let installed: ServiceKind[] = [];
-let file: { profiles: StackProfile[] };
+let file: { profiles: StackProfile[]; versions?: Record<string, string> };
 let settings: Settings;
 const record =
   (cmd: string, result: unknown = undefined) =>
@@ -21,7 +21,7 @@ const record =
     return Promise.resolve(typeof result === "function" ? (result as (...a: unknown[]) => unknown)(...args) : result);
   };
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: () => Promise.resolve("C:/profiles.json"), save: () => Promise.resolve(null) }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: () => Promise.resolve("C:/profiles.json"), save: () => Promise.resolve("C:/out.json") }));
 vi.mock("../lib/api", async (importOriginal) => {
   const original = await importOriginal<typeof import("../lib/api")>();
   // The app loads these from the backend's catalog before the first render.
@@ -38,6 +38,7 @@ vi.mock("../lib/api", async (importOriginal) => {
           : { runtime, label: original.serviceLabels[runtime as ServiceKind], blurb: "", action: { kind: "install", release: { runtime, version: "8.2.1" } }, size: 5_000_000 },
       ),
     ),
+    runtimeCatalog: record("runtimeCatalog", (runtime: string) => ["8.2.1", "7.4.1", "7.2.10", "7.2.4"].map((version) => ({ runtime, version }))),
   };
   return { ...original, api: new Proxy({}, { get: (_, name: string) => table[name] ?? record(name) }) };
 });
@@ -65,7 +66,7 @@ const saved = () => (calls.filter((c) => c.cmd === "saveSettings").slice(-1)[0]?
 beforeEach(() => {
   calls.length = 0;
   installed = ["apache", "mariadb"];
-  settings = { profiles: [{ name: "Old", services: ["apache"], processes: [] }], sites: {} } as unknown as Settings;
+  settings = { profiles: [{ name: "Old", services: ["apache"], processes: [] }], sites: {}, versions: { apache: "2.4.62", php: "8.3.14" } } as unknown as Settings;
 });
 afterEach(cleanup);
 
@@ -115,5 +116,46 @@ describe("importing profiles", () => {
     expect(screen.getByText(/so not imported: Mail/)).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Install 1 and import" }));
     await waitFor(() => expect(saved()?.map((p) => p.name)).toEqual(["Old", "Cache"]));
+  });
+});
+
+describe("profile versions", () => {
+  const installedRelease = () => calls.find((c) => c.cmd === "installRuntime")?.args[0];
+
+  it("exports the version each profile service runs", async () => {
+    show();
+    const button = await screen.findByRole("button", { name: /Export/ });
+    await waitFor(() => expect(button).toHaveProperty("disabled", false));
+    await userEvent.click(button);
+    await waitFor(() => expect(calls.some((c) => c.cmd === "saveText")).toBe(true));
+    const written = JSON.parse(calls.find((c) => c.cmd === "saveText")!.args[1] as string);
+    // Only the profiles' services: PHP isn't in one.
+    expect(written.versions).toEqual({ apache: "2.4.62" });
+  });
+
+  it("installs the version the other computer ran", async () => {
+    file = { profiles: [{ name: "Cache", services: ["apache", "redis"], processes: [] }], versions: { redis: "7.4.1" } };
+    show();
+    await clickImport();
+    expect(await screen.findByText("Downloads 7.4.1, the version the other computer ran")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Install 1 and import" }));
+    await waitFor(() => expect(installedRelease()).toEqual({ runtime: "redis", version: "7.4.1" }));
+  });
+
+  it("falls back to the newest of its line, then to the usual pick", async () => {
+    file = { profiles: [{ name: "Cache", services: ["redis", "mariadb"], processes: [] }], versions: { redis: "7.2.9" } };
+    installed = ["mariadb"];
+    show();
+    await clickImport();
+    expect(await screen.findByText(/Downloads 7.2.10, the newest of the line the other computer ran \(7.2.9\)/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Install 1 and import" }));
+    await waitFor(() => expect(installedRelease()).toEqual({ runtime: "redis", version: "7.2.10" }));
+
+    cleanup();
+    calls.length = 0;
+    file = { profiles: [{ name: "Cache", services: ["redis", "mariadb"], processes: [] }], versions: { redis: "6.0.0" } };
+    show();
+    await clickImport();
+    expect(await screen.findByText(/the other computer ran 6.0.0, which isn't offered here/)).toBeTruthy();
   });
 });

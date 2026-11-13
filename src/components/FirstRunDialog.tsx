@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, Circle, FolderInput, FolderOpen, Loader2, Play, RotateCw, Sparkles } from "lucide-react";
 import clsx from "clsx";
-import { api, serviceLabels, type NodeRelease, type ServiceKind, type StarterItem } from "../lib/api";
+import { api, serviceLabels, type NodeRelease, type Release, type ServiceKind, type StarterItem } from "../lib/api";
 import { installKey, useAppStore } from "../lib/store";
 import { formatBytes } from "../lib/usage";
 import Dialog from "./Dialog";
@@ -353,6 +353,7 @@ export function InstallStep({
   title = "Installing your stack",
   nextLabel = "Continue",
   labels: knownLabels,
+  releases: chosen,
 }: {
   runtimes: string[];
   onClose: () => void;
@@ -361,6 +362,8 @@ export function InstallStep({
   nextLabel?: string;
   /** Names to show before each component's plan says its own. */
   labels?: Record<string, string>;
+  /** Exact releases to install for some components (a profile import's versions). */
+  releases?: Record<string, Release>;
 }) {
   const queryClient = useQueryClient();
   // The list it opened with; the parent's array is new on every render.
@@ -390,6 +393,11 @@ export function InstallStep({
           await api.nodeInstall(version);
           await api.nodeUse(version);
         }
+      } else if (chosen?.[id]) {
+        const release = chosen[id];
+        setCurrent({ id, key: installKey(release.runtime, release.version) });
+        await api.installRuntime(release);
+        await api.setActiveVersion(release.runtime, release.version);
       } else {
         // Planned again right before installing: an earlier component may have changed things.
         const [item]: StarterItem[] = await api.starterPlan([id]);
