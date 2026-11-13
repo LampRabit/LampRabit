@@ -97,7 +97,7 @@ const answers: Record<string, unknown> = {
   runtime_info: fixtures.catalog,
   get_settings: settings,
   take_startup_warnings: [],
-  env_paths: { root: "C:\\lampRabit", www: "C:\\lampRabit\\www", logs: "C:\\lampRabit\\logs", settingsFile: "C:\\Users\\dev\\AppData\\Roaming\\lamprabit\\settings.toml", os: "windows" },
+  env_paths: { root: "C:\\lampRabit", www: "C:\\lampRabit\\www", logs: "C:\\lampRabit\\logs", settingsFile: "C:\\Users\\dev\\AppData\\Roaming\\lamprabit\\settings.toml", os: q.get("os") ?? "windows" },
   list_services: services,
   list_sites: { sites, tools: [], tld: "test", needsApply: false, hostsOk: true, manageHosts: true, caTrusted: true, caPath: "C:\\lampRabit\\ssl\\ca.pem", unserved: [], shadowedTools: [] },
   php_status: [{ version: "8.4.14", port: 9084, workers: 4, alive: 4 }],
@@ -277,4 +277,12 @@ if (gitView) await click((el) => el.getAttribute("role") === "tab" && !!el.textC
 const file = q.get("file");
 if (file) await click((el) => el.textContent?.includes(file) ?? false);
 if (q.get("filters")) await click((el) => el.textContent?.trim().startsWith("Filters") ?? false);
+// macOS draws its traffic lights over the title bar; stand-ins where trafficLightPosition puts them
+// (x 18, y 18; 12px buttons 20px apart) show whether they clear the logo.
+if (q.get("os") === "macos") {
+  const lights = document.createElement("div");
+  lights.style.cssText = "position:fixed;left:18px;top:18px;display:flex;gap:8px;z-index:9999;pointer-events:none";
+  for (const c of ["#ff5f57", "#febc2e", "#28c840"]) lights.insertAdjacentHTML("beforeend", `<span style="width:12px;height:12px;border-radius:50%;background:${c}"></span>`);
+  document.body.append(lights);
+}
 document.body.dataset.ready = "1";
