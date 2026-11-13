@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, Circle, FolderInput, FolderOpen, Loader2, Play, RotateCw, Sparkles } from "lucide-react";
 import clsx from "clsx";
-import { api, serviceLabels, type NodeRelease, type ServiceKind, type StarterItem } from "../lib/api";
+import { api, serviceLabels, type NodeRelease, type Release, type ServiceKind, type StarterItem } from "../lib/api";
 import { installKey, useAppStore } from "../lib/store";
 import { formatBytes } from "../lib/usage";
 import Dialog from "./Dialog";
@@ -342,8 +342,29 @@ function describe(id: string, item: StarterItem | undefined, node: { manager: st
   }
 }
 
-/** Installs the components one by one; a failed one can be retried. */
-function InstallStep({ runtimes: given, onClose, onNext }: { runtimes: string[]; onClose: () => void; onNext: () => void }) {
+/**
+ * Installs the components one by one; a failed one can be retried. Also used by a profile
+ * import, for the services the profiles need (a service's id is its runtime's).
+ */
+export function InstallStep({
+  runtimes: given,
+  onClose,
+  onNext,
+  title = "Installing your stack",
+  nextLabel = "Continue",
+  labels: knownLabels,
+  releases: chosen,
+}: {
+  runtimes: string[];
+  onClose: () => void;
+  onNext: () => void;
+  title?: string;
+  nextLabel?: string;
+  /** Names to show before each component's plan says its own. */
+  labels?: Record<string, string>;
+  /** Exact releases to install for some components (a profile import's versions). */
+  releases?: Record<string, Release>;
+}) {
   const queryClient = useQueryClient();
   // The list it opened with; the parent's array is new on every render.
   const [runtimes] = useState(given);
@@ -351,7 +372,7 @@ function InstallStep({ runtimes: given, onClose, onNext }: { runtimes: string[];
   const installs = useAppStore((s) => s.installs);
   const [states, setStates] = useState<Record<string, ItemState>>(() => Object.fromEntries(runtimes.map((r) => [r, { status: "waiting" }])));
   const [current, setCurrent] = useState<{ id: string; key?: string } | null>(null);
-  const [labels, setLabels] = useState<Record<string, string>>({ node: "Node.js" });
+  const [labels, setLabels] = useState<Record<string, string>>({ node: "Node.js", ...knownLabels });
 
   const installOne = async (id: string) => {
     setStates((s) => ({ ...s, [id]: { status: "working" } }));
@@ -372,6 +393,11 @@ function InstallStep({ runtimes: given, onClose, onNext }: { runtimes: string[];
           await api.nodeInstall(version);
           await api.nodeUse(version);
         }
+      } else if (chosen?.[id]) {
+        const release = chosen[id];
+        setCurrent({ id, key: installKey(release.runtime, release.version) });
+        await api.installRuntime(release);
+        await api.setActiveVersion(release.runtime, release.version);
       } else {
         // Planned again right before installing: an earlier component may have changed things.
         const [item]: StarterItem[] = await api.starterPlan([id]);
@@ -417,7 +443,7 @@ function InstallStep({ runtimes: given, onClose, onNext }: { runtimes: string[];
     <Dialog
       open
       onClose={onClose}
-      title={finished ? (failed ? "Some components didn't install" : "Installed") : "Installing your stack"}
+      title={finished ? (failed ? "Some components didn't install" : "Installed") : title}
       icon={finished ? <CheckCircle2 size={18} /> : <Loader2 size={18} className="animate-spin" />}
       width="max-w-xl"
       footer={
@@ -426,7 +452,7 @@ function InstallStep({ runtimes: given, onClose, onNext }: { runtimes: string[];
             {finished ? "Close" : "Hide"}
           </Button>
           <Button variant="primary" onClick={onNext} disabled={!finished} data-autofocus>
-            Continue
+            {nextLabel}
           </Button>
         </>
       }

@@ -37,6 +37,9 @@ const views = {
   "logs-filters": "page=logs&filters=1",
   "logs-dark": "page=logs&theme=dark",
   settings: "page=settings",
+  assistants: "page=settings&mcpOn=1",
+  "doctor-issues": "page=sites",
+  "doctor-healthy": "page=sites&healthy=1",
   "first-run": "page=overview&firstRun=1",
   "narrow-sites": "page=sites&tab=git&width=900",
 };

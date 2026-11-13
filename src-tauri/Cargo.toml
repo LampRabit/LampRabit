@@ -22,11 +22,13 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 toml = "0.8"
+# Codex keeps its MCP servers in config.toml: edited in place so its comments and layout stay.
+toml_edit = "0.25"
 thiserror = "2"
 dirs = "6"
-tokio = { version = "1", features = ["process", "io-util", "sync", "time", "macros", "rt-multi-thread", "fs"] }
+tokio = { version = "1", features = ["process", "io-util", "io-std", "sync", "time", "macros", "rt-multi-thread", "fs", "net"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 futures-util = "0.3"
 sha2 = "0.10"
@@ -51,7 +53,7 @@ ruzstd = "0.9.1"
 trash = "5"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_Storage_FileSystem"] }
 winreg = "0.55"
 
 [target.'cfg(unix)'.dependencies]

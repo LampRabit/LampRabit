@@ -45,6 +45,11 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
     for entry in std::fs::read_dir(&dir)?.flatten() {
         let _ = std::fs::remove_file(entry.path());
     }
+    // `lamprabit`: the app itself with --cli (cli.rs). A Windows batch file waits for it to
+    // finish, GUI program or not, so scripts see its output and exit code.
+    if let Ok(exe) = std::env::current_exe() {
+        shim(&dir, "lamprabit", &[Case { folder: None, target: exe, args: vec!["--cli".to_string()], env: Vec::new() }])?;
+    }
     // Sites with their own PHP version get it when the command runs inside their folder.
     let mut php_cases: Vec<Case> = settings
         .sites

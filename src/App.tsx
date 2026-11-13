@@ -151,14 +151,15 @@ export default function App() {
     <PageToolbarProvider>
       <div className="flex h-full flex-col">
         <Titlebar />
-        {/* The tab bar takes its own space at its edge (order puts it before or after the
-            pages), so it never covers them; the pages' element stays the same when it moves. */}
-        <div data-app-body className={clsx("flex min-h-0 flex-1", nav.direction === "row" ? "flex-row" : "flex-col")}>
+        {/* The tab bar floats over the pages at its edge; the scroller pads that edge by the
+            bar's size (--nav-*), so content scrolls under the bar and still ends in view. */}
+        <div data-app-body className="relative flex min-h-0 flex-1 flex-col">
           <div
             ref={scroller}
             data-page-scroller
             onScroll={(e) => (scrolls.current[page] = e.currentTarget.scrollTop)}
-            className={clsx("order-2 min-h-0 min-w-0 flex-1 overflow-x-hidden", page === "logs" ? "overflow-hidden" : "overflow-y-auto")}
+            className={clsx("min-h-0 min-w-0 flex-1 overflow-x-hidden", page === "logs" ? "overflow-hidden" : "overflow-y-auto")}
+            style={{ padding: "var(--nav-top, 0px) var(--nav-right, 0px) var(--nav-bottom, 0px) var(--nav-left, 0px)" }}
           >
             {visited.map((id) => (
               <main
@@ -175,7 +176,7 @@ export default function App() {
               </main>
             ))}
           </div>
-          <div className={clsx(nav.wrapper, nav.navFirst ? "order-1" : "order-3")}>
+          <div className={nav.wrapper}>
             <BottomNav />
           </div>
         </div>

@@ -1,14 +1,14 @@
 # LampRabit website content pack
 
-Everything needed to build the LampRabit marketing and documentation website. The copy in these files is final-draft quality and can be used as-is or edited for tone.
+Content notes and source copy for the LampRabit marketing and documentation website. Keep feature claims aligned with the current app and platform support.
 
 ## What LampRabit is
 
-LampRabit is a free, open-source desktop app that runs a complete local PHP development environment: Apache or Nginx, PHP (several versions side by side), MariaDB, and developer tools like phpMyAdmin, Adminer and Mailpit. Every folder you put in `www/` becomes a site at `https://<folder>.test`, with a trusted local certificate. It is a modern alternative to XAMPP and Laragon, built with Rust and Tauri.
+LampRabit is a free, open-source desktop environment for local web development. It manages web and app servers, languages, databases, project processes and developer tools, with platform availability shown in the app. Projects in `www/` can be served at `https://<folder>.test` with a local certificate. It is built with Rust, Tauri and React.
 
-**One-line pitch:** Your local PHP stack, without the setup.
+**One-line pitch:** Your local development stack, without the setup.
 
-**Short description (about 160 characters, for meta tags):** LampRabit runs Apache or Nginx, PHP and MariaDB on your machine. Drop a folder in www, get https://yourapp.test. Free and open source.
+**Short description (about 160 characters, for meta tags):** LampRabit manages local web servers, languages, databases and project tools. Put a project in www and serve it at a local .test domain. Free and open source.
 
 ## Files in this pack
 
@@ -25,11 +25,11 @@ LampRabit is a free, open-source desktop app that runs a complete local PHP deve
 LampRabit is under active development. Every feature in these files is marked:
 
 - **Available**: in the app today.
-- **Coming soon**: designed and scheduled; it will ship before or shortly after the first public release.
+- **Coming soon**: planned but not yet shipped; don't imply a release date unless one is confirmed.
 
-Show both on the website (for example a small "Coming soon" badge). Don't hide coming-soon features, but don't present them as available either. The app team will tell you when a feature moves to Available, so the badge can be removed.
+Show status and platform limits where relevant. Verify claims against `PLAN.md`, `src-tauri/src/catalog.rs` and the current release before publishing.
 
-Some features are limited by platform. Where that's the case, the feature text says so. The app runs on Windows, macOS and Linux, but **one-click runtime downloads currently cover Windows fully; macOS and Linux downloads are partial** (see the platform table in [installation.md](installation.md)).
+Some features are limited by platform. Runtime availability varies by OS, architecture and service; use [installation.md](installation.md) and the in-app catalog rather than a blanket platform claim.
 
 ## Suggested site map
 

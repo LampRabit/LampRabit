@@ -17,10 +17,10 @@ const items: { id: PageId; label: string; icon: typeof House }[] = [
 
 /**
  * The page tab bar. It docks to one of twelve places, an edge of the window's content (top,
- * right, bottom, left) and a position along it (start, center, end), and takes its own
- * space there, so it never covers the page. Drag it (by the grip, or anywhere on it): it
- * floats under the pointer in the shape it will have, the slot under the pointer lights up,
- * and on release it glides into place while the page slides over to make room. On the grip,
+ * right, bottom, left) and a position along it (start, center, end), and floats over the
+ * page there; the page pads that edge by the bar's size so nothing ends up hidden under it.
+ * Drag it (by the grip, or anywhere on it): it floats under the pointer in the shape it will
+ * have, the slot under the pointer lights up, and on release it glides into place. On the grip,
  * the arrow keys dock to that edge, Shift+arrows move it along the edge, and Escape puts it
  * back at the bottom center. App.tsx lays it out with `navLayout`; Settings → Appearance sets
  * it too. Its size is published as --nav-top/right/bottom/left, so floating bars (Apply
@@ -29,14 +29,17 @@ const items: { id: PageId; label: string; icon: typeof House }[] = [
 
 const vertical = (edge: NavEdge) => edge === "left" || edge === "right";
 
-/** How App lays the body out: the flex direction, whether the bar comes first, and where it sits along its edge. */
+/**
+ * Where App puts the bar: a click-through strip along its edge, over the page, with the bar
+ * placed along it. The page doesn't give up that strip; it pads its content by --nav-<edge>
+ * instead, so content scrolls under the floating bar and the last of it still comes into view.
+ */
 export function navLayout({ edge, align }: NavPlacement) {
   const along = { start: "justify-start", center: "justify-center", end: "justify-end" }[align];
+  const strip = { top: "inset-x-0 top-0", bottom: "inset-x-0 bottom-0", left: "inset-y-0 left-0", right: "inset-y-0 right-0" }[edge];
   return {
-    direction: vertical(edge) ? "row" : "column",
-    navFirst: edge === "top" || edge === "left",
-    // A row (top/bottom) aligns the bar left to right; a column (left/right) top to bottom.
-    wrapper: clsx("flex shrink-0", vertical(edge) ? "flex-col" : "flex-row", along),
+    // z-[15]: above the page and its sticky headers, below menus (z-20), floating bars and dialogs.
+    wrapper: clsx("pointer-events-none absolute z-[15] flex", strip, vertical(edge) ? "flex-col" : "flex-row", along),
   } as const;
 }
 
@@ -103,12 +106,11 @@ export default function BottomNav() {
   const shown = ghost?.slot ?? placement;
   const isVertical = vertical(shown.edge);
 
-  // Where the bar and the page were after the last render: when the placement changes (a
-  // drop, the keys, Settings), both glide from there to their new places. A drop starts the
-  // bar's glide from where it was let go.
-  const last = useRef<{ placement: NavPlacement; bar: DOMRect | null; page: DOMRect | null } | null>(null);
+  // Where the bar was after the last render: when the placement changes (a drop, the keys,
+  // Settings), it glides from there to its new place. A drop starts the glide from where it
+  // was let go.
+  const last = useRef<{ placement: NavPlacement; bar: DOMRect | null } | null>(null);
   const dropFrom = useRef<DOMRect | null>(null);
-  const pageEl = () => document.querySelector("[data-page-scroller]");
   const dockTo = (next: NavPlacement, from?: DOMRect) => {
     dropFrom.current = from ?? null;
     if (same(next, placement) && from) {
@@ -125,13 +127,13 @@ export default function BottomNav() {
     const was = last.current;
     if (was && !same(was.placement, placement)) {
       glide(bar.current, dropFrom.current ?? was.bar);
-      if (was.placement.edge !== placement.edge) glide(pageEl(), was.page);
       dropFrom.current = null;
     }
-    last.current = { placement, bar: bar.current?.getBoundingClientRect() ?? null, page: pageEl()?.getBoundingClientRect() ?? null };
+    last.current = { placement, bar: bar.current?.getBoundingClientRect() ?? null };
   });
 
-  // The room the bar takes at its edge, for anything fixed to the window's corners.
+  // The room the bar takes at its edge: the page pads by it, and so does anything fixed to
+  // the window's corners.
   useLayoutEffect(() => {
     const el = nav.current;
     if (!el) return;
@@ -248,7 +250,7 @@ export default function BottomNav() {
     <nav
       ref={nav}
       aria-label="Pages"
-      className={clsx("flex shrink-0", vertical(placement.edge) ? "flex-col px-2 py-4" : "flex-row px-4", placement.edge === "top" ? "pt-3 pb-1.5" : placement.edge === "bottom" && "pt-1.5 pb-3")}
+      className={clsx("pointer-events-none flex shrink-0", vertical(placement.edge) ? "flex-col px-2 py-4" : "flex-row px-4", placement.edge === "top" ? "pt-3 pb-1.5" : placement.edge === "bottom" && "pt-1.5 pb-3")}
     >
       {/* While dragging, the bar floats; a placeholder keeps the page where it is until the drop. */}
       {ghost && drag.current && <div style={{ width: drag.current.w, height: drag.current.h }} aria-hidden />}
@@ -256,7 +258,7 @@ export default function BottomNav() {
         ref={bar}
         data-nav-bar
         className={clsx(
-          "relative flex touch-none items-center gap-1 rounded-2xl border border-line bg-nav p-1.5 shadow-float backdrop-blur-md select-none",
+          "pointer-events-auto relative flex touch-none items-center gap-1 rounded-2xl border border-line bg-nav p-1.5 shadow-float backdrop-blur-md select-none",
           isVertical ? "flex-col" : "flex-row",
           ghost ? "cursor-grabbing ring-2 ring-accent/40" : "cursor-grab",
         )}

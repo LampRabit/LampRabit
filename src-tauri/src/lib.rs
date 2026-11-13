@@ -4,9 +4,14 @@ mod catalog;
 mod comfort;
 mod commands;
 mod config;
+mod control;
+mod cli;
+mod mcp;
+mod mcp_clients;
 mod configs;
 mod cron;
 mod diagnose;
+mod doctor;
 mod dumps;
 mod error;
 mod extensions;
@@ -2114,6 +2119,344 @@ fn git_cancel(op: String) -> bool {
     git::cancel(&op)
 }
 
+/// The project doctor's issues for a project, most serious first (doctor.rs).
+#[tauri::command]
+async fn project_doctor(state: State<'_, AppState>, name: String) -> Result<Vec<doctor::Issue>> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let site = sites::scan(&settings, &layout).into_iter().find(|s| s.name == name).ok_or_else(|| Error::msg(format!("There's no project called {name} in www.")))?;
+    let own = settings.sites.get(&name);
+    let pm = own.and_then(|s| s.app.as_ref()).and_then(|a| a.package_manager).unwrap_or_else(|| apps::detect_package_manager(&dir));
+    let facts = facts::read(&dir, site.framework, pm.id()).await;
+    let database = if site.database.is_some() { database_status(state.clone(), name.clone()).await.ok().flatten() } else { None };
+    let kind = ServiceKind::WEB.into_iter().find(|k| k.web_server() == Some(site.server)).unwrap_or(ServiceKind::Apache);
+    let server_installed = settings.versions.get(kind.id()).is_some();
+    let server_running = state.supervisor.is_running(kind).await;
+    let info = list_sites(state.clone()).await?;
+    let git_identity = if dir.join(".git").exists() {
+        git::configure(&settings, &layout);
+        git::status(&dir).await.ok().map(|s| s.identity.name.is_some() && s.identity.email.is_some())
+    } else {
+        None
+    };
+    let language = serde_json::to_value(site.language).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+    // The runtime besides PHP: Node from its settings or version file, the others from theirs.
+    let node = (site.language == sites::Language::Node).then(|| {
+        let chosen = own.and_then(|s| s.app.as_ref()).and_then(|a| a.node.clone());
+        let file = [".nvmrc", ".node-version"].into_iter().find(|f| dir.join(f).is_file()).map_or("its .nvmrc", |f| if f == ".nvmrc" { "its .nvmrc" } else { "its .node-version" });
+        let wanted = chosen.clone().map(|v| (v, "its settings")).or_else(|| node::project_version(&dir).map(|v| (v, file)));
+        doctor::NodeInput {
+            installed: node::installed_versions(),
+            nvm: node::nvm_installed(),
+            wanted,
+            version: node::for_project(chosen.as_deref(), &dir).ok().map(|(v, _)| v),
+            engines: facts.node_requirement.clone(),
+        }
+    });
+    let runtime = match site.language {
+        sites::Language::Python => Some(("Python", Runtime::Python)),
+        sites::Language::Java => Some(("Java", Runtime::Java)),
+        sites::Language::Go => Some(("Go", Runtime::Go)),
+        // rustup installs the toolchain a project names by itself.
+        _ => None,
+    }
+    .map(|(label, rt)| {
+        let installed = runtimes::installed(&layout, rt);
+        doctor::RuntimeInput {
+            label,
+            installed: !installed.is_empty(),
+            matched: site.version_request.as_ref().is_some_and(|r| langver::matching(&installed, &r.version).is_some()),
+            request: site.version_request.as_ref().map(|r| (r.version.clone(), r.file)),
+            version: site.language_version.clone(),
+        }
+    });
+    let app = if site.serve_mode == config::ServeMode::Dynamic && !matches!(site.language, sites::Language::Php | sites::Language::Static) {
+        let status = state.apps.status(&name).await;
+        Some(doctor::AppInput { state: status.state, exit_code: status.exit_code, routed: site.route.is_some() })
+    } else {
+        None
+    };
+    let input = doctor::Input {
+        name: &name,
+        dir: &dir,
+        layout: &layout,
+        language: &language,
+        framework: site.framework,
+        url: &site.url,
+        ssl: site.ssl,
+        php: site.php.as_deref().or(settings.versions.php.as_deref()),
+        php_installed: runtimes::installed(&layout, Runtime::Php),
+        php_requirement: facts.php_requirement.as_deref(),
+        dependencies: facts.dependencies.iter().map(|d| (d.manager.clone(), d.installed, d.outdated)).collect(),
+        package_manager: pm.id(),
+        database,
+        server: (kind.id(), kind.label(), server_installed, server_running),
+        hosts_ok: info.hosts_ok,
+        needs_apply: info.needs_apply,
+        ca_trusted: info.ca_trusted,
+        git_identity,
+        node,
+        runtime,
+        app,
+    };
+    Ok(doctor::check(&input).await)
+}
+
+/// Applies one doctor fix, by the issue's id. The issues are worked out again first, so a
+/// fix only runs while its problem is still there; each goes through the app's own command
+/// for it, with that command's checks.
+#[tauri::command]
+async fn doctor_fix(app: AppHandle, state: State<'_, AppState>, name: String, id: String) -> Result<String> {
+    use doctor::FixAction as A;
+    let issues = project_doctor(state.clone(), name.clone()).await?;
+    let issue = issues.into_iter().find(|i| i.id == id).ok_or_else(|| Error::msg("That problem is already gone (or changed): look at the list again."))?;
+    let fix = issue.fix.ok_or_else(|| Error::msg("LampRabit can't fix this one by itself; the description says what to do."))?;
+    logs::system(&app, logs::Level::Info, format!("Doctor, {name}: {}", fix.label));
+    match fix.action {
+        A::SetPhp { version } => set_site_php(app, state, name, Some(version)).await?,
+        A::EnableExtension { php, name: ext } => {
+            let (_, layout) = state.snapshot().await;
+            let bundled = layout.bin("php", &php).join("ext").join(format!("php_{ext}.dll")).exists();
+            if bundled {
+                set_php_extension(app, state, php, ext, true).await?
+            } else {
+                install_php_extension(app, state, php, ext).await?
+            }
+        }
+        A::RunCommand { label, command } => run_project_command(app, state, name, label, command).await?,
+        A::CopyFile { from, to } => {
+            let (_, layout) = state.snapshot().await;
+            let dir = project_dir(&layout, &name)?;
+            let target = dir.join(&to);
+            if target.exists() {
+                return Err(Error::msg(format!("{to} exists already; nothing was overwritten.")));
+            }
+            std::fs::copy(dir.join(&from), target)?;
+        }
+        A::StartService { service } => {
+            let kind: ServiceKind = serde_json::from_value(serde_json::Value::String(service.clone())).map_err(|_| Error::msg(format!("Unknown service {service}")))?;
+            start_service(app, state, kind).await?
+        }
+        A::CreateDatabase => create_project_database(app, state, name).await?,
+        A::SwitchDatabase { engine } => switch_project_database(state, name, engine).await?,
+        A::SetEnv { key, value } => set_project_env(state, name, key, value).await?,
+        A::ApplySites => apply_sites(app, state).await?,
+        A::TrustCa => {
+            if let Some(note) = trust_ca(app, state).await? {
+                return Ok(note);
+            }
+        }
+        A::InstallNode { version } => node_install(app, version).await?,
+        A::SetNode { version } => {
+            // The project's saved run settings (or what it would start with) on that version.
+            let (settings, layout) = state.snapshot().await;
+            let dir = project_dir(&layout, &name)?;
+            let mut config = settings.sites.get(&name).and_then(|s| s.app.clone()).unwrap_or_else(|| apps::suggest(&dir, 0));
+            config.node = Some(version);
+            app_save(app, state, name, config).await?
+        }
+        A::StartApp => {
+            app_start(app, state, name).await?;
+        }
+    }
+    Ok(fix.label)
+}
+
+/// The control channel's requests (control.rs), for the `lamprabit` command line and its
+/// MCP server. Each goes through the app's own command for it, so it runs the same checks
+/// and logs the same lines as the buttons do.
+fn control_dispatch(app: AppHandle, cmd: String, args: serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value>> + Send>> {
+    Box::pin(async move { control_command(app, &cmd, args).await })
+}
+
+async fn control_command(app: AppHandle, cmd: &str, args: serde_json::Value) -> Result<serde_json::Value> {
+    use serde_json::{json, to_value, Value};
+    let state = app.state::<AppState>();
+    let text = |key: &str| -> Result<String> { args[key].as_str().map(str::to_string).ok_or_else(|| Error::msg(format!("Missing \"{key}\"."))) };
+    let kind = |key: &str| -> Result<ServiceKind> {
+        let id = text(key)?;
+        serde_json::from_value(Value::String(id.clone())).map_err(|_| Error::msg(format!("There's no service called {id}. `lamprabit services` lists them.")))
+    };
+    let runtime = |key: &str| -> Result<Runtime> {
+        let id = text(key)?;
+        Runtime::from_id(&id).ok_or_else(|| Error::msg(format!("There's no runtime called {id}. `lamprabit runtimes` lists them.")))
+    };
+    let ok = |v: Result<serde_json::Value>| v;
+    let done = || Ok(json!(null));
+    match cmd {
+        "version" => Ok(json!(app.package_info().version.to_string())),
+        "status" => {
+            let services = list_services(state.clone()).await?;
+            let sites = list_sites(state.clone()).await?;
+            Ok(json!({
+                "version": app.package_info().version.to_string(),
+                "root": state.snapshot().await.1.root(),
+                "services": services.iter().filter(|s| s.installed).map(|s| json!({"id": s.kind, "label": s.label, "state": s.state, "port": s.port, "version": s.version, "pid": s.pid})).collect::<Vec<_>>(),
+                "projects": sites.sites.len(),
+                "hostsOk": sites.hosts_ok,
+                "caTrusted": sites.ca_trusted,
+            }))
+        }
+        "services" => Ok(to_value(list_services(state.clone()).await?)?),
+        "service.start" => start_service(app.clone(), state.clone(), kind("name")?).await.and_then(|_| done()),
+        "service.stop" => stop_service(app.clone(), state.clone(), kind("name")?).await.and_then(|_| done()),
+        "service.restart" => restart_service(app.clone(), state.clone(), kind("name")?).await.and_then(|_| done()),
+        "start_all" => Ok(to_value(start_all(app.clone(), state.clone()).await?)?),
+        "stop_all" => stop_all(app.clone(), state.clone()).await.and_then(|_| done()),
+        "profiles" => Ok(to_value(state.snapshot().await.0.profiles)?),
+        "profile.start" => {
+            let name = text("name")?;
+            let profile = state.snapshot().await.0.profiles.into_iter().find(|p| p.name.eq_ignore_ascii_case(&name)).ok_or_else(|| Error::msg(format!("There's no profile called {name}.")))?;
+            Ok(to_value(apply_services(app.clone(), state.clone(), profile.services, Vec::new()).await?)?)
+        }
+        "projects" => {
+            let sites = list_sites(state.clone()).await?;
+            let statuses = state.apps.statuses().await;
+            Ok(json!(sites
+                .sites
+                .iter()
+                .map(|s| json!({
+                    "name": s.name, "domain": s.domain, "url": s.url, "path": s.path, "language": s.language, "framework": s.framework,
+                    "php": s.php, "server": s.server, "gitBranch": s.git_branch, "database": s.database,
+                    "running": statuses.iter().any(|a| a.name == s.name && (a.state == "running" || a.state == "starting")),
+                }))
+                .collect::<Vec<_>>()))
+        }
+        "project.start" => Ok(to_value(app_start(app.clone(), state.clone(), text("name")?).await?)?),
+        "project.stop" => app_stop(app.clone(), state.clone(), text("name")?).await.and_then(|_| done()),
+        "project.open" => {
+            use tauri_plugin_opener::OpenerExt;
+            let name = text("name")?;
+            let site = list_sites(state.clone()).await?.sites.into_iter().find(|s| s.name.eq_ignore_ascii_case(&name)).ok_or_else(|| Error::msg(format!("There's no project called {name}.")))?;
+            app.opener().open_url(site.url.clone(), None::<&str>).map_err(|e| Error::msg(e.to_string()))?;
+            Ok(json!(site.url))
+        }
+        "project.create" => {
+            // A user template's risky steps need the wizard's explicit approval, never this.
+            let mut request: projects::NewProject = serde_json::from_value(args.clone()).map_err(|e| Error::msg(format!("Not a project request: {e}")))?;
+            request.approve_risky = false;
+            Ok(to_value(create_project(app.clone(), state.clone(), request).await?)?)
+        }
+        "templates" => Ok(to_value(list_templates(state.clone()).await?)?),
+        "runtimes" => Ok(to_value(installed_runtimes(state.clone()).await?)?),
+        "runtime.available" => Ok(to_value(runtime_catalog(state.clone(), runtime("name")?, None).await?)?),
+        "runtime.install" => {
+            let rt = runtime("name")?;
+            let wanted = args["version"].as_str().map(str::to_string);
+            let catalog = runtime_catalog(state.clone(), rt, None).await?;
+            // The version asked for (exact, or the newest of a line like "8.4"), else LTS, else the newest.
+            let release = match &wanted {
+                Some(v) => catalog.iter().find(|r| &r.version == v).or_else(|| catalog.iter().find(|r| r.version.starts_with(&format!("{v}.")))),
+                None => catalog.iter().find(|r| r.label.as_deref() == Some("LTS")).or(catalog.first()),
+            }
+            .cloned()
+            .ok_or_else(|| Error::msg(format!("No {} {} download for this system. `lamprabit runtimes --available {}` lists them.", rt.id(), wanted.unwrap_or_default(), rt.id())))?;
+            let version = release.version.clone();
+            install_runtime(app.clone(), state.clone(), release).await?;
+            set_active_version(app.clone(), state.clone(), rt, version.clone()).await?;
+            Ok(json!(version))
+        }
+        "runtime.use" => set_active_version(app.clone(), state.clone(), runtime("name")?, text("version")?).await.and_then(|_| done()),
+        "runtime.remove" => remove_runtime(app.clone(), state.clone(), runtime("name")?, text("version")?).await.and_then(|_| done()),
+        "logs" => {
+            let history = log_history(app.clone(), state.clone()).await?;
+            let source = args["source"].as_str().map(str::to_ascii_lowercase);
+            let lines = args["lines"].as_u64().unwrap_or(100) as usize;
+            let picked: Vec<&logs::LogLine> = history
+                .lines
+                .iter()
+                .filter(|l| match &source {
+                    None => true,
+                    Some(s) if s.starts_with("project:") => l.service == "project" && l.project.as_deref().is_some_and(|p| p.eq_ignore_ascii_case(&s[8..])),
+                    Some(s) => l.service == s,
+                })
+                .collect();
+            Ok(to_value(&picked[picked.len().saturating_sub(lines)..])?)
+        }
+        "doctor" => Ok(to_value(project_doctor(state.clone(), text("name")?).await?)?),
+        "doctor.fix" => ok(doctor_fix(app.clone(), state.clone(), text("name")?, text("id")?).await.map(|label| json!(label))),
+        "config" => Ok(to_value(get_settings(state.clone()).await?)?),
+        "git.status" => Ok(to_value(git_status(state.clone(), text("name")?).await?)?),
+        other => Err(Error::msg(format!("Unknown request {other} (this LampRabit may be older than the command line).")))
+    }
+}
+
+/// The token clients send to LampRabit's MCP server over HTTP, made once and kept in the
+/// app's config folder (readable by the user only).
+fn mcp_token(app: &AppHandle) -> Result<String> {
+    let path = app.path().app_config_dir().map_err(|e| Error::msg(e.to_string()))?.join("mcp-token");
+    if let Ok(t) = std::fs::read_to_string(&path) {
+        if t.trim().len() >= 32 {
+            return Ok(t.trim().to_string());
+        }
+    }
+    use std::hash::{BuildHasher, Hasher};
+    let token: String = (0..2)
+        .map(|i| {
+            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+            h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() + i);
+            format!("{:016x}", h.finish())
+        })
+        .collect();
+    std::fs::create_dir_all(path.parent().unwrap())?;
+    std::fs::write(&path, &token)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(token)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpStatus {
+    /// The HTTP server runs (Settings → AI assistants).
+    running: bool,
+    url: String,
+    token: String,
+    /// What LampRabit adds to an assistant's config: its own program with these arguments.
+    command: String,
+    args: Vec<&'static str>,
+    clients: Vec<mcp_clients::ClientStatus>,
+}
+
+#[tauri::command]
+async fn mcp_status(app: AppHandle, state: State<'_, AppState>) -> Result<McpStatus> {
+    let (settings, _) = state.snapshot().await;
+    Ok(McpStatus {
+        running: mcp::http_running(),
+        url: format!("http://127.0.0.1:{}/mcp", settings.ports.mcp),
+        token: mcp_token(&app)?,
+        command: mcp_clients::program(),
+        args: vec!["--cli", "mcp"],
+        clients: mcp_clients::status(),
+    })
+}
+
+/// Switches LampRabit's own MCP server (HTTP, on ports.mcp) on or off, and remembers it.
+#[tauri::command]
+async fn set_mcp_server(app: AppHandle, state: State<'_, AppState>, enabled: bool) -> Result<()> {
+    if enabled {
+        let port = state.snapshot().await.0.ports.mcp;
+        mcp::start_http(port, mcp_token(&app)?).await?;
+        logs::system(&app, logs::Level::Info, format!("MCP server on http://127.0.0.1:{port}/mcp"));
+    } else {
+        mcp::stop_http();
+        logs::system(&app, logs::Level::Info, "MCP server stopped");
+    }
+    state.update_settings(|s| s.mcp_server = enabled).await?;
+    Ok(())
+}
+
+/// Adds LampRabit to (or removes it from) an AI assistant's MCP config.
+#[tauri::command]
+fn mcp_connect(app: AppHandle, client: String, on: bool) -> Result<String> {
+    let note = mcp_clients::set(&client, on)?;
+    logs::system(&app, logs::Level::Info, note.clone());
+    Ok(note)
+}
+
 /// Points a project at the other MySQL-family server (its .env's DB_PORT).
 #[tauri::command]
 async fn switch_project_database(state: State<'_, AppState>, name: String, engine: manage::Engine) -> Result<()> {
@@ -3159,6 +3502,9 @@ fn spawn_process_restarts(app: &AppHandle) {
 fn run_smoke_test(mut context: tauri::Context<tauri::Wry>, options: smoke::Options) {
     context.config_mut().app.windows.clear();
     let settings = smoke::settings(&options);
+    // Its own control file, so the command line it tests never meets a real install's app.
+    // SAFETY: nothing else runs yet, so no other thread reads the environment.
+    unsafe { std::env::set_var("LAMPRABIT_CONTROL_FILE", settings.root_dir.join("control.json")) };
     if let Err(e) = Layout::new(&settings.root_dir).ensure() {
         eprintln!("smoke test: can't use {}: {e}", settings.root_dir.display());
         std::process::exit(2);
@@ -3176,6 +3522,9 @@ fn run_smoke_test(mut context: tauri::Context<tauri::Wry>, options: smoke::Optio
             spawn_process_schedules(app.handle());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                if let Err(e) = control::serve(handle.clone(), control_dispatch).await {
+                    eprintln!("smoke test: the control channel didn't start: {e}");
+                }
                 let code = smoke::run(handle, options).await;
                 // The services are stopped by now. AppHandle::exit loses the code on Linux
                 // (GTK's loop ends with 0), and CI needs it.
@@ -3186,6 +3535,33 @@ fn run_smoke_test(mut context: tauri::Context<tauri::Wry>, options: smoke::Optio
         .build(context)
         .expect("error while building LampRabit");
     app.run(|_, _| {});
+}
+
+/// The release build on Windows is a GUI program with no console of its own: for the
+/// command line, write to the terminal that started it (when output isn't redirected to a
+/// pipe or file, which it already reaches, as MCP clients do).
+fn attach_console() {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::{
+            Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
+            Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING},
+            System::Console::{AttachConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE},
+        };
+        let missing = |h: windows_sys::Win32::Foundation::HANDLE| h.is_null() || h == INVALID_HANDLE_VALUE;
+        if !missing(GetStdHandle(STD_OUTPUT_HANDLE)) {
+            return;
+        }
+        if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
+            return;
+        }
+        let name: Vec<u16> = "CONOUT$\0".encode_utf16().collect();
+        let out = CreateFileW(name.as_ptr(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, std::ptr::null(), OPEN_EXISTING, 0, std::ptr::null_mut());
+        if !missing(out) {
+            SetStdHandle(STD_OUTPUT_HANDLE, out);
+            SetStdHandle(STD_ERROR_HANDLE, out);
+        }
+    }
 }
 
 /// `--pg-elevated <pg_ctl> <data> <port> <log>`: starts PostgreSQL through pg_ctl (which
@@ -3249,6 +3625,12 @@ pub fn run() {
     if std::env::args().any(|a| a == "--uninstall-cleanup") {
         uninstall::cli();
         return;
+    }
+    // The command line (cli.rs): `lamprabit` shims call the app with --cli. It talks to the
+    // running app, so it comes before the single-instance plugin too.
+    if std::env::args().nth(1).as_deref() == Some("--cli") {
+        attach_console();
+        std::process::exit(cli::main(std::env::args().skip(2).collect()));
     }
     // PostgreSQL under an elevated LampRabit (services.rs): no window, no single instance.
     if std::env::args().nth(1).as_deref() == Some("--pg-elevated") {
@@ -3330,6 +3712,19 @@ pub fn run() {
                 let root = app.state::<AppState>().settings.try_read().map(|s| s.root_dir.clone()).unwrap_or_default();
                 logs::set_system_file(app.handle(), Layout::new(root).logs().join("lampRabit.log"));
             }
+            {
+                // Assistants' LampRabit entries follow this build: the copy they run (Windows)
+                // is refreshed, and entries pointing at another program are pointed here.
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(e) = mcp_clients::refresh_launcher() {
+                        logs::system(&handle, logs::Level::Warn, format!("Couldn't update the copy of LampRabit that AI assistants run: {e}"));
+                    }
+                    for name in mcp_clients::repoint() {
+                        logs::system(&handle, logs::Level::Info, format!("{name}'s LampRabit entry now runs this LampRabit; restart {name} to use it."));
+                    }
+                });
+            }
             logs::system(app.handle(), logs::Level::Info, format!("LampRabit {} started on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS));
             for w in &warnings {
                 logs::system(app.handle(), logs::Level::Warn, w.clone());
@@ -3393,6 +3788,24 @@ pub fn run() {
             });
 
             setup_tray(app)?;
+            // The control channel for the `lamprabit` command line and its MCP server, and the
+            // MCP server over HTTP when it's switched on.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = control::serve(handle.clone(), control_dispatch).await {
+                    logs::system(&handle, logs::Level::Warn, format!("The command line's control channel couldn't start: {e}"));
+                }
+                let settings = handle.state::<AppState>().snapshot().await.0;
+                if settings.mcp_server {
+                    let started = match mcp_token(&handle) {
+                        Ok(token) => mcp::start_http(settings.ports.mcp, token).await,
+                        Err(e) => Err(e),
+                    };
+                    if let Err(e) = started {
+                        logs::system(&handle, logs::Level::Warn, format!("The MCP server didn't start: {e}"));
+                    }
+                }
+            });
             // A window bigger than the screen (1280×860 on a 1024×768 display) would open
             // partly off it, hiding its controls: fit it to the screen's work area first.
             if let Some(w) = app.get_webview_window("main") {
@@ -3440,6 +3853,11 @@ pub fn run() {
             database_status,
             create_project_database,
             switch_project_database,
+            mcp_status,
+            set_mcp_server,
+            mcp_connect,
+            project_doctor,
+            doctor_fix,
             git_version,
             git_status,
             git_diff,

@@ -118,6 +118,33 @@ const answers: Record<string, unknown> = {
     template: "laravel@1",
   },
   database_status: { engine: "mariadb", label: "MariaDB", database: "dummy_project", installed: false, running: false, exists: null, port: 3306, reason: "The project connects to port 3306, which is MariaDB's in LampRabit (MySQL uses 3307).", alternative: { engine: "mysql", label: "MySQL", port: 3307 } },
+  project_doctor: q.get("healthy")
+    ? []
+    : [
+        { id: "php-version", severity: "error", title: "PHP 8.1.31 doesn't match the project", detail: "composer.json asks for PHP ^8.3.", fix: { label: "Use PHP 8.4.14", preview: "Sets dummy-project's PHP to 8.4.14 (other projects keep theirs) and restarts the web server.", action: { kind: "setPhp", version: "8.4.14" } } },
+        { id: "db-missing", severity: "error", title: "MariaDB isn't installed", detail: "The project connects to port 3306, which is MariaDB's in LampRabit (MySQL uses 3307).", fix: { label: "Use MySQL", preview: "Points the project at MySQL (port 3307) in its config.", action: { kind: "switchDatabase", engine: "mysql" } } },
+        { id: "deps-outdated-composer", severity: "warning", title: "Composer dependencies are out of date", detail: "The lock file changed since vendor/ was installed (a pull or a branch switch), so the code may expect packages that aren't there.", fix: { label: "Run composer install", preview: "Runs composer install in the project (its output shows under Commands).", action: { kind: "runCommand" } } },
+        { id: "git-identity", severity: "info", title: "Git doesn't know who you are", detail: "Commits will fail until Git has a name and email: set them in the Git tab.", fix: null },
+      ],
+  mcp_status: {
+    running: q.get("mcpOn") === "1",
+    url: "http://127.0.0.1:39813/mcp",
+    token: "3f9c2a7be41d08c6a5e19f7d0b2c4e8a",
+    command: String.raw`C:\Program Files\LampRabit\LampRabit.exe`,
+    args: ["--cli", "mcp"],
+    clients: [
+      { id: "claude-desktop", name: "Claude Desktop", installed: true, connected: true, path: String.raw`C:\Users\dev\AppData\Roaming\Claude\claude_desktop_config.json`, stale: false, note: null, unsupported: null },
+      { id: "claude-code", name: "Claude Code", installed: true, connected: false, path: String.raw`C:\Users\dev\.claude.json`, stale: false, note: null, unsupported: null },
+      { id: "codex", name: "Codex", installed: true, connected: false, path: String.raw`C:\Users\dev\.codex\config.toml`, stale: false, note: "The Codex app, CLI and IDE extension", unsupported: null },
+      { id: "cursor", name: "Cursor", installed: true, connected: false, path: null, stale: false, note: null, unsupported: null },
+      { id: "vscode", name: "VS Code", installed: true, connected: false, path: null, stale: false, note: "Copilot's agent mode", unsupported: null },
+      { id: "lm-studio", name: "LM Studio", installed: true, connected: false, path: null, stale: false, note: "Local models, Ollama's included", unsupported: null },
+      { id: "windsurf", name: "Windsurf", installed: false, connected: false, path: null, stale: false, note: null, unsupported: null },
+      { id: "kiro", name: "Kiro", installed: false, connected: false, path: null, stale: false, note: null, unsupported: null },
+      { id: "chatgpt", name: "ChatGPT", installed: false, connected: false, stale: false, path: null, note: null, unsupported: "ChatGPT's connectors reach only MCP servers on the internet, and LampRabit's stays on this computer. Codex, OpenAI's coding app, runs local ones: connect Codex." },
+      { id: "ollama", name: "Ollama", installed: false, connected: false, stale: false, path: null, note: null, unsupported: "Ollama runs models but has no MCP client of its own. Use its models from an app that has one, such as LM Studio, Cline or opencode, and connect that app." },
+    ],
+  },
   git_version: "2.47.1",
   git_status: gitStatus,
   git_diff: (args: { path: string }) => (args.path === "README.md" ? readme : edit),

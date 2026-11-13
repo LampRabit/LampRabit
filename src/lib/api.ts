@@ -247,6 +247,27 @@ export type GitRemoteAction =
   | { kind: "rename"; from: string; to: string }
   | { kind: "remove"; name: string };
 
+/** The project doctor (doctor.rs): a problem, why it matters, and a fix to preview and run. */
+export interface DoctorIssue {
+  id: string;
+  severity: "error" | "warning" | "info";
+  title: string;
+  detail: string;
+  fix: { label: string; preview: string; action: { kind: string } & Record<string, unknown> } | null;
+}
+
+/** LampRabit's MCP server: the in-app HTTP server, and the assistants it can be added to. */
+export interface McpStatus {
+  running: boolean;
+  url: string;
+  token: string;
+  command: string;
+  args: string[];
+  /** `unsupported`: it can't run a local MCP server; why, and what to use instead. */
+  /** `stale`: its entry runs another program than this LampRabit (an old copy, a moved app). */
+  clients: { id: string; name: string; installed: boolean; connected: boolean; stale: boolean; path: string | null; note: string | null; unsupported: string | null }[];
+}
+
 /** One component of a first-run starter stack (starterPlan). */
 export interface StarterItem {
   runtime: Runtime;
@@ -761,6 +782,8 @@ export interface Settings {
     memcached: number;
     /** Where PHP's dump() sends dumps for Logs. */
     dumps: number;
+    /** LampRabit's own MCP server over HTTP. */
+    mcp: number;
   };
   versions: Partial<Record<Runtime, string | null>>;
   /** The web servers that run; the first is the primary one (main ports, localhost, tools). */
@@ -785,6 +808,8 @@ export interface Settings {
   autoRestart: string[];
   /** dump() and dd() go to Logs instead of the page. */
   catchDumps: boolean;
+  /** LampRabit runs its MCP server over HTTP (ports.mcp). */
+  mcpServer: boolean;
   /** Log files over logMaxMb are rotated, logKeep old copies kept, the folder under logTotalMb. */
   logMaxMb: number;
   logKeep: number;
@@ -906,6 +931,11 @@ export const api = {
   projectFacts: (name: string) => invoke<ProjectFacts>("project_facts", { name }),
   databaseStatus: (name: string) => invoke<DbStatus | null>("database_status", { name }),
   switchProjectDatabase: (name: string, engine: "mariadb" | "mysql") => invoke<void>("switch_project_database", { name, engine }),
+  projectDoctor: (name: string) => invoke<DoctorIssue[]>("project_doctor", { name }),
+  mcpStatus: () => invoke<McpStatus>("mcp_status"),
+  setMcpServer: (enabled: boolean) => invoke<void>("set_mcp_server", { enabled }),
+  mcpConnect: (client: string, on: boolean) => invoke<string>("mcp_connect", { client, on }),
+  doctorFix: (name: string, id: string) => invoke<string>("doctor_fix", { name, id }),
   gitVersion: () => invoke<string | null>("git_version"),
   gitStatus: (name: string) => invoke<GitStatus>("git_status", { name }),
   gitDiff: (name: string, path: string, staged: boolean, untracked: boolean) => invoke<string>("git_diff", { name, path, staged, untracked }),

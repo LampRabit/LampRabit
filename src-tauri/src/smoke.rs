@@ -125,6 +125,39 @@ impl From<Error> for Outcome {
 }
 
 /// Runs everything and returns the process exit code: 0 when nothing failed.
+/// `lamprabit status/services/projects/doctor/logs` and an MCP tool call, against the app's
+/// control channel; a request with the wrong token must be refused.
+async fn command_line(with_project: bool) -> std::result::Result<String, Outcome> {
+    use serde_json::json;
+    let fail = |e: crate::error::Error| Outcome::Failed(e.to_string());
+    let endpoint = crate::control::reach(false).await.map_err(fail)?;
+    let status = crate::control::call(&endpoint, "status", json!({})).await.map_err(fail)?;
+    if !status["version"].is_string() {
+        return Err(Outcome::Failed(format!("status had no version: {status}")));
+    }
+    let services = crate::control::call(&endpoint, "services", json!({})).await.map_err(fail)?;
+    let projects = crate::control::call(&endpoint, "projects", json!({})).await.map_err(fail)?;
+    let logs = crate::control::call(&endpoint, "logs", json!({"lines": 5})).await.map_err(fail)?;
+    if !services.is_array() || !projects.is_array() || !logs.is_array() {
+        return Err(Outcome::Failed("services, projects or logs didn't answer with a list".into()));
+    }
+    let mut notes = vec![format!("{} services, {} projects", services.as_array().map_or(0, Vec::len), projects.as_array().map_or(0, Vec::len))];
+    if let (true, Some(name)) = (with_project, projects.as_array().and_then(|p| p.first()).and_then(|p| p["name"].as_str())) {
+        let issues = crate::control::call(&endpoint, "doctor", json!({"name": name})).await.map_err(fail)?;
+        notes.push(format!("doctor on {name}: {} issues", issues.as_array().map_or(0, Vec::len)));
+    }
+    let mcp = crate::mcp::answer(false, &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "list_services", "arguments": {}}})).await;
+    if mcp.as_ref().is_none_or(|m| m["result"]["isError"] == true) {
+        return Err(Outcome::Failed(format!("the MCP tool call failed: {mcp:?}")));
+    }
+    let wrong = crate::control::Endpoint { token: "wrong".into(), ..endpoint.clone() };
+    if crate::control::call(&wrong, "status", json!({})).await.is_ok() {
+        return Err(Outcome::Failed("a request with the wrong token was answered".into()));
+    }
+    notes.push("MCP answered; a wrong token is refused".into());
+    Ok(notes.join(", "))
+}
+
 pub async fn run(app: AppHandle, options: Options) -> i32 {
     let mut report = Report { steps: Vec::new(), path: options.root.join("smoke-report.json") };
     let mut installed = Vec::new();
@@ -167,6 +200,11 @@ pub async fn run(app: AppHandle, options: Options) -> i32 {
         report.add("project domains and processes".into(), started, outcome);
         state.apps.stop_all().await;
     }
+
+    // The command line and MCP, through the control channel as `lamprabit` uses it.
+    let started = Instant::now();
+    let outcome = command_line(installed.contains(&Runtime::Php)).await;
+    report.add("command line and MCP".into(), started, outcome);
 
     app.state::<AppState>().supervisor.shutdown().await;
     let count = |result: &str| report.steps.iter().filter(|s| s.result == result).count();

@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Layers, Upload } from "lucide-react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import clsx from "clsx";
-import { api, serviceLabels, type ServiceKind, type StackProfile } from "../lib/api";
+import { api, serviceLabels, type Release, type Runtime, type ServiceKind, type StackProfile } from "../lib/api";
 import { useAppStore } from "../lib/store";
+import { formatBytes } from "../lib/usage";
 import Dialog from "./Dialog";
+import { InstallStep } from "./FirstRunDialog";
 import { Button, inputClass } from "./ui";
 
 /** Create or edit one stack profile. */
@@ -138,20 +140,43 @@ export default function ProfilesDialog({
 }
 
 /**
+ * An import waiting on what to do about services that aren't installed here, with the
+ * versions the exporting computer ran (exports before these were added have none).
+ */
+type Review = { incoming: StackProfile[]; missing: ServiceKind[]; versions: Record<string, string> };
+
+/**
  * Export the stack profiles to a JSON file and import them on another machine. An imported
  * profile with the same name replaces the one here; services this LampRabit doesn't know
  * are dropped (an older version), and so are processes of projects that aren't here.
+ * Services it knows but that aren't installed are reviewed first: each is installed, or
+ * taken out of the profiles (see ImportReview).
  */
 export function ProfilesTransfer() {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const profiles = settings.data?.profiles ?? [];
+  const [review, setReview] = useState<Review | null>(null);
+  const [installing, setInstalling] = useState<{ services: ServiceKind[]; releases: Record<string, Release> } | null>(null);
+
+  /** Adds the profiles, replacing ones with the same name. */
+  const commit = async (incoming: StackProfile[]) => {
+    const current = await api.getSettings();
+    const names = new Set(incoming.map((p) => p.name.toLowerCase()));
+    const saved = await api.saveSettings({ ...current, profiles: [...current.profiles.filter((p) => !names.has(p.name.toLowerCase())), ...incoming] });
+    queryClient.setQueryData(["settings"], saved);
+    notify("info", `Imported ${incoming.length} ${incoming.length === 1 ? "profile" : "profiles"}`);
+  };
   const exportAll = useMutation({
     mutationFn: async () => {
       const path = await saveDialog({ defaultPath: "lamprabit-profiles.json", filters: [{ name: "LampRabit profiles", extensions: ["json"] }] });
       if (!path) return false;
-      await api.saveText(path, JSON.stringify({ lamprabitProfiles: 1, profiles }, null, 2) + "\n");
+      // The version each profile service runs here, so an import elsewhere can install the same.
+      const used = [...new Set(profiles.flatMap((p) => p.services))];
+      const versions = Object.fromEntries(used.flatMap((k) => (settings.data?.versions[k as Runtime] ? [[k, settings.data.versions[k as Runtime]]] : [])));
+      await api.saveText(path, JSON.stringify({ lamprabitProfiles: 1, profiles, versions }, null, 2) + "\n");
       return true;
     },
     onSuccess: (done) => done && notify("info", `Exported ${profiles.length} ${profiles.length === 1 ? "profile" : "profiles"}`),
@@ -180,19 +205,50 @@ export function ProfilesTransfer() {
         incoming.push({ name, services, processes: procs });
       }
       if (incoming.length === 0) throw new Error("No usable profiles in that file: each needs a name and services this LampRabit knows.");
-      const names = new Set(incoming.map((p) => p.name.toLowerCase()));
-      const merged = [...settings.data.profiles.filter((p) => !names.has(p.name.toLowerCase())), ...incoming];
-      return { saved: await api.saveSettings({ ...settings.data, profiles: merged }), count: incoming.length };
+      // Present: installed, or run by another app (Ollama's own).
+      const here = services.data ?? (await api.listServices());
+      const present = new Set(here.filter((s) => s.installed || s.external).map((s) => s.kind));
+      const missing = [...new Set(incoming.flatMap((p) => p.services))].filter((k) => !present.has(k));
+      const given = (data as { versions?: unknown })?.versions;
+      const versions = Object.fromEntries(Object.entries(given && typeof given === "object" ? given : {}).filter(([k, v]) => known.has(k) && typeof v === "string" && v.length > 0)) as Record<string, string>;
+      if (missing.length) {
+        setReview({ incoming, missing, versions });
+        return;
+      }
+      await commit(incoming);
     },
-    onSuccess: (result) => {
-      if (!result) return;
-      queryClient.setQueryData(["settings"], result.saved);
-      notify("info", `Imported ${result.count} ${result.count === 1 ? "profile" : "profiles"}`);
+    onError: (e) => notify("error", String(e)),
+  });
+  const confirm = useMutation({
+    mutationFn: async ({ install, remove, releases }: { install: ServiceKind[]; remove: ServiceKind[]; releases: Record<string, Release> }) => {
+      if (!review) return;
+      const kept = review.incoming.map((p) => ({ ...p, services: p.services.filter((s) => !remove.includes(s)) }));
+      // A profile left with no services has nothing to start.
+      const emptied = kept.filter((p) => p.services.length === 0).map((p) => p.name);
+      const usable = kept.filter((p) => p.services.length > 0);
+      if (usable.length) await commit(usable);
+      if (emptied.length) notify("info", `Not imported, no services left: ${emptied.join(", ")}`);
+      setReview(null);
+      // Saved first, so a failed download doesn't lose the import; its service stays in the
+      // profile and can be installed on the Services page later.
+      if (install.length) setInstalling({ services: install, releases });
     },
     onError: (e) => notify("error", String(e)),
   });
   return (
     <div className="flex items-center gap-1">
+      {review && <ImportReview review={review} busy={confirm.isPending} onCancel={() => setReview(null)} onConfirm={(install, remove, releases) => confirm.mutate({ install, remove, releases })} />}
+      {installing && (
+        <InstallStep
+          runtimes={installing.services}
+          releases={installing.releases}
+          title="Installing the profiles' services"
+          nextLabel="Done"
+          labels={Object.fromEntries(installing.services.map((k) => [k, serviceLabels[k]]))}
+          onClose={() => setInstalling(null)}
+          onNext={() => setInstalling(null)}
+        />
+      )}
       <Button size="sm" variant="ghost" onClick={() => importFile.mutate()} disabled={importFile.isPending || !settings.data} title="Add profiles from a file exported on another machine">
         <Upload size={13} /> Import
       </Button>
@@ -201,4 +257,140 @@ export function ProfilesTransfer() {
       </Button>
     </div>
   );
+}
+
+/**
+ * The services an import needs that aren't installed here: each one is installed (with its
+ * download size) or removed from the profiles that use it. One that can't be installed on
+ * this computer is set to Remove, with the reason.
+ */
+function ImportReview({
+  review,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  review: Review;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (install: ServiceKind[], remove: ServiceKind[], releases: Record<string, Release>) => void;
+}) {
+  const plan = useQuery({ queryKey: ["starter-plan", review.missing.join(",")], queryFn: () => api.starterPlan(review.missing), staleTime: 5 * 60_000 });
+  const items = new Map((plan.data ?? []).map((item) => [item.runtime as string, item]));
+  // The version the other computer ran: that exact one when offered here, else the newest of
+  // its line (8.3.x for 8.3.14); otherwise the usual pick, and the note says so.
+  const wanted = review.missing.filter((k) => review.versions[k]);
+  const catalogs = useQueries({ queries: wanted.map((k) => ({ queryKey: ["runtime-catalog", k], queryFn: () => api.runtimeCatalog(k as Runtime), staleTime: 5 * 60_000 })) });
+  const releases: Record<string, Release> = {};
+  wanted.forEach((k, i) => {
+    const match = matchRelease(catalogs[i].data ?? [], review.versions[k]);
+    if (match) releases[k] = match;
+  });
+  const checking = plan.isLoading || catalogs.some((c) => c.isLoading);
+  const blocked = (k: ServiceKind) => items.get(k)?.action.kind === "unavailable";
+  const [choice, setChoice] = useState<Record<string, "install" | "remove">>(() => Object.fromEntries(review.missing.map((k) => [k, "install"])));
+  const pick = (k: ServiceKind) => (blocked(k) ? "remove" : choice[k]);
+  const install = review.missing.filter((k) => pick(k) === "install");
+  const remove = review.missing.filter((k) => pick(k) === "remove");
+  // Sizes are known for the usual picks only.
+  const size = install.reduce((sum, k) => sum + (releases[k] ? 0 : (items.get(k)?.size ?? 0)), 0);
+  const usedBy = (k: ServiceKind) => review.incoming.filter((p) => p.services.includes(k)).map((p) => p.name);
+  // Profiles that would be left with nothing to start.
+  const emptied = review.incoming.filter((p) => p.services.every((s) => remove.includes(s))).map((p) => p.name);
+  const one = review.missing.length === 1;
+
+  return (
+    <Dialog
+      open
+      onClose={onCancel}
+      title={one ? "A service isn't installed" : "Some services aren't installed"}
+      icon={<Layers size={20} />}
+      width="max-w-xl"
+      footer={
+        <>
+          <Button onClick={onCancel} className="mr-auto">
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => onConfirm(install, remove, Object.fromEntries(install.flatMap((k) => (releases[k] ? [[k, releases[k]]] : []))))}
+            disabled={busy || checking || emptied.length === review.incoming.length}
+            data-autofocus
+          >
+            {install.length ? `Install ${install.length} and import` : "Import"}
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-sm text-muted">
+        The imported {review.incoming.length === 1 ? "profile uses" : "profiles use"} {one ? "a service that isn't" : "services that aren't"} installed on this computer. Install{" "}
+        {one ? "it" : "them"}, or take {one ? "it" : "them"} out of the profiles.
+      </p>
+      <ul className="divide-y divide-line rounded-xl border border-line">
+        {review.missing.map((k) => {
+          const item = items.get(k);
+          const a = item?.action;
+          const other = review.versions[k];
+          const exact = releases[k];
+          const note = checking
+            ? "Checking…"
+            : a?.kind !== "unavailable" && exact
+              ? exact.version === other
+                ? `Downloads ${exact.version}, the version the other computer ran`
+                : `Downloads ${exact.version}, the newest of the line the other computer ran (${other})`
+              : a?.kind === "install"
+              ? `Downloads ${a.release.version}${item?.size ? ` · ${formatBytes(item.size)}` : ""}${other ? ` (the other computer ran ${other}, which isn't offered here)` : ""}`
+              : a?.kind === "activate"
+                ? `Installed: ${a.version} (becomes the version in use)`
+                : a?.kind === "unavailable"
+                  ? a.reason
+                  : "";
+          return (
+            <li key={k} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2">
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-fg">{serviceLabels[k]}</span>
+                <span className="block text-xs text-muted">In {usedBy(k).join(", ")}</span>
+                {note && <span className={clsx("block text-xs", a?.kind === "unavailable" ? "text-warn" : "text-muted")}>{note}</span>}
+              </span>
+              <span role="radiogroup" aria-label={`${serviceLabels[k]}: install or remove`} className="flex rounded-lg border border-line p-0.5 text-xs">
+                {(["install", "remove"] as const).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    role="radio"
+                    aria-checked={pick(k) === option}
+                    disabled={option === "install" && blocked(k)}
+                    onClick={() => setChoice((c) => ({ ...c, [k]: option }))}
+                    className={clsx("rounded-md px-2.5 py-1 font-medium transition-colors disabled:opacity-40", pick(k) === option ? "bg-accent-soft text-accent-text" : "text-muted hover:text-fg")}
+                  >
+                    {option === "install" ? "Install" : "Remove"}
+                  </button>
+                ))}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {install.length > 0 && size > 0 && <p className="mt-2 text-xs text-muted">About {formatBytes(size)} to download. The profiles are saved first, so a failed download can be retried.</p>}
+      {emptied.length > 0 && (
+        <p className="mt-2 text-xs text-warn">
+          {emptied.length === review.incoming.length ? "Every profile would be left without services: install at least one." : `Left without services, so not imported: ${emptied.join(", ")}.`}
+        </p>
+      )}
+    </Dialog>
+  );
+}
+
+/** The catalog release for a version: exactly it, else the newest of its line (major.minor). */
+function matchRelease(catalog: Release[], version: string): Release | undefined {
+  const exact = catalog.find((r) => r.version === version);
+  if (exact) return exact;
+  const line = version.split(".").slice(0, 2).join(".");
+  const key = (v: string) => v.split(/[.-]/).map((p) => parseInt(p, 10) || 0);
+  const newest = (a: Release, b: Release) => {
+    const [x, y] = [key(a.version), key(b.version)];
+    for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (y[i] ?? 0) - (x[i] ?? 0);
+    return 0;
+  };
+  return catalog.filter((r) => r.version === line || r.version.startsWith(`${line}.`)).sort(newest)[0];
 }

@@ -128,7 +128,7 @@ export default function Services() {
     <>
       <div className="grid items-start gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
         {/* Sized to the space under the header (title bar, page header, room for the tab bar), so the list scrolls on its own and the page only when a service's details are taller. */}
-        <nav aria-label="Services" className="scrollbar-thin hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+        <nav aria-label="Services" className="scrollbar-thin hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
           <div className="mb-4 space-y-2">
             <label className="flex h-9 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 focus-within:border-accent">
               <Search size={14} className="shrink-0 text-muted" aria-hidden />

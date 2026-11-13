@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef,
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
+  Bot,
   CheckCircle2,
   CircleSlash,
   Database,
@@ -39,6 +40,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { runtimeTiles } from "../components/runtimes";
 import UninstallDialog from "../components/UninstallDialog";
+import McpSettings from "../components/McpSettings";
 import MoveEnvironmentDialog from "../components/MoveEnvironmentDialog";
 import ApplyBar from "../components/ApplyBar";
 import { portFields, portShown, serverNotes } from "../lib/settingsFields";
@@ -52,6 +54,7 @@ const sections = [
   { id: "general", label: "General", icon: Settings2 },
   { id: "startup", label: "Startup", icon: Power },
   { id: "terminal", label: "Terminal", icon: SquareTerminal },
+  { id: "assistants", label: "AI assistants", icon: Bot },
   { id: "web", label: "Web server", icon: ServerCog },
   { id: "databases", label: "Databases", icon: Database },
   { id: "versions", label: "Active versions", icon: Layers },
@@ -135,8 +138,8 @@ export default function Settings() {
   const dirty =
     !!draft &&
     !!settings.data &&
-    (JSON.stringify({ ...draft, versions: null, sites: null, profiles: null, catchDumps: null }) !==
-      JSON.stringify({ ...settings.data, versions: null, sites: null, profiles: null, catchDumps: null }) ||
+    (JSON.stringify({ ...draft, versions: null, sites: null, profiles: null, catchDumps: null, mcpServer: null }) !==
+      JSON.stringify({ ...settings.data, versions: null, sites: null, profiles: null, catchDumps: null, mcpServer: null }) ||
       JSON.stringify(versions) !== JSON.stringify(activeVersions));
 
   usePageToolbar("settings", {
@@ -160,7 +163,8 @@ export default function Settings() {
       // options, profiles and the dump catcher (it restarts PHP) are owned by their own
       // controls, so they come from the latest copy.
       const latest = await api.getSettings();
-      await api.saveSettings({ ...draft, versions: latest.versions, sites: latest.sites, profiles: latest.profiles, catchDumps: latest.catchDumps });
+      // Switches that apply at once (dumps, the MCP server) keep their saved value.
+      await api.saveSettings({ ...draft, versions: latest.versions, sites: latest.sites, profiles: latest.profiles, catchDumps: latest.catchDumps, mcpServer: latest.mcpServer });
       for (const runtime of Object.keys(versions ?? {}) as Runtime[]) {
         const version = versions?.[runtime];
         if (version && version !== activeVersions?.[runtime]) await api.setActiveVersion(runtime, version);
@@ -337,13 +341,24 @@ export default function Settings() {
             />
             <Row label="Commands" hint="Also available in the terminal that the title bar's terminal button opens." wide>
               <div className="flex flex-wrap gap-1.5">
-                {["php", "composer", "mysql", "mysqldump", "mysqladmin", "mariadb", "mariadb-dump", "redis-cli"].map((c) => (
+                {["lamprabit", "php", "composer", "mysql", "mysqldump", "mysqladmin", "mariadb", "mariadb-dump", "redis-cli"].map((c) => (
                   <code key={c} className="rounded-md bg-surface-2 px-2 py-0.5 font-mono text-xs">
                     {c}
                   </code>
                 ))}
               </div>
             </Row>
+            <Row
+              label="Command line"
+              hint="lamprabit status, services, service start apache, projects, doctor shop, logs --follow, runtime install php 8.4… Add --json for scripts. It starts LampRabit in the background when it isn't running."
+              wide
+            >
+              <code className="block rounded-md bg-surface-2 px-3 py-2 font-mono text-xs">lamprabit help</code>
+            </Row>
+          </Section>
+
+          <Section id="assistants" title="AI assistants" subtitle="Let Claude, Cursor, VS Code and other assistants work with your local stack through MCP.">
+            <McpSettings />
           </Section>
 
           <Section id="web" title="Web servers" subtitle="Which servers run your sites. Several can run side by side, each site on one of them.">
@@ -877,3 +892,4 @@ function AutostartToggle() {
     />
   );
 }
+

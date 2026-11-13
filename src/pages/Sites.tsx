@@ -33,11 +33,11 @@ import { useAppStore } from "../lib/store";
 import Dialog from "../components/Dialog";
 import ProjectDomains from "../components/ProjectDomains";
 import ProjectGit, { CloneDialog } from "../components/ProjectGit";
+import ProjectDoctor from "../components/ProjectDoctor";
 import ProjectProcesses, { processFrom } from "../components/ProjectProcesses";
 import { usePageToolbar } from "../components/PageToolbar";
 import { toolUrl } from "../lib/tools";
 import { useHotkeys } from "../lib/shortcuts";
-import { bestMatch, satisfies } from "../lib/constraint";
 import { formatAgo, useNow } from "../lib/time";
 import { Button, Card, Switch, inputClass } from "../components/ui";
 import { ShareButton, TunnelRow, useProjectTunnel } from "../components/Tunnels";
@@ -740,7 +740,6 @@ function Overview({
 }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
-  const navigate = useAppStore((s) => s.navigate);
   const onError = (e: unknown) => notify("error", String(e));
   const install = useMutation({
     mutationFn: (manager: string) => (manager === "Composer" ? api.runProjectCommand(site.name, "composer install", "composer install") : api.appInstall(site.name)),
@@ -760,41 +759,9 @@ function Overview({
     onError,
   });
 
-  // composer.json's PHP requirement against the PHP the site runs on (FrankenPHP brings its own).
-  const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
-  const phpVersions = installed.data?.find((i) => i.runtime === "php")?.versions ?? [];
-  const needs = facts?.phpRequirement ?? null;
-  const phpMismatch = site.language === "php" && site.server !== "frankenphp" && !!needs && !!php && !satisfies(php, needs);
-  const better = phpMismatch && needs ? bestMatch(phpVersions, needs) : null;
-  const switchPhp = useMutation({
-    mutationFn: (version: string) => api.setSitePhp(site.name, version),
-    onSuccess: (_, version) => {
-      notify("info", `${site.name} now uses PHP ${version}`);
-      for (const key of ["sites", "settings", "services", "php-status"]) queryClient.invalidateQueries({ queryKey: [key] });
-    },
-    onError,
-  });
-
   return (
     <div className="space-y-4">
-      {phpMismatch && (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-warn/30 bg-warn/10 px-4 py-3 text-sm">
-          <AlertTriangle size={16} className="shrink-0 text-warn" aria-hidden />
-          <span className="min-w-0 flex-1 text-fg">
-            This project needs PHP <span className="font-mono">{needs}</span> but runs on PHP {php}, so it may fail to start.
-          </span>
-          {better ? (
-            <Button size="sm" variant="primary" onClick={() => switchPhp.mutate(better)} disabled={switchPhp.isPending}>
-              {switchPhp.isPending ? "Switching…" : `Switch to PHP ${better}`}
-            </Button>
-          ) : (
-            <Button size="sm" onClick={() => navigate("services")}>
-              Install a matching PHP
-            </Button>
-          )}
-        </div>
-      )}
-
+      <ProjectDoctor site={site} onCommands={onCommands} />
       {(isActive(status) || status?.task) && <OutputPanel name={site.name} height="max-h-56 min-h-24" />}
 
       <ProjectInfo site={site} settings={settings} facts={facts} status={status} php={php} />

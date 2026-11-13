@@ -1,6 +1,6 @@
 # LampRabit features
 
-Status labels: **Available** (in the app today) and **Coming soon** (designed and scheduled). Platform notes appear where a feature isn't on every OS.
+Status labels: **Available** (in the app today) and **Coming soon** (planned, not shipped). Platform notes appear where a feature isn't on every OS; confirm runtime coverage against the current in-app catalog.
 
 ---
 
@@ -9,10 +9,22 @@ Status labels: **Available** (in the app today) and **Coming soon** (designed an
 - **Every folder is a site.** Put a project in `www/` and open `https://project.test`. No virtual-host files, no hosts-file editing.
 - **Real HTTPS, locally.** LampRabit creates its own certificate authority and trusted certificates for every site, sub-domains included.
 - **Any PHP version, per project.** Run PHP 8.1 to 8.5 side by side; each site picks its own.
-- **Apache, Nginx, or both.** Choose per site.
+- **Several web and app servers.** Apache, Nginx, Caddy, FrankenPHP and Tomcat, subject to platform/runtime requirements.
 - **Command line included.** `php`, `composer` and the MariaDB tools on your PATH, following each site's PHP version.
 - **Batteries included.** phpMyAdmin, Adminer and Mailpit, installed with one click.
 - **Tells you what's wrong.** Health checks, port-conflict detection that names the program in the way, and a diagnostics report.
+- **Project Health and Git.** Check project requirements, preview fixes, review changes and handle everyday Git operations from the project view.
+- **CLI and MCP.** Control the same backend from `lamprabit` or supported AI clients.
+
+## Recent capabilities
+
+LampRabit can manage projects beyond PHP and Node.js. Python, Go, Rust and Java runtimes are available where supported; project templates include frameworks such as Django, Flask, FastAPI, Gin, Axum and Spring Boot. Per-project language version files are respected for supported languages.
+
+Projects can define additional domains and long-running processes such as workers and development servers. Processes can have environment variables, ports and restart policies. Project settings can be stored in `lamprabit.toml`; templates can define domains and processes too.
+
+The database and service catalog includes PostgreSQL, MongoDB, SQLite, ClickHouse and Neo4j, plus search, object storage, queues and local AI/automation services. Installers and dependencies vary by platform; the app explains requirements and unavailable runtimes.
+
+The environment folder is selected during first-run onboarding and can be moved later from Settings. Onboarding can install a PHP, Laravel, WordPress, Node.js, full-stack or custom starter. Stack profiles can be exported and imported.
 
 ---
 
@@ -39,7 +51,7 @@ Press `?` for every shortcut. Number keys switch pages; J/K (or the arrow keys) 
 ### One-click runtimes and versions (Available; platform-limited)
 Install, switch and remove versions of Apache, Nginx, PHP, MariaDB, MySQL and Composer from the Services page. Downloads come straight from the official sources (Apache Lounge, nginx.org, windows.php.net, mariadb.org) and are checked against their published SHA-256 checksums before use (nginx.org publishes PGP signatures only; those downloads rely on HTTPS). Switching a version restarts the services that use it.
 
-Platform note: Windows and Linux have downloads for everything. On Linux, Apache, Nginx and PHP come from LampRabit's own builds (nobody publishes portable Linux builds), made in the open by a GitHub workflow and checked against their published SHA-256 checksums. macOS downloads for Apache, Nginx and PHP are coming soon.
+Platform note: Runtime downloads depend on platform and architecture. LampRabit builds Apache, Nginx and PHP for Linux and macOS; consult the Services catalog for current availability and checksums.
 
 ### Your stack at a glance (Available)
 A live diagram of web server → PHP → MariaDB, animated while requests can flow, with each runtime's versions on a timeline: active, installed and available at a glance.
@@ -56,7 +68,7 @@ If a port is taken, LampRabit names the program holding it (for example `node.ex
 ### Apache and Nginx (Available; Nginx on Windows)
 Run Apache, Nginx, or both. With both, Apache keeps ports 80/443 and Nginx gets its own (8080/8443 by default), and you choose the server for each site. Overlapping ports are rejected before anything starts. Nginx sites get front-controller routing out of the box, so Laravel, Symfony and WordPress pretty URLs just work.
 
-Platform note: Nginx downloads are available on Windows (nginx.org builds) and Linux (LampRabit's builds); macOS support is coming soon.
+Platform note: Nginx downloads are available on Windows (nginx.org builds), Linux and macOS (LampRabit's builds); macOS remains in preview.
 
 ### System tray (Available)
 LampRabit lives in the system tray: start or stop everything, open the www folder or a terminal, and quit from its menu. Closing the window keeps your services running (you can turn this off).
@@ -229,7 +241,7 @@ Windows (`.exe` / `.msi`), macOS for Apple Silicon and Intel (`.dmg`), and Linux
 
 ### Coming soon
 - **Code-signed installers** for Windows and macOS.
-- **Apache, Nginx and PHP downloads on macOS**, making it fully supported.
+- **Complete macOS parity and stability work.** macOS builds and runtime coverage are still in preview; check the current release notes for gaps.
 
 ---
 
@@ -247,7 +259,7 @@ Windows (`.exe` / `.msi`), macOS for Apple Silicon and Intel (`.dmg`), and Linux
 | Mail catcher | Mailpit | Mercury | Mailpit option |
 | Runs without administrator rights | Yes (asks only for hosts and certificates) | Often needs admin | Usually run as admin |
 | Linux | Yes | Yes | Windows only |
-| macOS | Preview (Apache, Nginx and PHP downloads coming) | Yes | Windows only |
+| macOS | Preview (runtime coverage varies) | Yes | Windows only |
 | Open source | Yes | Yes | Source available |
 
 Keep the comparison factual and update it if competitors change; avoid disparaging language.

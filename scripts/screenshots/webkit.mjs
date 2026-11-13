@@ -22,6 +22,7 @@ const views = {
   settings: "page=settings",
   "first-run": "page=overview&firstRun=1",
   "home-dark": "page=overview&theme=dark",
+  assistants: "page=settings&mcpOn=1",
 };
 
 const only = process.argv.slice(2);
