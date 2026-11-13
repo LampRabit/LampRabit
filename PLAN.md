@@ -10,7 +10,7 @@ A Laragon/XAMPP-style local dev environment built with Tauri v2 (Rust) and React
 | Binaries | Downloaded on demand from a per-OS version manifest, sha256-verified |
 | MVP stack | Apache + PHP + MariaDB (MySQL added in phase 9) |
 | PHP integration | Windows: thread-safe PHP loaded into Apache as `mod_php`. macOS/Linux: `php-fpm` + `mod_proxy_fcgi` |
-| Binary sources | Windows: Apache Lounge, nginx.org, windows.php.net, mariadb.org, MySQL CDN. Linux: LampRabit's own CI builds of Apache, Nginx and PHP (`build/linux/`), official MariaDB and MySQL tarballs. macOS: still to do |
+| Binary sources | Windows: Apache Lounge, nginx.org, windows.php.net, mariadb.org, MySQL CDN. Linux: LampRabit's own CI builds of Apache, Nginx and PHP (`build/linux/`), official MariaDB and MySQL tarballs. macOS: LampRabit CI builds for Apache, Nginx, PHP, Redis, Memcached and MariaDB; MySQL downloads from Oracle CDN |
 | Frontend | React 19, TypeScript, Vite, Tailwind v4, TanStack Query, Zustand |
 
 ## Environment layout (default `C:\lampRabit` / `~/lampRabit`)
@@ -32,7 +32,7 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **8. Release**: installers (NSIS/MSI, dmg, AppImage/deb), signed auto-updates, CI on every push, tag-triggered draft releases (see RELEASING.md)
 - [x] **Polish**: animated logo (ears, eyes, nose every few minutes), page/dialog/list motion, Motion setting (System / Full / Reduced / Off)
 - [x] **9. Linux parity and developer dashboard** (see below)
-- [ ] **10. macOS parity, stability on every OS, safe uninstall** (macOS part in the backlog, the user's choice 2026-11-05)
+- [ ] **10. macOS parity, stability on every OS, safe uninstall** (runtime builds and CI coverage are in place; keep macOS in preview until hands-on platform checks and the compatibility matrix are complete)
 - [x] **11. Service foundation and web servers: Caddy, FrankenPHP, Tomcat (with Java)** (2026-11-05: runtime needs and platform gaps from `catalog.rs`; the frontend's runtime and service labels load from it)
 - [x] **12. Projects: several domains, processes, Node.js serving** (2026-11-05: stack profiles list project processes; `lamprabit.toml` saved and applied from a project's Settings)
 - [x] **13. Logs redesign and dump catcher** (2026-11-05: dump catcher, source sidebar, virtualised list, line details, per-source clear, rotation)
@@ -71,29 +71,36 @@ Phases 10 and up come from an exported product spec (`Preject-features-and-plan.
 
 ## Phase 10: macOS parity, stability on every OS, safe uninstall
 
-macOS was in preview because only Redis, Mailpit, ngrok, cloudflared and Composer had macOS downloads; Apache, Nginx, PHP, MariaDB and MySQL had none.
+macOS remains in preview while platform behavior and runtime coverage are validated. LampRabit now builds Apache, Nginx, PHP, Redis, Memcached and MariaDB for macOS; MySQL uses Oracle CDN archives. Some runtimes remain unavailable on specific architectures or operating systems, as reported by the catalog.
 
-### 10.1 macOS runtimes, Redis and Memcached (scripts done 2026-10-29, first CI run pending)
-- Compared with FlyEnv and EnvKit first. FlyEnv uses the same Windows sources as LampRabit, but on Linux/macOS it takes static-php-cli's prebuilt PHP (months behind), a stale third-party Nginx, and Homebrew/system packages for Apache, Redis and Memcached; EnvKit is closed source and bundles everything (Windows and Apple Silicon only). Decision: keep building our own, extended to macOS.
-- ✅ `binaries.yml` builds Apache, Nginx, PHP, Redis and Memcached for Linux and macOS, x86_64 and aarch64 each (macOS: `@rpath` for APR, ad hoc re-signing, no file AIO), and repackages Memcached for Windows. The app reads Apache/Nginx/PHP from the manifest on macOS too.
-- ✅ Real Redis on Windows (community redis-windows build) instead of Garnet + .NET; `redis-cli` comes with it; Garnet installs from 0.1 are removed on start. Verified locally: Windows path with spaces for `--dir`, `INFO keyspace`, saving.
-- ✅ Memcached as a downloadable runtime everywhere (was: system install on Linux/macOS, nothing on Windows). Verified locally: Windows build (set/get/version) and the Linux build (links only glibc).
-- ✅ PHP `memcached` + `igbinary`: compiled into the Linux/macOS builds (the build fails if missing), and the `memcached` PECL download in the Windows extension manager.
-- ⏳ Push and watch the first CI run; test the macOS builds on a Mac (Apache, Nginx, PHP-FPM, Redis, Memcached), then mark macOS out of preview for those.
-- ⏳ MariaDB ships no macOS tarballs: build it in CI too (heavy, cache aggressively), or use a detected Homebrew install. Spike both. MySQL publishes macOS tarballs (add to `mysql_releases`).
+### 10.1 macOS runtimes, Redis and Memcached
+
+- Compared with FlyEnv and EnvKit first. Decision: keep building our own portable runtimes rather than relying on Homebrew/system packages.
+- [x] `.github/workflows/binaries.yml` builds Apache, Nginx, PHP, Redis and Memcached for Linux and macOS (x86_64 and aarch64); macOS Apache uses `@rpath` for APR, ad hoc signing and no file AIO. LampRabit also builds MariaDB LTS releases for both macOS architectures. MySQL downloads official macOS archives from Oracle CDN and tries compatible macOS archive variants.
+- [x] The runtime manager reads the manifest for macOS builds and removes `com.apple.quarantine` after checksum verification so downloaded executables can run.
+- [x] Real Redis on Windows replaced Garnet; Memcached is a downloadable runtime on each supported platform; PHP `memcached` and `igbinary` are included in the Linux/macOS PHP builds.
+- [x] Latest CI on 2026-11-13 passed the smoke workflow on Apple Silicon (`macos-latest`) and Intel (`macos-15-intel`), and built and opened the app bundle on both runners. See [workflow run](https://github.com/LampRabit/LampRabit/actions/runs/43377759321). Pull-request smoke runs cover the standard runtime list; heavy services run on the scheduled/full workflow.
+- [ ] Hands-on Mac validation: install and start Apache, Nginx, PHP-FPM, Redis, Memcached, MariaDB and MySQL; confirm common site and database workflows, including paths with spaces and quotes. Keep macOS in preview until this is complete.
+
 ### 10.2 macOS platform pieces
-- Hosts file and CA trust (`security add-trusted-cert`, an admin prompt), ports below 1024 (macOS allows them unprivileged since Mojave, but verify), terminal launcher (Terminal.app / iTerm), shims on PATH (`~/.zprofile`), process groups, `reap_orphans`.
-- Gatekeeper: downloaded runtimes carry `com.apple.quarantine`; remove it after the checksum check.
-- A macOS CI job that installs and starts each runtime (smoke test), like the existing checks.
+
+- [x] Platform code is present for managed hosts entries, CA trust/removal via `security`, port-conflict discovery via `lsof`, Terminal.app launch, shell PATH shims, process groups and orphan cleanup.
+- [x] Downloaded runtime quarantine is removed only after the archive checksum has been verified.
+- [x] CI builds and opens the macOS app bundle on Apple Silicon and Intel, and runs the service smoke workflow on both.
+- [ ] Hands-on Mac validation remains for the system permission prompts and effects: hosts-file updates, CA trust and removal, ports 80/443, Terminal and PATH behavior, Gatekeeper/runtime launch, and process cleanup.
+- [x] The macOS Terminal launcher now passes paths as `osascript` arguments and shell-quotes them in AppleScript instead of interpolating them into source. `cargo check` passed on Windows; verify opening a terminal from a path containing spaces and quotes on macOS.
+
 ### 10.3 Stability on all OSes
 - ✅ A cross-platform smoke test (2026-11-04): `lamprabit --smoke-test <folder> <runtime>…` (smoke.rs) installs each runtime with the versions its needs call for into a throwaway folder (own settings, every port +20000), then start → healthy → second start ignored → stop → port free for every service, and one killed service has to come back through "Restart after a crash" and stay stopped after Stop. `.github/workflows/smoke.yml` runs it on Windows, Linux (Xvfb) and macOS for pull requests that touch the backend, weekly with the heavy services, and by hand; platform gaps are reported as skipped with their reason.
-- A compatibility matrix (runtime × OS × arch, with the reason when one isn't available) in the docs, generated from the catalogs where possible.
+- [ ] Publish a runtime compatibility matrix (runtime × OS × architecture, with unavailability reasons) from the catalogs. This documentation is still missing.
+
 ### 10.4 Uninstall ✅ (2026-10-30)
 - `uninstall.rs` removes the folders LampRabit creates under the root (`bin`, `etc`, `logs`, `tmp`, `ssl`, `shims`, nothing else), the root itself only if empty, the settings and (Windows uninstaller) WebView data, the hosts block, the trusted CA (system store and, on Linux, the browsers' NSS databases), the PATH entry, the ngrok token and the Linux sysctl file. Keeps `www/` and `data/`.
 - Windows: NSIS `NSIS_HOOK_PREUNINSTALL` (src-tauri/windows/hooks.nsh) asks to close the app and runs `LampRabit.exe --uninstall-cleanup`; skipped for updates (`/UPDATE`). The uninstaller itself removes the autostart entry.
 - Every OS: Settings → Troubleshooting → "Remove LampRabit from this computer" stops services cleanly, shows what is deleted and kept, reports what couldn't be undone, then quits. Linux does the system files in one pkexec prompt.
 - ✅ MSI (2026-10-31): `windows/cleanup.wxs` runs `--uninstall-cleanup` as a deferred, impersonated custom action before RemoveFiles, on a real uninstall only (not for upgrades); linked through `bundle.windows.wix.componentRefs`.
 - The .deb's removal can't reach per-user files, so Linux users use the Settings action.
+- [ ] Verify the Settings uninstall flow on macOS removes hosts and CA trust while preserving `www/` and `data/`.
 
 ## Sources for phases 11, 15, 16, 24, 25 (checked 2026-11-01)
 
@@ -236,7 +243,7 @@ Done (2026-10-30): YAML templates (`src-tauri/templates/`, user ones in `<root>/
 
 ## Phase 18: onboarding
 
-**Done (2026-11-12):** the first run goes from the folder question to a starter (PHP, Laravel, WordPress, Node.js, full stack, custom): each component shows installed / the download and its size (`starter_plan`, same choice as needs, HEAD for the size) / why it can't run here, installs one by one with progress and retry (Node through NVM), then offers a first project. Settings → General reopens it. Stack profiles export to and import from JSON (Home → Stack Profiles).
+**Done (2026-11-12):** the first run goes from the folder question to a starter (PHP, Laravel, WordPress, Node.js, full stack, custom): each component shows installed / the download and its size (`starter_plan`, same choice as needs, HEAD for the size) / why it can't run here, installs one by one with progress and retry (Node through NVM), then offers a first project. Settings → General reopens it. Stack profiles export to and import from JSON (Home → Stack Profiles). **2026-11-13:** the starter became "What do you build?" (several usages, components by category, more added per category), projects can be imported from Laragon, XAMPP, AMPPS, MAMP, Herd, Valet, FlyEnv, EnvKit, WampServer, ServBay, Local or any folder (copied into www/, originals untouched), and the guide asks the developer's name for Home's greeting.
 
 First-run wizard: what LampRabit does, a starter (PHP, Laravel, WordPress, Node.js, full stack, custom), each component with download size and platform notes, install with progress and retry, optionally create a first project. Already-installed runtimes are detected and skipped. Stack profiles gain export/import. Can be re-opened from Settings.
 
@@ -257,7 +264,7 @@ Built on `diagnose.rs`. Per project: PHP version vs `composer.json`, missing ext
 
 ## Phase 21: MCP server
 
-**Done (2026-11-12):** `lamprabit mcp` (`mcp.rs`, stdio JSON-RPC, protocol 2025-06-18): read-only tools (status, services, projects, logs with filters, doctor, git status, runtimes, templates) and annotated ones that change things (start/stop/restart a service, start/stop a project, apply a doctor fix, create a project without a user template's risky steps, install a runtime). No settings, no credentials. Then, from the app (2026-11-12): Settings → AI assistants connects Claude Desktop, Claude Code, Cursor, VS Code and Windsurf in one click (`mcp_clients.rs`) and can run the server inside LampRabit over HTTP (`ports.mcp`, token, Origin check).
+**Done (2026-11-12):** `lamprabit mcp` (`mcp.rs`, stdio JSON-RPC, protocol 2025-06-18): read-only tools (status, services, projects, logs with filters, doctor, git status, runtimes, templates) and annotated ones that change things (start/stop/restart a service, start/stop a project, apply a doctor fix, create a project without a user template's risky steps, install a runtime). No settings, no credentials. Then, from the app (2026-11-12): Settings → AI assistants connects Claude Desktop, Claude Code, Codex, Cursor, VS Code, GitHub Copilot CLI, Windsurf, Gemini CLI, Antigravity, LM Studio, Cline, Roo Code, Kiro and opencode where installed (`mcp_clients.rs`) and can run the server inside LampRabit over HTTP (`ports.mcp`, token, Origin check).
 
 `lamprabit mcp` (stdio) on top of the phase 20 backend: list projects, services and their health, read filtered logs and dumps, run the doctor, start/stop, create a project from a template, git status. Read-only tools by default; tools that change things are marked so the client asks first; credentials and keys are never returned, only connection metadata.
 
@@ -290,7 +297,7 @@ Absorbs phase 23. npm comes with Node, pip with Python and Cargo with Rust; pnpm
 
 ## Phase 26: movable environment folder
 
-**Done (2026-11-01):** `relocate.rs` and Settings → LampRabit folder → Move. Checks (inside/around the folder, clashing folders, write access, system folders, free space, FAT/exFAT, network drives, Linux noexec) through sysinfo's disk list; programs using the folder (exe or working directory inside it, from sysinfo rather than the Windows Restart Manager) with Stop it; rename on the same drive, copy-check-delete across drives, rolled back on failure; PATH and shims switched, Python venvs (pgAdmin's, projects' .venv) repointed. Left: choosing the folder on first run (onboarding).
+**Done (2026-11-01):** `relocate.rs` and Settings → LampRabit folder → Move. Checks (inside/around the folder, clashing folders, write access, system folders, free space, FAT/exFAT, network drives, Linux noexec) through sysinfo's disk list; programs using the folder (exe or working directory inside it, from sysinfo rather than the Windows Restart Manager) with Stop it; rename on the same drive, copy-check-delete across drives, rolled back on failure; PATH and shims switched, Python venvs (pgAdmin's, projects' .venv) repointed. First-run environment-folder selection is implemented in phase 18.
 
 Decided 2026-11-01: the LampRabit folder (bin, etc, www, data, logs…) can live anywhere the OS allows, and changing it moves everything.
 - Chosen on first run (onboarding) and changeable in Settings → Environment folder → Move.

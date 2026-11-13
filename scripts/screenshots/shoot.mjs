@@ -41,6 +41,9 @@ const views = {
   "doctor-issues": "page=sites",
   "doctor-healthy": "page=sites&healthy=1",
   "first-run": "page=overview&firstRun=1",
+  "setup-guide": "page=overview&guide=guide",
+  "setup-guide-dark": "page=overview&guide=guide&theme=dark",
+  "import-projects": "page=overview&guide=import",
   "narrow-sites": "page=sites&tab=git&width=900",
 };
 

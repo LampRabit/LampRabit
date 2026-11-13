@@ -64,6 +64,8 @@ pub struct Settings {
     pub log_max_mb: u32,
     pub log_keep: u32,
     pub log_total_mb: u32,
+    /// What Home greets the user with; empty until the setup guide asks.
+    pub developer_name: String,
 }
 
 /// The two MySQL-compatible servers LampRabit runs.
@@ -560,6 +562,7 @@ impl Default for Settings {
             log_max_mb: 10,
             log_keep: 3,
             log_total_mb: 500,
+            developer_name: String::new(),
         }
     }
 }

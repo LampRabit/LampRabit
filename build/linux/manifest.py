@@ -11,7 +11,7 @@ import pathlib
 import re
 import sys
 
-NAME = re.compile(r"^(apache|nginx|php|redis|memcached|minio)-(.+)-(linux|macos|windows)-(x86_64|aarch64)\.tar\.gz$")
+NAME = re.compile(r"^(apache|nginx|php|redis|memcached|minio|mariadb)-(.+)-(linux|macos|windows)-(x86_64|aarch64)\.tar\.gz$")
 
 
 def label(runtime, version):
@@ -32,7 +32,9 @@ def main():
     for archive in sorted(out.glob("*.tar.gz")):
         m = NAME.match(archive.name)
         if not m:
-            continue
+            # Skipping it would publish the archive without listing it, so the app never
+            # offers it (MariaDB's macOS builds were missed this way): add the runtime above.
+            sys.exit(f"manifest.py: {archive.name} isn't a known runtime archive; add its runtime to NAME")
         runtime, version, os_name, arch = m.groups()
         sha256 = (out / f"{archive.name}.sha256").read_text().split()[0]
         entries[(runtime, version, os_name, arch)] = {
