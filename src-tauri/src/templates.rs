@@ -1075,6 +1075,25 @@ mod tests {
         }
     }
 
+    /// What the template editor writes (src/lib/templateYaml.ts; templateYaml.test.ts keeps
+    /// these samples in step with it) must pass the same checks a saved template does.
+    #[test]
+    fn editor_samples_are_valid() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/lib/__fixtures__/templates");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&dir).expect("the editor's samples (npm test writes them)") {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|e| e == "yaml") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                if let Err(e) = parse_text(&text) {
+                    panic!("{}: {e}\n{text}", path.display());
+                }
+                seen += 1;
+            }
+        }
+        assert!(seen >= 5, "expected the editor's samples in {}", dir.display());
+    }
+
     #[test]
     fn the_example_template_is_valid() {
         let t = parse(EXAMPLE).unwrap();

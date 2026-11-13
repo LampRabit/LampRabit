@@ -44,6 +44,8 @@ const views = {
   "setup-guide": "page=overview&guide=guide",
   "setup-guide-dark": "page=overview&guide=guide&theme=dark",
   "import-projects": "page=overview&guide=import",
+  "template-editor": "page=overview&templateEditor=1",
+  "template-editor-dark": "page=overview&templateEditor=1&theme=dark",
   "titlebar-macos": "page=overview&os=macos",
   "titlebar-macos-narrow": "page=sites&os=macos&width=900",
   "titlebar-linux": "page=sites&os=linux&width=900",

@@ -1,0 +1,48 @@
+schema: 1
+id: cms-from-a-zip
+name: 'CMS from a zip'
+requires:
+  php: '8.3'
+database: optional
+engines: [mariadb, mysql]
+steps:
+  - create_database: {}
+  - name: Downloading the code
+    download:
+      url: 'https://example.com/cms.zip'
+      sha256: abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+      extract: true
+      strip: 'cms'
+  - name: 'Writing the config'
+    write:
+      path: 'config.php'
+      content: |
+        <?php
+        return ['url' => '{{url}}'];
+  - name: 'Settings'
+    env:
+      values:
+        APP_NAME: '{{project}}'
+        SECRET: '{{random:32}}'
+  - name: 'Installer'
+    optional: true
+    label: 'Installer'
+    if: database
+    php: ['install.php', '--quiet']
+  - if: '!database'
+    composer: ['require', 'predis/predis']
+  - name: 'Sample'
+    copy: { from: 'sample.htaccess', to: '.htaccess' }
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: 'New CMS from a zip'
+commands:
+  discover: []
+domains:
+  - name: admin
+    root: 'admin'
+done: 'Open {{url}}/install to finish.'

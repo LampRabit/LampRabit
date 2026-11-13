@@ -1,0 +1,13 @@
+schema: 1
+id: go-service
+name: 'Go service'
+requires:
+  go: '1.22'
+steps:
+  - name: Creating the project
+    run: 'go mod init {{project}}'
+  - name: Downloading Go modules
+    run: go mod download
+serve:
+  mode: dynamic
+  command: 'go run .'
