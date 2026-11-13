@@ -36,12 +36,22 @@ pub fn open_terminal(settings: &Settings, layout: &Layout, dir: &Path) -> Result
     #[cfg(not(windows))]
     {
         if cfg!(target_os = "macos") {
-            let script = format!(
-                "tell application \"Terminal\" to do script \"cd '{}'; export PATH='{}'\"",
-                dir.display(),
-                path.to_string_lossy()
-            );
-            std::process::Command::new("osascript").args(["-e", &script, "-e", "tell application \"Terminal\" to activate"]).spawn()?;
+            // Keep paths out of AppleScript source, then quote them for the shell that
+            // Terminal starts. Project folders and the environment root can contain quotes.
+            let script = r#"
+                on run argv
+                    set projectDir to item 1 of argv
+                    set lampRabitPath to item 2 of argv
+                    set shellCommand to "cd " & quoted form of projectDir & "; export PATH=" & quoted form of lampRabitPath
+                    tell application "Terminal" to do script shellCommand
+                    tell application "Terminal" to activate
+                end run
+            "#;
+            std::process::Command::new("osascript")
+                .args(["-e", script])
+                .arg(dir)
+                .arg(path)
+                .spawn()?;
             return Ok(());
         }
         // GNOME's terminals start shells from a background server that never sees our
