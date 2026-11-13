@@ -342,8 +342,26 @@ function describe(id: string, item: StarterItem | undefined, node: { manager: st
   }
 }
 
-/** Installs the components one by one; a failed one can be retried. */
-function InstallStep({ runtimes: given, onClose, onNext }: { runtimes: string[]; onClose: () => void; onNext: () => void }) {
+/**
+ * Installs the components one by one; a failed one can be retried. Also used by a profile
+ * import, for the services the profiles need (a service's id is its runtime's).
+ */
+export function InstallStep({
+  runtimes: given,
+  onClose,
+  onNext,
+  title = "Installing your stack",
+  nextLabel = "Continue",
+  labels: knownLabels,
+}: {
+  runtimes: string[];
+  onClose: () => void;
+  onNext: () => void;
+  title?: string;
+  nextLabel?: string;
+  /** Names to show before each component's plan says its own. */
+  labels?: Record<string, string>;
+}) {
   const queryClient = useQueryClient();
   // The list it opened with; the parent's array is new on every render.
   const [runtimes] = useState(given);
@@ -351,7 +369,7 @@ function InstallStep({ runtimes: given, onClose, onNext }: { runtimes: string[];
   const installs = useAppStore((s) => s.installs);
   const [states, setStates] = useState<Record<string, ItemState>>(() => Object.fromEntries(runtimes.map((r) => [r, { status: "waiting" }])));
   const [current, setCurrent] = useState<{ id: string; key?: string } | null>(null);
-  const [labels, setLabels] = useState<Record<string, string>>({ node: "Node.js" });
+  const [labels, setLabels] = useState<Record<string, string>>({ node: "Node.js", ...knownLabels });
 
   const installOne = async (id: string) => {
     setStates((s) => ({ ...s, [id]: { status: "working" } }));
@@ -417,7 +435,7 @@ function InstallStep({ runtimes: given, onClose, onNext }: { runtimes: string[];
     <Dialog
       open
       onClose={onClose}
-      title={finished ? (failed ? "Some components didn't install" : "Installed") : "Installing your stack"}
+      title={finished ? (failed ? "Some components didn't install" : "Installed") : title}
       icon={finished ? <CheckCircle2 size={18} /> : <Loader2 size={18} className="animate-spin" />}
       width="max-w-xl"
       footer={
@@ -426,7 +444,7 @@ function InstallStep({ runtimes: given, onClose, onNext }: { runtimes: string[];
             {finished ? "Close" : "Hide"}
           </Button>
           <Button variant="primary" onClick={onNext} disabled={!finished} data-autofocus>
-            Continue
+            {nextLabel}
           </Button>
         </>
       }
