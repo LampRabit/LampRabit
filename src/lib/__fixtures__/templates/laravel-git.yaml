@@ -1,0 +1,65 @@
+schema: 1
+id: shop
+name: 'Shop'
+description: 'Our shop, ready to work on'
+icon: flame
+color: red
+requires:
+  php: '8.3'
+  node: true
+  extensions: [intl, gd]
+database: optional
+engines: [mariadb, mysql]
+steps:
+  - create_database: {}
+  - name: Getting the code
+    cwd: www
+    needs: [git]
+    run: 'git clone --branch main https://github.com/acme/shop.git "{{project}}"'
+  - name: Installing PHP packages
+    composer: [install, --no-interaction]
+  - name: Creating .env
+    copy: { from: .env.example, to: .env }
+  - name: Configuring the environment
+    env:
+      values:
+        APP_URL: "{{url}}"
+        MAIL_HOST: "{{mail.host}}"
+        MAIL_PORT: "{{mail.port}}"
+  - name: Installing Node packages
+    needs: [node]
+    run: "{{pm.install}}"
+  - name: Building the front end
+    needs: [node]
+    run: "{{pm.run}} build"
+  - name: Connecting the database
+    if: database
+    env:
+      values:
+        DB_CONNECTION: "{{db.engine}}"
+        DB_HOST: "{{db.host}}"
+        DB_PORT: "{{db.port}}"
+        DB_DATABASE: "{{database}}"
+        DB_USERNAME: "{{db.user}}"
+        DB_PASSWORD: "{{db.password}}"
+  - name: Generating the app key
+    php: [artisan, key:generate]
+  - name: Running database migrations
+    if: database
+    php: [artisan, migrate, --force]
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: 'New Shop'
+commands:
+  list:
+    - name: 'Seed'
+      run: 'php artisan db:seed'
+      description: 'Fills the database'
+processes:
+  - name: queue
+    command: 'php artisan queue:work'
+    autostart: false

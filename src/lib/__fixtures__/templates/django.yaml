@@ -1,0 +1,43 @@
+schema: 1
+id: django-postgres
+name: 'Django + Postgres'
+requires:
+  python: '3.11'
+database: required
+engines: [postgres]
+variables:
+  - id: admin
+    label: 'Admin user'
+    default: 'admin'
+    help: 'Made with createsuperuser'
+    required: true
+  - id: css
+    label: 'CSS'
+    type: choice
+    options: ['plain', 'tailwind']
+    default: 'plain'
+  - id: api
+    label: 'REST API'
+    type: bool
+    default: 'false'
+steps:
+  - create_database: {}
+  - name: Creating the project
+    run: 'python -m venv .venv && {{venv.python}} -m pip install django && {{venv.python}} -m django startproject config .'
+  - name: Running the migrations
+    run: "{{venv.python}} manage.py migrate"
+  - name: Connecting the database
+    if: database
+    env:
+      values:
+        DATABASE_URL: "{{db.scheme}}://{{db.user}}:{{db.password}}@{{db.host}}:{{db.port}}/{{database}}?charset={{db.charset}}"
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: 'New Django + Postgres'
+serve:
+  mode: dynamic
+  command: '{{venv.python}} manage.py runserver 127.0.0.1:{port}'

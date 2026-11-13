@@ -33,7 +33,9 @@ export default function Titlebar() {
     return () => document.removeEventListener("mousedown", close);
   }, []);
   const update = useAppUpdate((s) => s.available);
-  const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
+  // The user agent knows macOS before the backend answers, so the traffic lights never
+  // land on the logo while it loads.
+  const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os ?? (navigator.userAgent.includes("Mac OS X") ? "macos" : undefined);
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
   const onError = (e: unknown) => notify("error", String(e));
@@ -46,8 +48,11 @@ export default function Titlebar() {
     <header
       data-tauri-drag-region
       className={clsx(
-        "relative z-50 flex h-12 shrink-0 items-center gap-2 border-b border-line bg-surface/90 px-2 backdrop-blur-md select-none sm:gap-2.5 sm:px-3",
-        os === "macos" ? "pl-20" : "",
+        "relative z-50 flex h-12 shrink-0 items-center gap-2 border-b border-line bg-surface/90 backdrop-blur-md select-none sm:gap-2.5",
+        // macOS draws its traffic lights over the left edge (trafficLightPosition in
+        // tauri.macos.conf.json): 84px keeps the logo clear of them at every width. A
+        // responsive px-* here would override it, which is how they once covered the logo.
+        os === "macos" ? "pr-2 pl-[84px] sm:pr-3" : "px-2 sm:px-3",
       )}
     >
       <Logo animated className="pointer-events-none size-8 shrink-0" />

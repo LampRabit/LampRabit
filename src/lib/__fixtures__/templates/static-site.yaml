@@ -1,0 +1,19 @@
+schema: 1
+id: landing-page
+name: 'Landing page'
+requires:
+  node: true
+steps:
+  - name: Writing a README
+    write:
+      path: README.md
+      content: "# {{project}}\n"
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: 'New Landing page'
+serve:
+  mode: static

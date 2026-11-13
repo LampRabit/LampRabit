@@ -37,7 +37,7 @@ import { useAppStore } from "../lib/store";
 import { Button, Segmented, Switch, inputClass } from "./ui";
 
 /** Icons a template can name (`icon:`); anything else gets a box. */
-const icons: Record<string, LucideIcon> = {
+export const icons: Record<string, LucideIcon> = {
   coffee: Coffee,
   leaf: Leaf,
   terminal: SquareTerminal,
@@ -55,7 +55,7 @@ const icons: Record<string, LucideIcon> = {
 };
 
 /** Tile colours a template can name (`color:`), spelled out so Tailwind keeps them. */
-const tiles: Record<string, string> = {
+export const tiles: Record<string, string> = {
   red: "bg-red-500/10 text-red-500",
   orange: "bg-orange-500/10 text-orange-500",
   amber: "bg-amber-500/10 text-amber-600",

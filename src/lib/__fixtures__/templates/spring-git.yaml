@@ -1,0 +1,31 @@
+schema: 1
+id: spring
+name: 'Spring'
+requires:
+  java: '21'
+database: optional
+engines: [mysql, postgres]
+steps:
+  - create_database: {}
+  - name: Getting the code
+    cwd: www
+    needs: [git]
+    run: 'git clone https://github.com/acme/api.git "{{project}}"'
+  - name: Building with Maven
+    run: "{{mvnw}} -q package -DskipTests"
+  - name: Connecting the database
+    if: database
+    env:
+      file: '.env.local'
+      values:
+        DATABASE_URL: "{{db.scheme}}://{{db.user}}:{{db.password}}@{{db.host}}:{{db.port}}/{{database}}?charset={{db.charset}}"
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: 'New Spring'
+serve:
+  mode: dynamic
+  command: '{{mvnw}} spring-boot:run'

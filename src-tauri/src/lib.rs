@@ -1176,7 +1176,7 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
         .await?;
     let (settings, layout) = state.snapshot().await;
     let url = sites::url_for(&settings, &name).ok_or_else(|| Error::msg("invalid project name"))?;
-    let ctx = projects::Ctx { app: &app, http: &state.http, settings: &settings, layout: &layout, name: &name };
+    let ctx = projects::Ctx { app: &app, http: &state.http, settings: &settings, layout: &layout, name: &name, created_database: Default::default() };
     logs::system(&app, logs::Level::Info, format!("Creating project {name} from the {} template", template.name));
 
     let result = async {
@@ -1225,6 +1225,7 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
         Ok(built) => built,
         Err(e) => {
             let _ = std::fs::remove_dir_all(layout.www().join(&name));
+            projects::drop_created_database(&ctx, &request).await;
             state.update_settings(|s| { s.sites.remove(&name); }).await?;
             logs::system(&app, logs::Level::Error, format!("Creating project {name} failed: {e}"));
             return Err(e);

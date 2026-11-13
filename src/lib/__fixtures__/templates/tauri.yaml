@@ -1,0 +1,26 @@
+schema: 1
+id: tauri-app
+name: 'Tauri app'
+requires:
+  rust: '1.80'
+  node: true
+steps:
+  - name: Creating the project
+    cwd: www
+    needs: [node]
+    run: '{{pm.create}} tauri-app@latest "{{project}}" {{pm.args}} --template react-ts --manager {{pm}} --yes'
+  - name: Installing Node packages
+    needs: [node]
+    run: "{{pm.install}}"
+  - name: Building it once
+    run: cargo build
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: 'New Tauri app'
+serve:
+  mode: dynamic
+  command: '{{pm.run}} dev {{pm.args}} --host 127.0.0.1 --port {port} --strictPort'

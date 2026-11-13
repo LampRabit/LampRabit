@@ -1351,11 +1351,27 @@ pub async fn update_hosts(layout: &Layout, sites: &[Site]) -> Result<()> {
         crate::procgroup::prepare(&mut cmd);
         cmd.status().await?
     } else if cfg!(target_os = "macos") {
+        // The DNS cache flush mustn't fail the update: the file is what matters, and Safari
+        // and Chrome read it again once mDNSResponder is told.
         let script = format!(
-            "do shell script \"cp '{}' /etc/hosts && dscacheutil -flushcache && killall -HUP mDNSResponder\" with administrator privileges",
+            "do shell script \"cp '{}' /etc/hosts; dscacheutil -flushcache; killall -HUP mDNSResponder; true\" with administrator privileges",
             staged.display()
         );
-        tokio::process::Command::new("osascript").args(["-e", &script]).status().await?
+        let out = tokio::process::Command::new("osascript").args(["-e", &script]).output().await?;
+        let _ = std::fs::remove_file(&staged);
+        if out.status.success() {
+            return Ok(());
+        }
+        // osascript exits 1 for everything; its message says what happened (-128 is Cancel).
+        let message = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(Error::msg(if message.contains("-128") {
+            "Updating the hosts file was cancelled. LampRabit asks for your Mac's password to add the .test domains to /etc/hosts; until then they don't resolve.".to_string()
+        } else {
+            format!(
+                "Could not update /etc/hosts ({message}). Your macOS account needs administrator rights for it; or add these lines to /etc/hosts yourself (sudo nano /etc/hosts):\n{}",
+                sites.iter().map(|s| format!("127.0.0.1\t{}", s.domain)).collect::<Vec<_>>().join("\n")
+            )
+        }));
     } else {
         tokio::process::Command::new("pkexec").arg("cp").arg(&staged).arg(&hosts).status().await?
     };
