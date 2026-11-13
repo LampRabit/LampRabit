@@ -263,7 +263,9 @@ export interface McpStatus {
   token: string;
   command: string;
   args: string[];
-  clients: { id: string; name: string; installed: boolean; connected: boolean; path: string | null }[];
+  /** `unsupported`: it can't run a local MCP server; why, and what to use instead. */
+  /** `stale`: its entry runs another program than this LampRabit (an old copy, a moved app). */
+  clients: { id: string; name: string; installed: boolean; connected: boolean; stale: boolean; path: string | null; note: string | null; unsupported: string | null }[];
 }
 
 /** One component of a first-run starter stack (starterPlan). */

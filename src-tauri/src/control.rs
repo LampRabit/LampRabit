@@ -151,7 +151,9 @@ pub async fn reach(launch: bool) -> Result<Endpoint> {
     if !launch {
         return Err(Error::msg("LampRabit isn't running. Start it, or drop --no-launch to have the command start it."));
     }
-    let exe = std::env::current_exe()?;
+    // The real app, also when this is the copy assistants run (mcp_clients::launcher_dir), so
+    // the copy never ends up running LampRabit's window.
+    let exe = crate::mcp_clients::app_exe()?;
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("--minimized").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     #[cfg(windows)]

@@ -2377,7 +2377,7 @@ async fn mcp_status(app: AppHandle, state: State<'_, AppState>) -> Result<McpSta
         running: mcp::http_running(),
         url: format!("http://127.0.0.1:{}/mcp", settings.ports.mcp),
         token: mcp_token(&app)?,
-        command: std::env::current_exe()?.to_string_lossy().into_owned(),
+        command: mcp_clients::program(),
         args: vec!["--cli", "mcp"],
         clients: mcp_clients::status(),
     })
@@ -3712,6 +3712,19 @@ pub fn run() {
                     polls = polls.wrapping_add(1);
                     if polls % 150 == 1 {
                         let mb = |n: u32| u64::from(n.max(1)) * 1024 * 1024;
+            {
+                // Assistants' LampRabit entries follow this build: the copy they run (Windows)
+                // is refreshed, and entries pointing at another program are pointed here.
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(e) = mcp_clients::refresh_launcher() {
+                        logs::system(&handle, logs::Level::Warn, format!("Couldn't update the copy of LampRabit that AI assistants run: {e}"));
+                    }
+                    for name in mcp_clients::repoint() {
+                        logs::system(&handle, logs::Level::Info, format!("{name}'s LampRabit entry now runs this LampRabit; restart {name} to use it."));
+                    }
+                });
+            }
                         let (max, keep, total) = (mb(settings.log_max_mb), settings.log_keep, mb(settings.log_total_mb));
                         let dir2 = dir.clone();
                         let rotated = tauri::async_runtime::spawn_blocking(move || logs::rotate(&dir2, max, keep, total)).await.unwrap_or(0);

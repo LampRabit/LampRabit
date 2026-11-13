@@ -48,6 +48,7 @@ fn settings_dirs(config_dir: &Path) -> Vec<PathBuf> {
 pub fn plan(layout: &Layout, config_dir: &Path) -> Plan {
     let mut remove = existing(layout.root(), &OWNED);
     remove.extend(settings_dirs(config_dir));
+    remove.extend(crate::mcp_clients::launcher_dir().filter(|d| d.exists()));
     Plan { remove, keep: existing(layout.root(), &KEPT) }
 }
 
@@ -60,6 +61,13 @@ pub async fn run(layout: &Layout, config_dir: &Path) -> Report {
         problems.push(format!("LampRabit's commands couldn't be taken off your PATH: {e}. Remove {} from it by hand.", shims::dir(layout).display()));
     }
     let _ = tunnels::set_ngrok_token(None);
+    // AI assistants' "lamprabit" entries, and the copy of LampRabit they ran (Windows).
+    problems.extend(crate::mcp_clients::remove_all());
+    if let Some(dir) = crate::mcp_clients::launcher_dir().filter(|d| d.exists()) {
+        if let Err(e) = std::fs::remove_dir_all(&dir) {
+            problems.push(format!("Couldn't delete {}: {e}. Quit your AI assistants and delete it by hand.", dir.display()));
+        }
+    }
     problems.extend(remove_folders(layout, config_dir));
     Report { kept: existing(layout.root(), &KEPT), problems }
 }

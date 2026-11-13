@@ -24,6 +24,8 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 toml = "0.8"
+# Codex keeps its MCP servers in config.toml: edited in place so its comments and layout stay.
+toml_edit = "0.25"
 thiserror = "2"
 dirs = "6"
 tokio = { version = "1", features = ["process", "io-util", "io-std", "sync", "time", "macros", "rt-multi-thread", "fs", "net"] }
