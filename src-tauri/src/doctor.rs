@@ -228,8 +228,13 @@ pub async fn check(input: &Input<'_>) -> Vec<Issue> {
         }
     }
 
+    // Laravel (Statamic is a Laravel app); framework names are as sites.rs shows them.
+    let laravel = input.framework.is_some_and(|f| f.eq_ignore_ascii_case("laravel") || f.eq_ignore_ascii_case("statamic"));
+    if laravel {
+        laravel_checks(input.dir, input.package_manager, has_env, &mut add);
+    }
     // Laravel builds links and redirects from APP_URL.
-    if has_env && input.framework == Some("laravel") {
+    if has_env && laravel {
         let env = std::fs::read_to_string(input.dir.join(".env")).unwrap_or_default();
         let app_url = env.lines().find_map(|l| l.strip_prefix("APP_URL=")).map(|v| v.trim().trim_matches('"').trim_end_matches('/').to_string());
         let want = input.url.trim_end_matches('/');
@@ -398,6 +403,40 @@ fn app_checks(input: &Input<'_>, app: &AppInput, add: &mut impl FnMut(&str, Seve
     }
 }
 
+/// What a fresh clone of a Laravel app is missing: its encryption key, the built Vite assets,
+/// and the public/storage link.
+fn laravel_checks(dir: &Path, package_manager: &str, has_env: bool, add: &mut impl FnMut(&str, Severity, String, String, Option<Fix>)) {
+    let run = |label: &str, command: &str| Some(Fix { label: label.into(), preview: format!("Runs {command} in the project (its output shows under Commands)."), action: FixAction::RunCommand { label: command.into(), command: command.into() } });
+    if has_env {
+        let env = std::fs::read_to_string(dir.join(".env")).unwrap_or_default();
+        let key = env.lines().find_map(|l| l.trim().strip_prefix("APP_KEY=")).map(|v| v.trim().trim_matches('"').trim_matches('\''));
+        if key == Some("") {
+            add("app-key", Severity::Error, "APP_KEY is empty".into(), "Laravel can't encrypt sessions or cookies without it, so every page fails with \"No application encryption key has been specified\".".into(), run("Generate a key", "php artisan key:generate"));
+        }
+    }
+    // @vite() reads public/build/manifest.json, or public/hot while `vite` runs.
+    let vite = ["vite.config.js", "vite.config.ts", "vite.config.mjs"].iter().any(|f| dir.join(f).is_file());
+    let public = dir.join("public");
+    if vite && !public.join("build").join("manifest.json").is_file() && !public.join("hot").is_file() {
+        let pm = match package_manager {
+            "pnpm" | "yarn" | "bun" => package_manager,
+            _ => "npm",
+        };
+        let command = format!("{pm} run build");
+        add(
+            "vite-manifest",
+            Severity::Error,
+            "The front-end assets aren't built".into(),
+            "There's no public/build/manifest.json and Vite's dev server isn't running, so pages that use @vite fail with \"Vite manifest not found\". Build them, or run the dev script under Commands.".into(),
+            Some(Fix { label: format!("Run {command}"), preview: format!("Runs {command} in the project (its output shows under Commands)."), action: FixAction::RunCommand { label: command.clone(), command } }),
+        );
+    }
+    // Uploads saved to the "public" disk are served through public/storage.
+    if dir.join("storage").join("app").join("public").is_dir() && std::fs::symlink_metadata(public.join("storage")).is_err() {
+        add("storage-link", Severity::Warning, "public/storage isn't linked".into(), "Files saved to the public disk (uploads, avatars) return 404 until public/storage points at storage/app/public.".into(), run("Create the link", "php artisan storage:link"));
+    }
+}
+
 fn install_command(manager: &str, package_manager: &str) -> String {
     if manager == "composer" {
         "composer install".into()
@@ -427,13 +466,32 @@ pub fn composer_extensions(dir: &Path) -> Vec<String> {
 }
 
 /// What `php -m` lists, lower-cased (Zend OPcache as "zend opcache" and "opcache").
+/// `php -m` per PHP, kept while its program and php.ini stay the same (turning an extension
+/// on or off rewrites php.ini). The Health panel checks every 15 seconds; without this,
+/// each check started PHP.
+type ModulesKey = (std::path::PathBuf, Option<std::time::SystemTime>, Option<std::time::SystemTime>);
+static MODULES: std::sync::Mutex<Option<std::collections::HashMap<String, (ModulesKey, Vec<String>)>>> = std::sync::Mutex::new(None);
+
 async fn php_modules(layout: &Layout, version: &str) -> Option<Vec<String>> {
     let home = layout.bin("php", version);
     let exe = home.join(exe("php"));
     let ini = layout.etc("php").join(version).join("php.ini");
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let key: ModulesKey = (exe.clone(), modified(&exe), modified(&ini));
+    if let Some((k, mods)) = MODULES.lock().ok()?.get_or_insert_with(Default::default).get(version) {
+        if *k == key {
+            return Some(mods.clone());
+        }
+    }
+    let mods = run_php_m(&exe, &ini).await?;
+    MODULES.lock().ok()?.get_or_insert_with(Default::default).insert(version.to_string(), (key, mods.clone()));
+    Some(mods)
+}
+
+async fn run_php_m(exe: &Path, ini: &Path) -> Option<Vec<String>> {
     let mut cmd = tokio::process::Command::new(exe);
     if ini.exists() {
-        cmd.arg("-c").arg(&ini);
+        cmd.arg("-c").arg(ini);
     }
     cmd.arg("-m").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
     procgroup::prepare(&mut cmd);
@@ -579,5 +637,32 @@ mod tests {
         runtime_checks(&rt, &mut |id: &str, _, _, detail: String, _| out.push((id.to_string(), detail)));
         assert_eq!(out[0].0, "runtime-version");
         assert!(out[0].1.contains("runs on Python 3.13.1"), "{}", out[0].1);
+    }
+
+    #[test]
+    fn laravel_clone() {
+        let dir = std::env::temp_dir().join(format!("lamprabit-doctor-laravel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("storage/app/public")).unwrap();
+        std::fs::create_dir_all(dir.join("public")).unwrap();
+        std::fs::write(dir.join(".env"), "APP_NAME=Shop\nAPP_KEY=\nAPP_URL=https://shop.test\n").unwrap();
+        std::fs::write(dir.join("vite.config.js"), "export default {}").unwrap();
+        let ids = |dir: &Path| {
+            let mut out: Vec<(String, Option<String>)> = Vec::new();
+            laravel_checks(dir, "pnpm", true, &mut |id: &str, _, _, _, fix: Option<Fix>| out.push((id.to_string(), fix.map(|f| f.label))));
+            out
+        };
+        let want: Vec<(String, Option<String>)> = vec![
+            ("app-key".into(), Some("Generate a key".into())),
+            ("vite-manifest".into(), Some("Run pnpm run build".into())),
+            ("storage-link".into(), Some("Create the link".into())),
+        ];
+        assert_eq!(ids(&dir), want);
+        // A key, Vite's dev server running (public/hot), and the link: nothing to say.
+        std::fs::write(dir.join(".env"), "APP_KEY=base64:abc=\n").unwrap();
+        std::fs::write(dir.join("public/hot"), "http://localhost:5173").unwrap();
+        std::fs::create_dir_all(dir.join("public/storage")).unwrap();
+        assert!(ids(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
