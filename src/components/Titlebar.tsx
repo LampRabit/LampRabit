@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Copy, Download, FolderOpen, Keyboard, Minus, Moon, MoreHorizontal, Play, Square, SquareTerminal, Sun, X } from "lucide-react";
 import clsx from "clsx";
 import { api } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { useAppUpdate } from "../lib/updates";
 import { useStack } from "../lib/stack";
 import { useEffectiveTheme, useTheme } from "../lib/theme";
@@ -19,7 +19,6 @@ import { Button } from "./ui";
  * top of it (overlay title bar), so it only leaves room for them.
  */
 export default function Titlebar() {
-  const notify = useAppStore((s) => s.notify);
   const navigate = useAppStore((s) => s.navigate);
   const page = useAppStore((s) => s.page);
   const pageToolbar = useCurrentPageToolbar(page);
@@ -38,7 +37,6 @@ export default function Titlebar() {
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os ?? (navigator.userAgent.includes("Mac OS X") ? "macos" : undefined);
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
-  const onError = (e: unknown) => notify("error", String(e));
   const stack = useStack();
   const anyRunning = stack.running.length > 0;
   // On a fresh install there is nothing to start yet; lead to Services instead.
@@ -97,10 +95,10 @@ export default function Titlebar() {
             <span className="hidden 2xl:inline">Update {update.version} available</span><Download size={14} className="2xl:hidden" />
           </button>
         )}
-        <Button size="sm" className="px-2 sm:px-3" onClick={() => paths.data && openPath(paths.data.www).catch(onError)} disabled={!paths.data} title="Open www (W)" aria-label="Open www">
+        <Button size="sm" className="px-2 sm:px-3" onClick={() => paths.data && openPath(paths.data.www).catch(notifyError)} disabled={!paths.data} title="Open www (W)" aria-label="Open www">
           <FolderOpen size={15} /> <span className="hidden xl:inline">Open www</span>
         </Button>
-        <Button size="sm" onClick={() => api.openTerminal(null).catch(onError)} aria-label="Open terminal" title="Terminal with php, composer and mariadb (T)">
+        <Button size="sm" onClick={() => api.openTerminal(null).catch(notifyError)} aria-label="Open terminal" title="Terminal with php, composer and mariadb (T)">
           <SquareTerminal size={15} />
         </Button>
         {/* Home has its own (profile-aware) Start, Restart and Stop in its header. */}

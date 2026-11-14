@@ -14,7 +14,7 @@ import {
   type Crash,
   type StatusEvent,
 } from "./lib/api";
-import { useAppStore } from "./lib/store";
+import { useAppStore, notifyError } from "./lib/store";
 import { useAppUpdate } from "./lib/updates";
 import Overview from "./pages/Overview";
 import Sites from "./pages/Sites";
@@ -104,9 +104,8 @@ const pageKeys: PageId[] = ["overview", "sites", "services", "logs", "settings"]
 
 /** Shortcuts that work on every page (see lib/shortcuts.ts for the full list). */
 function useGlobalShortcuts() {
-  const { navigate, notify, setShortcutsOpen, setNewProjectOpen } = useAppStore.getState();
+  const { navigate, setShortcutsOpen, setNewProjectOpen } = useAppStore.getState();
   const stack = useStack();
-  const onError = (e: unknown) => notify("error", String(e));
   useHotkeys({
     "?": () => setShortcutsOpen(true),
     ...Object.fromEntries(pageKeys.map((p, i) => [String(i + 1), () => navigate(p)])),
@@ -114,12 +113,12 @@ function useGlobalShortcuts() {
     "shift+x": () => stack.stopAll(),
     "shift+r": () => stack.running.length > 0 && stack.restartRunning(),
     n: () => setNewProjectOpen(true),
-    t: () => api.openTerminal(null).catch(onError),
+    t: () => api.openTerminal(null).catch(notifyError),
     w: () =>
       api
         .envPaths()
         .then((p) => openPath(p.www))
-        .catch(onError),
+        .catch(notifyError),
   });
 }
 

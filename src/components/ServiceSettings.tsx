@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { FolderOpen, Star } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { allServers, api, runtimeLabels, type Runtime, type Server, type Settings } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { portsFor, serverNotes } from "../lib/settingsFields";
 import ApplyBar from "./ApplyBar";
 import { Button, Card, Segmented, Switch, inputClass } from "./ui";
@@ -59,7 +59,7 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
       for (const key of ["settings", "services", "sites", "port-status"]) queryClient.invalidateQueries({ queryKey: [key] });
       notify("info", `${runtimeLabels[runtime]} settings applied`);
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
 
   if (!draft || !settings.data) return null;

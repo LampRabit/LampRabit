@@ -5,7 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, Check, FolderInput, FolderOpen, Loader2, Square } from "lucide-react";
 import clsx from "clsx";
 import { api, type MoveCheck } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { notifyError } from "../lib/store";
 import Dialog from "./Dialog";
 import { Button, inputClass } from "./ui";
 
@@ -20,7 +20,6 @@ type Phase = { kind: "pick" } | { kind: "moving"; done: number; total: number } 
  */
 export default function MoveEnvironmentDialog({ current, onClose }: { current: string; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
   const [target, setTarget] = useState("");
   const [check, setCheck] = useState<MoveCheck | null>(null);
   const [checking, setChecking] = useState(false);
@@ -61,7 +60,7 @@ export default function MoveEnvironmentDialog({ current, onClose }: { current: s
     api
       .stopEnvironmentHolder(pid)
       .then(() => holders.refetch())
-      .catch((e) => notify("error", String(e)));
+      .catch(notifyError);
   const move = async () => {
     setPhase({ kind: "moving", done: 0, total: check?.size ?? 0 });
     try {

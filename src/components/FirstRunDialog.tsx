@@ -34,7 +34,7 @@ import {
 import clsx from "clsx";
 import { api, serviceLabels, type ImportSource, type ImportedProject, type NodeRelease, type Release, type ServiceKind, type Settings, type StarterItem } from "../lib/api";
 import { labelFor, useCatalog } from "../lib/catalog";
-import { installKey, useAppStore } from "../lib/store";
+import { installKey, useAppStore, notifyError } from "../lib/store";
 import { formatBytes } from "../lib/usage";
 import Dialog from "./Dialog";
 import Logo from "./Logo";
@@ -85,7 +85,6 @@ export default function FirstRunDialog() {
 
 function Flow({ settings, firstRun = false, only, onDone }: { settings: Settings; firstRun?: boolean; only?: "import"; onDone: () => void }) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
   const catalog = useCatalog();
   // Decided once, so saving the name doesn't take its step away mid-flow.
   const [steps] = useState<Step[]>(() => {
@@ -112,7 +111,7 @@ function Flow({ settings, firstRun = false, only, onDone }: { settings: Settings
   const finishFolder = useMutation({
     mutationFn: api.finishFirstRun,
     onSuccess: () => setStep("stack"),
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   // Leaving at any step still settles the folder, so later runs don't ask again.
   const close = () => {
@@ -636,7 +635,6 @@ function InstallPane({ nav, runtimes, labels, onNext }: { nav: Nav; runtimes: st
 
 function NameStep({ nav, initial, onBack, onNext }: { nav: Nav; initial: string; onBack: () => void; onNext: () => void }) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
   const [name, setName] = useState(initial);
   const save = useMutation({
     mutationFn: async () => {
@@ -647,7 +645,7 @@ function NameStep({ nav, initial, onBack, onNext }: { nav: Nav; initial: string;
       queryClient.setQueryData(["settings"], saved);
       onNext();
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const hour = new Date().getHours();
   const greeting = hour < 5 || hour >= 17 ? "Good evening" : hour < 12 ? "Good morning" : "Good afternoon";
@@ -715,7 +713,7 @@ function DoneStep({ nav, wanted, picked, installed, imported, onClose }: { nav: 
       for (const p of problems) notify("error", p);
       queryClient.invalidateQueries({ queryKey: ["services"] });
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const examples = picked.includes("wordpress") ? "WordPress" : picked.includes("laravel") ? "Laravel" : picked.includes("javascript") ? "Next.js, Vite, Express" : "Laravel, Symfony, WordPress";
   const facts = [

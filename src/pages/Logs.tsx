@@ -8,7 +8,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { api, serviceLabels, type Dump, type DumpNode, type LogStream, type ServiceKind } from "../lib/api";
 import type { Level, LogEntry } from "../lib/logparse";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { Button, Card, Switch } from "../components/ui";
 import Menu from "../components/Menu";
 import { usePageToolbar } from "../components/PageToolbar";
@@ -79,7 +79,6 @@ export default function Logs() {
   const clearLogs = useAppStore((s) => s.clearLogs);
   const loadHistory = useAppStore((s) => s.loadHistory);
   const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
@@ -98,7 +97,7 @@ export default function Logs() {
       notify("info", on ? "dump() and dd() now show here. PHP restarted to pick it up." : "dump() and dd() show in the page again.");
       queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
-    onError,
+    onError: notifyError,
   });
 
   // Lines per source, for the sidebar.
@@ -159,7 +158,7 @@ export default function Logs() {
     api
       .logHistory()
       .then(loadHistory)
-      .catch((e) => notify("error", String(e)))
+      .catch(notifyError)
       .finally(() => setLoading(false));
   }, [loadHistory, notify]);
 
@@ -616,7 +615,7 @@ export default function Logs() {
           {logsDropped > 0 && (
             <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-200" role="status">
               Showing the newest {logs.length.toLocaleString()} lines; {logsDropped.toLocaleString()} older {logsDropped === 1 ? "line is" : "lines are"} only in the log files.
-              <button type="button" onClick={() => paths.data && openPath(paths.data.logs).catch(onError)} className="font-medium underline">
+              <button type="button" onClick={() => paths.data && openPath(paths.data.logs).catch(notifyError)} className="font-medium underline">
                 Open the logs folder
               </button>
             </div>
@@ -693,7 +692,7 @@ export default function Logs() {
               dumps={dumps.data ?? []}
               onClose={() => setSelected(null)}
               onCopy={(text) => copyText(text, "the line")}
-              onOpenFile={(file) => api.openInEditor(file).catch(onError)}
+              onOpenFile={(file) => api.openInEditor(file).catch(notifyError)}
             />
           )}
 

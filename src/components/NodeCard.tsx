@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Hexagon, Loader2, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 import { api } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { Button, Card, IconTile } from "./ui";
 import { ActiveTile, AvailableList, InstalledTile, InstalledTiles, NoActiveTile, VersionsLayout } from "./versions";
 
@@ -19,26 +19,25 @@ export default function NodeCard() {
     staleTime: 60 * 60 * 1000,
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["node"] });
-  const onError = (e: unknown) => notify("error", String(e));
 
-  const installNvm = useMutation({ mutationFn: api.nvmInstall, onSuccess: refresh, onError });
+  const installNvm = useMutation({ mutationFn: api.nvmInstall, onSuccess: refresh, onError: notifyError });
   const install = useMutation({
     mutationFn: (v: string) => api.nodeInstall(v),
     onSuccess: (_, v) => {
       notify("info", `Node ${v} installed`);
       refresh();
     },
-    onError,
+    onError: notifyError,
   });
-  const use = useMutation({ mutationFn: (v: string) => api.nodeUse(v), onSuccess: refresh, onError });
-  const remove = useMutation({ mutationFn: (v: string) => api.nodeUninstall(v), onSuccess: refresh, onError });
+  const use = useMutation({ mutationFn: (v: string) => api.nodeUse(v), onSuccess: refresh, onError: notifyError });
+  const remove = useMutation({ mutationFn: (v: string) => api.nodeUninstall(v), onSuccess: refresh, onError: notifyError });
   const enablePms = useMutation({
     mutationFn: api.nodeEnablePackageManagers,
     onSuccess: () => {
       notify("info", "pnpm and Yarn are on");
       refresh();
     },
-    onError,
+    onError: notifyError,
   });
 
   const data = status.data;

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Loader2, Puzzle, Search, X } from "lucide-react";
 import clsx from "clsx";
 import { api, type ExtInfo } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { Button, Switch } from "./ui";
 
 /** Browse, enable and install PHP extensions for one installed PHP version. */
@@ -48,7 +48,6 @@ export default function ExtensionsDialog({
   });
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ["php-extensions", php] });
-  const onError = (e: unknown) => notify("error", String(e));
   const toggle = useMutation({
     mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
       api.setPhpExtension(php!, name, enabled),
@@ -57,7 +56,7 @@ export default function ExtensionsDialog({
       window.setTimeout(() => setFlash((f) => (f === name ? null : f)), 1200);
       return refresh();
     },
-    onError,
+    onError: notifyError,
   });
   const install = useMutation({
     mutationFn: (name: string) => api.installPhpExtension(php!, name),
@@ -65,7 +64,7 @@ export default function ExtensionsDialog({
       notify("info", `${name} installed and enabled for PHP ${php}`);
       refresh();
     },
-    onError,
+    onError: notifyError,
   });
 
   const filtered = useMemo(() => {

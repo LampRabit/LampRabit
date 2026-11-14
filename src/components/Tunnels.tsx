@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, ExternalLink, Loader2, Radio, Share2, Square } from "lucide-react";
 import clsx from "clsx";
 import { api, type Site, type Tunnel, type TunnelProvider } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { Button, Card, inputClass } from "./ui";
 
 const providerLabel: Record<TunnelProvider, string> = { ngrok: "Ngrok", cloudflare: "Cloudflare" };
@@ -22,13 +22,12 @@ function useProviders() {
 
 function useTunnelActions() {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["tunnels"] });
   const start = useMutation({
     mutationFn: ({ provider, site, port }: { provider: TunnelProvider; site: string | null; port: number | null }) =>
       api.tunnelStart(provider, site, port),
     onSuccess: refresh,
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const stop = useMutation({ mutationFn: (id: string) => api.tunnelStop(id), onSuccess: refresh });
   return { start, stop };

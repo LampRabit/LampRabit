@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Link2 } from "lucide-react";
 import { api, type InstalledRuntime, type Requirement, type Runtime } from "../lib/api";
 import { infoFor, labelFor, meet, needName, plan, unmet, useCatalog } from "../lib/catalog";
-import { installKey, useAppStore } from "../lib/store";
+import { installKey, useAppStore, notifyError } from "../lib/store";
 import { tileFor } from "./runtimes";
 import { Button, Card } from "./ui";
 
@@ -39,7 +39,7 @@ export default function RelatedPanel({ runtime, installed, onSelect }: { runtime
       }
     },
     onSuccess: (_, { needs, suggests }) => notify("info", `Set up ${[...needs.map((n) => n.label), ...suggests.map((r) => labelFor(catalog.data, r))].join(", ")}`),
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
     onSettled: () => {
       for (const key of ["installed", "services", "settings", "sites", "requirements"]) queryClient.invalidateQueries({ queryKey: [key] });
     },

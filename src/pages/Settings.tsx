@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { allServers, api, runtimeLabels, type EnvPaths, type PortStatus, type Runtime, type Server, type Settings as SettingsT } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { useTheme } from "../lib/theme";
 import { useMotion } from "../lib/motion";
 import { installAppUpdate, useAppUpdate } from "../lib/updates";
@@ -178,7 +178,7 @@ export default function Settings() {
       }
       notify("info", "Settings applied. Running services that use them were restarted.");
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
 
 
@@ -555,7 +555,7 @@ export default function Settings() {
                     setDraft({ ...draft, catchDumps: v });
                     queryClient.invalidateQueries({ queryKey: ["settings"] });
                   },
-                  (e) => notify("error", String(e)),
+                  notifyError,
                 )
               }
             />
@@ -785,7 +785,7 @@ function SharingSection() {
       queryClient.invalidateQueries({ queryKey: ["ngrok-token"] });
       notify("info", t ? "Ngrok authtoken saved to your system keychain" : "Ngrok authtoken removed");
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
 
   return (

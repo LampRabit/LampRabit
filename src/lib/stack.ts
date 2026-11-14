@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { allServers, api, type Server, type ServiceInfo, type ServiceKind, type Settings } from "./api";
-import { useAppStore } from "./store";
+import { useAppStore, notifyError } from "./store";
 
 /** Services shown (and started by "Start all") with these settings: web servers only while enabled. */
 export function serverEnabled(kind: ServiceKind, servers: Settings["webServers"] | undefined) {
@@ -43,7 +43,7 @@ export function useStack() {
     },
     // Home shows each failure on its service's row; elsewhere a toast says it.
     onSuccess: (errors) => useAppStore.getState().page !== "overview" && errors.forEach((e) => notify("error", e)),
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["services"] }),
   });
 

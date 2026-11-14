@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Infinity as Forever, Play, Plus, RefreshCw, RotateCcw, ScrollText, Search, Square, Trash2, X } from "lucide-react";
 import clsx from "clsx";
 import { api, type AppInfo, type AppOutput, type AppStatus, type NodeApp, type PackageManager, type ProjectCommand, type Site } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { Button, Segmented, inputClass } from "./ui";
 
 /** How each package manager runs a script, and passes it extra arguments. */
@@ -54,16 +54,14 @@ export function appCommand(config: NodeApp) {
 /** Start, stop and restart a project's process. The backend picks the port, writes the site and reloads the web server. */
 export function useAppActions(name: string) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const onSuccess = () => {
     queryClient.invalidateQueries({ queryKey: ["app-info", name] });
     queryClient.invalidateQueries({ queryKey: ["sites"] });
   };
   return {
-    start: useMutation({ mutationFn: () => api.appStart(name), onSuccess, onError }),
-    stop: useMutation({ mutationFn: () => api.appStop(name), onError }),
-    restart: useMutation({ mutationFn: () => api.appRestart(name), onSuccess, onError }),
+    start: useMutation({ mutationFn: () => api.appStart(name), onSuccess, onError: notifyError }),
+    stop: useMutation({ mutationFn: () => api.appStop(name), onError: notifyError }),
+    restart: useMutation({ mutationFn: () => api.appRestart(name), onSuccess, onError: notifyError }),
   };
 }
 
@@ -125,7 +123,7 @@ export function ServeSettings({ site, info, status }: { site: Site; info: AppInf
       notify("info", isActive(status) ? "Saved. Restart the app to use it." : "Saved.");
       setCustomising(false);
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
 
   return (
@@ -290,20 +288,18 @@ export function CommandsPanel({
   onKeepRunning?: (c: { name: string; command: string }) => void;
 }) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const list = useQuery({ queryKey: ["project-commands", site.name], queryFn: () => api.projectCommands(site.name), staleTime: 5 * 60_000 });
   const [filter, setFilter] = useState("");
   const running = status?.task ?? null;
   const compact = limit != null;
 
-  const run = useMutation({ mutationFn: (c: { label: string; command: string }) => api.runProjectCommand(site.name, c.label, c.command), onError });
-  const stop = useMutation({ mutationFn: () => api.stopProjectCommand(site.name), onError });
+  const run = useMutation({ mutationFn: (c: { label: string; command: string }) => api.runProjectCommand(site.name, c.label, c.command), onError: notifyError });
+  const stop = useMutation({ mutationFn: () => api.stopProjectCommand(site.name), onError: notifyError });
   const yours = useMemo(() => (list.data?.commands ?? []).filter((c) => c.origin === "yours").map((c) => ({ name: c.name, run: c.command })), [list.data]);
   const saveYours = useMutation({
     mutationFn: (commands: { name: string; run: string }[]) => api.saveProjectCommands(site.name, commands),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project-commands", site.name] }),
-    onError,
+    onError: notifyError,
   });
 
   const all = list.data?.commands ?? [];
@@ -504,8 +500,6 @@ export function OutputPanel({ name, height = "max-h-96 min-h-40", title, footer 
  */
 export function CommandPrompt({ site, status }: { site: Site; status?: AppStatus }) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const list = useQuery({ queryKey: ["project-commands", site.name], queryFn: () => api.projectCommands(site.name), staleTime: 5 * 60_000 });
   const [command, setCommand] = useState("");
   const history = useQuery({ queryKey: ["command-history", site.name], queryFn: () => api.commandHistory(site.name) });
@@ -520,7 +514,7 @@ export function CommandPrompt({ site, status }: { site: Site; status?: AppStatus
       setCommand("");
       setBack(-1);
     },
-    onError,
+    onError: notifyError,
   });
   const recall = (step: 1 | -1) => {
     const next = Math.max(-1, Math.min(earlier.length - 1, back + step));
@@ -529,7 +523,7 @@ export function CommandPrompt({ site, status }: { site: Site; status?: AppStatus
     setBack(next);
     setCommand(next === -1 ? draft.current : earlier[next]);
   };
-  const stop = useMutation({ mutationFn: () => api.stopProjectCommand(site.name), onError });
+  const stop = useMutation({ mutationFn: () => api.stopProjectCommand(site.name), onError: notifyError });
   const keep = useMutation({
     mutationFn: (c: string) =>
       api.saveProjectCommands(site.name, [...(list.data?.commands ?? []).filter((x) => x.origin === "yours").map((x) => ({ name: x.name, run: x.command })), { name: c, run: c }]),
@@ -537,7 +531,7 @@ export function CommandPrompt({ site, status }: { site: Site; status?: AppStatus
       setCommand("");
       queryClient.invalidateQueries({ queryKey: ["project-commands", site.name] });
     },
-    onError,
+    onError: notifyError,
   });
   const text = command.trim();
   const icon = "flex size-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100 disabled:opacity-30 disabled:hover:bg-transparent";

@@ -4,7 +4,7 @@ import { Download, Layers, Upload } from "lucide-react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import clsx from "clsx";
 import { api, serviceLabels, type Release, type Runtime, type ServiceKind, type StackProfile } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { formatBytes } from "../lib/usage";
 import Dialog from "./Dialog";
 import { InstallStep } from "./FirstRunDialog";
@@ -51,7 +51,7 @@ export default function ProfilesDialog({
       notify("info", profile ? "Profile updated" : "Profile created");
       onClose();
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
 
   return (
@@ -180,7 +180,7 @@ export function ProfilesTransfer() {
       return true;
     },
     onSuccess: (done) => done && notify("info", `Exported ${profiles.length} ${profiles.length === 1 ? "profile" : "profiles"}`),
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const importFile = useMutation({
     mutationFn: async () => {
@@ -217,7 +217,7 @@ export function ProfilesTransfer() {
       }
       await commit(incoming);
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const confirm = useMutation({
     mutationFn: async ({ install, remove, releases }: { install: ServiceKind[]; remove: ServiceKind[]; releases: Record<string, Release> }) => {
@@ -233,7 +233,7 @@ export function ProfilesTransfer() {
       // profile and can be installed on the Services page later.
       if (install.length) setInstalling({ services: install, releases });
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   return (
     <div className="flex items-center gap-1">

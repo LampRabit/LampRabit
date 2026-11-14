@@ -5,7 +5,7 @@ import clsx from "clsx";
 import { api, type GitBranch as Branch, type GitFile, type GitRepoSettings, type GitStatus, type Site } from "../lib/api";
 import { convertUrl, isSsh, looksSensitive, nextStep, parseDiff, progressPercent, useGitProgress } from "../lib/git";
 import { usePageActive } from "../lib/pageActive";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { formatAgo } from "../lib/time";
 import Dialog from "./Dialog";
 import { Button, inputClass } from "./ui";
@@ -25,7 +25,6 @@ type SyncAction = "fetch" | "pull" | "push";
 export default function ProjectGit({ site }: { site: Site }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const navigate = useAppStore((s) => s.navigate);
   const version = useQuery({ queryKey: ["git-version"], queryFn: api.gitVersion, staleTime: Infinity });
   const active = usePageActive();
@@ -36,7 +35,7 @@ export default function ProjectGit({ site }: { site: Site }) {
     for (const key of ["git-status", "git-branches", "git-log", "git-commit", "project-facts", "git-repo-settings", "git-stashes", "git-tags"]) queryClient.invalidateQueries({ queryKey: [key, site.name] });
     queryClient.invalidateQueries({ queryKey: ["sites"] });
   };
-  const init = useMutation({ mutationFn: () => api.gitInit(site.name), onSuccess: refresh, onError });
+  const init = useMutation({ mutationFn: () => api.gitInit(site.name), onSuccess: refresh, onError: notifyError });
   // Each run gets its own id, so its progress and Cancel don't mix with another's.
   const [op, setOp] = useState<string | null>(null);
   const progress = useGitProgress(op);
@@ -52,12 +51,12 @@ export default function ProjectGit({ site }: { site: Site }) {
       refresh();
     },
     onError: (e) => {
-      if (String(e) !== "Cancelled.") onError(e);
+      if (String(e) !== "Cancelled.") notifyError(e);
       refresh();
     },
   });
-  const abort = useMutation({ mutationFn: () => api.gitAbort(site.name), onSuccess: refresh, onError });
-  const carryOn = useMutation({ mutationFn: () => api.gitContinue(site.name), onSuccess: refresh, onError });
+  const abort = useMutation({ mutationFn: () => api.gitAbort(site.name), onSuccess: refresh, onError: notifyError });
+  const carryOn = useMutation({ mutationFn: () => api.gitContinue(site.name), onSuccess: refresh, onError: notifyError });
 
   if (version.isLoading) return <p className="text-sm text-muted">Looking for Git…</p>;
   if (!version.data) {
@@ -233,7 +232,6 @@ function Changes({
   pushing: boolean;
 }) {
   const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const files = status.files;
   const firstCommit = !status.head;
   const identityMissing = !status.identity.name || !status.identity.email;
@@ -251,14 +249,14 @@ function Changes({
     if (selected && !current) setSelected(null);
   }, [selected, current]);
 
-  const stage = useMutation({ mutationFn: ({ paths, on }: { paths: string[]; on: boolean }) => api.gitStage(site.name, paths, on), onSuccess: onChanged, onError });
+  const stage = useMutation({ mutationFn: ({ paths, on }: { paths: string[]; on: boolean }) => api.gitStage(site.name, paths, on), onSuccess: onChanged, onError: notifyError });
   const discard = useMutation({
     mutationFn: (paths: string[]) => api.gitDiscard(site.name, paths),
     onSuccess: () => {
       setDiscarding(null);
       onChanged();
     },
-    onError,
+    onError: notifyError,
   });
   // Nothing staged but changes there: the commit takes all of them (git add --all first),
   // like VS Code's "commit all" when nothing is staged.
@@ -271,7 +269,7 @@ function Changes({
       setAmend(false);
       onChanged();
     },
-    onError,
+    onError: notifyError,
   });
   const stashes = useQuery({ queryKey: ["git-stashes", site.name], queryFn: () => api.gitStashes(site.name) });
   const stash = useMutation({
@@ -282,7 +280,7 @@ function Changes({
       onChanged();
     },
     onError: (e) => {
-      onError(e);
+      notifyError(e);
       stashes.refetch();
       onChanged();
     },
@@ -523,8 +521,6 @@ function Changes({
 }
 
 function FileDiff({ site, file, staged, onChanged }: { site: Site; file: GitFile; staged: boolean; onChanged: () => void }) {
-  const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const untracked = file.staged === "?";
   const diff = useQuery({
     queryKey: ["git-diff", site.name, file.path, staged, file.staged, file.unstaged],
@@ -538,9 +534,9 @@ function FileDiff({ site, file, staged, onChanged }: { site: Site; file: GitFile
       diff.refetch();
       onChanged();
     },
-    onError,
+    onError: notifyError,
   });
-  const resolve = useMutation({ mutationFn: (theirs: boolean) => api.gitResolve(site.name, file.path, theirs), onSuccess: onChanged, onError });
+  const resolve = useMutation({ mutationFn: (theirs: boolean) => api.gitResolve(site.name, file.path, theirs), onSuccess: onChanged, onError: notifyError });
   if (file.conflicted) {
     return (
       <>
@@ -554,7 +550,7 @@ function FileDiff({ site, file, staged, onChanged }: { site: Site; file: GitFile
             <Button size="sm" onClick={() => resolve.mutate(true)} disabled={resolve.isPending} title="git checkout --theirs, then stage">
               Take the incoming version
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => api.openInEditor(`${site.path}/${file.path}`).catch(onError)}>
+            <Button size="sm" variant="ghost" onClick={() => api.openInEditor(`${site.path}/${file.path}`).catch(notifyError)}>
               Open in editor
             </Button>
           </div>
@@ -725,7 +721,7 @@ function CommitView({ site, hash, onOpen }: { site: Site; hash: string; onOpen: 
       setConfirm(null);
       changed();
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const restore = useMutation({
     mutationFn: (path: string) => api.gitRestoreFile(site.name, hash, path),
@@ -734,7 +730,7 @@ function CommitView({ site, hash, onOpen }: { site: Site; hash: string; onOpen: 
       setConfirm(null);
       changed();
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const d = details.data;
   if (details.isLoading) return <p className="p-4 text-sm text-muted">Loading the commit…</p>;
@@ -890,7 +886,6 @@ function LineCounts({ add, del, binary }: { add: number; del: number; binary?: b
 
 function Branches({ site, current, upstream, onChanged }: { site: Site; current: string | null; upstream: string | null; onChanged: () => void }) {
   const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const list = useQuery({ queryKey: ["git-branches", site.name], queryFn: () => api.gitBranches(site.name) });
   const [name, setName] = useState("");
   const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null);
@@ -909,7 +904,7 @@ function Branches({ site, current, upstream, onChanged }: { site: Site; current:
     onError: (e, action) => {
       // An unmerged branch asks again, with the reason, before deleting it anyway.
       if (action.kind === "delete" && !action.force && String(e).includes("aren't merged")) setDeleting({ branch: action.branch, force: true, why: String(e) });
-      else onError(e);
+      else notifyError(e);
       onChanged();
     },
   });
@@ -1067,7 +1062,7 @@ function Tags({ site, onChanged }: { site: Site; onChanged: () => void }) {
       tags.refetch();
       onChanged();
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   return (
     <section className="space-y-2">
@@ -1118,13 +1113,12 @@ const hosts = [
 
 function RemotesAndSettings({ site, status, onChanged }: { site: Site; status: GitStatus; onChanged: () => void }) {
   const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const remotes = status.remotes;
   const identity = status.identity;
   const remote = useMutation({
     mutationFn: (action: Parameters<typeof api.gitRemote>[1]) => api.gitRemote(site.name, action),
     onSuccess: onChanged,
-    onError,
+    onError: notifyError,
   });
   const [who, setWho] = useState({ name: identity.local ? (identity.name ?? "") : "", email: identity.local ? (identity.email ?? "") : "" });
   const saveWho = useMutation({
@@ -1133,7 +1127,7 @@ function RemotesAndSettings({ site, status, onChanged }: { site: Site; status: G
       notify("info", v.name || v.email ? "This repository now commits as you set" : "This repository uses your global Git identity again");
       onChanged();
     },
-    onError,
+    onError: notifyError,
   });
 
   return (
@@ -1372,7 +1366,6 @@ function AddRemote({ taken, busy, onAdd }: { taken: string[]; busy: boolean; onA
 
 /** Pull mode, pruning and first-push tracking for this repository only. */
 function RepoSettingsCard({ site, onChanged }: { site: Site; onChanged: () => void }) {
-  const notify = useAppStore((s) => s.notify);
   const settings = useQuery({ queryKey: ["git-repo-settings", site.name], queryFn: () => api.gitRepoSettings(site.name) });
   const save = useMutation({
     mutationFn: (next: GitRepoSettings) => api.gitSetRepoSettings(site.name, next),
@@ -1380,7 +1373,7 @@ function RepoSettingsCard({ site, onChanged }: { site: Site; onChanged: () => vo
       settings.refetch();
       onChanged();
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const s = settings.data;
   return (

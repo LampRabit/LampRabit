@@ -247,3 +247,6 @@ export const useAppStore = create<AppStore>((set) => ({
   },
   dismiss: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
 }));
+
+/** Shows a failed action's error as a toast: the usual `onError` and `.catch` handler. */
+export const notifyError = (e: unknown) => useAppStore.getState().notify("error", String(e));

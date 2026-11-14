@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpCircle, Download, Loader2, PackagePlus, RefreshCw, Search, Trash2, TriangleAlert } from "lucide-react";
 import clsx from "clsx";
 import { api, type AppStatus, type DependencyEcosystem, type DependencyManager, type DependencyPlan, type DependencyRequest, type OutdatedPackage, type Site } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import Dialog from "./Dialog";
 import { OutputPanel } from "./ProjectRun";
 import { Button, Card, Pill, inputClass } from "./ui";
@@ -34,7 +34,6 @@ const canUpgrade = (m: DependencyManager) => m !== "gradle";
  */
 export default function ProjectDependencies({ site, status }: { site: Site; status?: AppStatus }) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
   const list = useQuery({ queryKey: ["dependencies", site.name], queryFn: () => api.projectDependencies(site.name) });
   const [pending, setPending] = useState<{ request: DependencyRequest; plan: DependencyPlan } | null>(null);
   const [starting, setStarting] = useState(false);
@@ -54,14 +53,14 @@ export default function ProjectDependencies({ site, status }: { site: Site; stat
   const ask = (request: DependencyRequest) =>
     api.dependencyPlan(site.name, request).then(
       (plan) => setPending({ request, plan }),
-      (e) => notify("error", String(e)),
+      notifyError,
     );
   const confirm = () => {
     if (!pending) return;
     setStarting(true);
     api
       .runDependencyAction(site.name, pending.request)
-      .then(() => setPending(null), (e) => notify("error", String(e)))
+      .then(() => setPending(null), notifyError)
       .finally(() => setStarting(false));
   };
 
