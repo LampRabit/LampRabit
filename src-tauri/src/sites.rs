@@ -1353,11 +1353,20 @@ pub async fn update_hosts(layout: &Layout, sites: &[Site]) -> Result<()> {
     } else if cfg!(target_os = "macos") {
         // The DNS cache flush mustn't fail the update: the file is what matters, and Safari
         // and Chrome read it again once mDNSResponder is told.
-        let script = format!(
-            "do shell script \"cp '{}' /etc/hosts; dscacheutil -flushcache; killall -HUP mDNSResponder; true\" with administrator privileges",
-            staged.display()
-        );
-        let out = tokio::process::Command::new("osascript").args(["-e", &script]).output().await?;
+        // The staged file's path comes in as an argument and is shell-quoted by AppleScript,
+        // so a LampRabit folder with quotes or backslashes in its name still works.
+        let out = tokio::process::Command::new("osascript")
+            .args([
+                "-e",
+                "on run argv",
+                "-e",
+                "do shell script \"cp \" & quoted form of (item 1 of argv) & \" /etc/hosts; dscacheutil -flushcache; killall -HUP mDNSResponder; true\" with administrator privileges",
+                "-e",
+                "end run",
+            ])
+            .arg(&staged)
+            .output()
+            .await?;
         let _ = std::fs::remove_file(&staged);
         if out.status.success() {
             return Ok(());

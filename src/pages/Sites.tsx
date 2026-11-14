@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -32,6 +33,7 @@ import { api, runtimeLabels, serviceLabels, type AppStatus, type CommandRun, typ
 import { useAppStore } from "../lib/store";
 import Dialog from "../components/Dialog";
 import ProjectDomains from "../components/ProjectDomains";
+import ProjectDependencies from "../components/ProjectDependencies";
 import ProjectGit, { CloneDialog } from "../components/ProjectGit";
 import ProjectDoctor from "../components/ProjectDoctor";
 import ProjectProcesses, { processFrom } from "../components/ProjectProcesses";
@@ -71,14 +73,16 @@ const frameworkStyle: Record<string, string> = {
 const languageLabel: Record<Language, string> = { php: "PHP", node: "Node.js", java: "Java", python: "Python", go: "Go", rust: "Rust", static: "Static" };
 
 type Sort = "recent" | "name";
-type Tab = "overview" | "commands" | "domains" | "git" | "settings";
+type Tab = "overview" | "commands" | "dependencies" | "domains" | "git" | "settings";
 
 export default function Sites() {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const openNewProject = useAppStore((s) => s.setNewProjectOpen);
   const onError = (e: unknown) => notify("error", String(e));
-  const info = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: 10_000 });
+  // Pages stay mounted when hidden; they only poll while on screen.
+  const active = usePageActive();
+  const info = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: active ? 10_000 : false });
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
   const statuses = useAppStatuses();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["sites"] });
@@ -497,7 +501,8 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
   const onError = (e: unknown) => notify("error", String(e));
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const app = useAppInfo(site);
-  const facts = useQuery({ queryKey: ["project-facts", site.name], queryFn: () => api.projectFacts(site.name), refetchInterval: 30_000 });
+  const active = usePageActive();
+  const facts = useQuery({ queryKey: ["project-facts", site.name], queryFn: () => api.projectFacts(site.name), refetchInterval: active ? 30_000 : false });
   const tunnel = useProjectTunnel(site);
   const dynamic = site.serveMode === "dynamic";
   // Running from your own terminal (or anything else LampRabit didn't start).
@@ -518,6 +523,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
     { id: "overview", label: "Overview" },
     { id: "git", label: "Git" },
     { id: "commands", label: "Commands" },
+    { id: "dependencies", label: "Dependencies" },
     { id: "domains", label: "Domains" },
     { id: "settings", label: "Settings" },
   ];
@@ -530,7 +536,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
   const hasFramework = !!site.framework && site.framework !== "Static" && site.framework !== "PHP";
   const kindLabel = hasFramework ? site.framework! : languageLabel[site.language];
   // The site only answers while its web server runs.
-  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices, refetchInterval: 5000 });
+  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices, refetchInterval: active ? 5000 : false });
   const web = services.data?.find((s) => s.kind === site.server);
   const serverUp = web?.state === "running";
   const serverName = serviceLabels[site.server];
@@ -642,6 +648,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
         <div role="tabpanel" className="-mx-5 border-b border-line/80 bg-bg/60 px-5 py-4">
           {tab === "overview" && <Overview site={site} info={info} settings={settings.data} facts={facts.data} status={status} php={php} onCommands={() => setTab("commands")} />}
           {tab === "commands" && <CommandsTab site={site} settings={settings.data} status={status} />}
+          {tab === "dependencies" && <ProjectDependencies site={site} status={status} />}
           {tab === "domains" && <ProjectDomains site={site} settings={settings.data} />}
           {tab === "git" && <ProjectGit site={site} />}
           {tab === "settings" && <SettingsTab site={site} settings={settings.data} status={status} onRenamed={onSelect} />}
@@ -881,7 +888,8 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
   const notify = useAppStore((s) => s.notify);
   const navigate = useAppStore((s) => s.navigate);
   const onError = (e: unknown) => notify("error", String(e));
-  const status = useQuery({ queryKey: ["database-status", site.name], queryFn: () => api.databaseStatus(site.name), refetchInterval: 10_000 });
+  const active = usePageActive();
+  const status = useQuery({ queryKey: ["database-status", site.name], queryFn: () => api.databaseStatus(site.name), refetchInterval: active ? 10_000 : false });
   const create = useMutation({
     mutationFn: () => api.createProjectDatabase(site.name),
     onSuccess: () => {

@@ -38,7 +38,7 @@ export default function MoveEnvironmentDialog({ current, onClose }: { current: s
       api
         .checkMoveTarget(target.trim())
         .then(setCheck)
-        .catch((e) => setCheck({ problems: [String(e)], size: 0, free: null, sameDrive: false, fileSystem: null }))
+        .catch((e) => setCheck({ problems: [String(e)], size: 0, free: null, sameDrive: false, fileSystem: null, warnings: [] }))
         .finally(() => setChecking(false));
     }, 400);
     return () => clearTimeout(timer);
@@ -146,6 +146,12 @@ export default function MoveEnvironmentDialog({ current, onClose }: { current: s
               </p>
             )
           )}
+
+          {check && !checking && check.problems.length === 0 && (check.warnings ?? []).map((w) => (
+            <p key={w} className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warn" aria-hidden /> {w}
+            </p>
+          ))}
 
           {busy.length > 0 && (
             <div className="rounded-lg border border-warn/40 bg-warn/10 p-3">

@@ -32,11 +32,20 @@ export default function NodeCard() {
   });
   const use = useMutation({ mutationFn: (v: string) => api.nodeUse(v), onSuccess: refresh, onError });
   const remove = useMutation({ mutationFn: (v: string) => api.nodeUninstall(v), onSuccess: refresh, onError });
+  const enablePms = useMutation({
+    mutationFn: api.nodeEnablePackageManagers,
+    onSuccess: () => {
+      notify("info", "pnpm and Yarn are on");
+      refresh();
+    },
+    onError,
+  });
 
   const data = status.data;
   const busy = install.isPending || use.isPending || remove.isPending;
   const others = (data?.installed ?? []).filter((v) => v !== data?.current);
   const choices = (available.data ?? []).filter((r) => !data?.installed.includes(r.version));
+  const pmsOn = !!data?.packageManagers?.length && data.packageManagers.every((p) => p.enabled);
 
   return (
     <Card className="overflow-hidden">
@@ -111,6 +120,24 @@ export default function NodeCard() {
                 />
               ))}
             </InstalledTiles>
+          )}
+          {data.current && (
+            <section className="space-y-2">
+              <h4 className="text-xs font-bold tracking-wider text-muted uppercase">pnpm and Yarn</h4>
+              {pmsOn ? (
+                <p className="text-sm text-muted">On for Node {data.current} through corepack. Each project gets the version its package.json asks for.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted">
+                    Turns on corepack's pnpm and yarn commands for Node {data.current}
+                    {data.corepack ? "" : ", installing corepack from npm first (Node 25 and later don't include it)"}. Until then, projects run them through npx, which is slower.
+                  </p>
+                  <Button size="sm" onClick={() => enablePms.mutate()} disabled={enablePms.isPending}>
+                    {enablePms.isPending ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Turn on pnpm and Yarn
+                  </Button>
+                </>
+              )}
+            </section>
           )}
           <AvailableList
             title={data.current ? "Available to download" : "Choose a version"}

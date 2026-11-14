@@ -3,6 +3,7 @@ mod backups;
 mod catalog;
 mod comfort;
 mod commands;
+mod deps;
 mod config;
 mod control;
 mod cli;
@@ -130,6 +131,7 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         Runtime::Rabbitmq | Runtime::Erlang => &[ServiceKind::Rabbitmq],
         // Languages run from the terminal and projects' own processes.
         Runtime::Go | Runtime::Rust | Runtime::Maven | Runtime::Gradle | Runtime::Git => &[],
+        Runtime::Bun | Runtime::Deno | Runtime::Uv | Runtime::Conda => &[],
         // Projects run Python themselves; pgAdmin keeps the Python it was installed with.
         Runtime::Python => &[],
         Runtime::Phppgadmin => &ServiceKind::WEB,
@@ -842,6 +844,18 @@ async fn uninstall(app: AppHandle, state: State<'_, AppState>) -> Result<uninsta
     Ok(uninstall::run(&layout, &config_dir).await)
 }
 
+/// Stops tunnels, project processes and services the way quitting does, before an app
+/// update installs: on Windows the updater ends the app without the usual exit, which would
+/// leave the databases running until the next start cleans them up.
+#[tauri::command]
+async fn prepare_for_update(state: State<'_, AppState>) -> Result<()> {
+    let _op = state.ops.lock().await;
+    state.tunnels.stop_all().await;
+    state.apps.stop_all().await;
+    state.supervisor.shutdown().await;
+    Ok(())
+}
+
 #[tauri::command]
 async fn stop_all(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     let _op = state.ops.lock().await;
@@ -936,12 +950,20 @@ async fn service_usage(state: State<'_, AppState>) -> Result<Vec<Usage>> {
         state.supervisor.list(&settings, &layout).await.into_iter().filter_map(|s| Some((s.kind, s.pid?))).collect();
     let php_bin = layout.bin("php", "");
 
+    if roots.is_empty() {
+        // PHP's pools only run with a web server, so nothing to measure.
+        return Ok(Vec::new());
+    }
     let mut system = state.processes.lock().unwrap_or_else(|e| e.into_inner());
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing().with_cpu().with_memory().with_exe(UpdateKind::OnlyIfNotSet),
-    );
+    // Reading every process takes tens of milliseconds (more on macOS); off the async
+    // threads, so other commands don't wait behind it.
+    tokio::task::block_in_place(|| {
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::nothing().with_cpu().with_memory().with_exe(UpdateKind::OnlyIfNotSet),
+        )
+    });
     let mut children: std::collections::HashMap<Pid, Vec<Pid>> = std::collections::HashMap::new();
     // On Linux every thread is listed too, each with its whole process's memory.
     let processes = || system.processes().iter().filter(|(_, p)| p.thread_kind().is_none());
@@ -1485,14 +1507,14 @@ async fn watch_ports(handle: AppHandle) {
         }
         let state = handle.state::<AppState>();
         let (settings, layout) = state.snapshot().await;
-        let now = langver::signature(&layout);
+        // Both read every project's files: off the async threads, which serve the window.
+        let (now, sites) = tokio::task::block_in_place(|| (langver::signature(&layout), sites::scan(&settings, &layout)));
         if now != versions {
             if !versions.is_empty() {
                 refresh_shims(&handle, &settings);
             }
             versions = now;
         }
-        let sites = sites::scan(&settings, &layout);
         let projects: Vec<(String, PathBuf)> = sites.iter().map(|s| (s.name.clone(), s.path.clone())).collect();
         let Ok((found, back)) = tauri::async_runtime::spawn_blocking(move || {
             let found = ports::discover(&mut system, &projects);
@@ -1877,6 +1899,49 @@ async fn run_project_command(app: AppHandle, state: State<'_, AppState>, name: S
         return Err(Error::msg("Enter a command to run."));
     }
     state.apps.run_command(&app, &settings, &layout, &name, &label, &command).await
+}
+
+/// A project's dependencies for each package manager it uses, read from its files.
+#[tauri::command]
+async fn project_dependencies(state: State<'_, AppState>, name: String) -> Result<Vec<deps::Ecosystem>> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let path = apps::Apps::command_path(&settings, &layout, &name);
+    Ok(tokio::task::spawn_blocking(move || deps::list(&dir, &path)).await.map_err(|e| Error::msg(e.to_string()))?)
+}
+
+/// The packages with newer releases than the installed ones, for one package manager.
+#[tauri::command]
+async fn dependencies_outdated(state: State<'_, AppState>, name: String, manager: deps::Manager) -> Result<Vec<deps::Outdated>> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let path = apps::Apps::command_path(&settings, &layout, &name);
+    let env = shims::tool_env(&settings, &layout);
+    deps::outdated(&state.http, &dir, &path, &env, manager).await
+}
+
+/// What a dependency action would run, shown for confirmation before it does.
+#[tauri::command]
+async fn dependency_plan(state: State<'_, AppState>, name: String, request: deps::Request) -> Result<deps::Plan> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let path = apps::Apps::command_path(&settings, &layout, &name);
+    deps::plan(&dir, &path, &request)
+}
+
+/// Runs a confirmed dependency action through the project's command runner (one at a
+/// time, output in the Commands tab and the Dependencies tab's output).
+#[tauri::command]
+async fn run_dependency_action(app: AppHandle, state: State<'_, AppState>, name: String, request: deps::Request) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let path = apps::Apps::command_path(&settings, &layout, &name);
+    let plan = deps::plan(&dir, &path, &request)?;
+    if let Some(task) = state.apps.status(&name).await.task {
+        return Err(Error::msg(format!("\"{task}\" is still running for {name}. Wait for it or stop it first.")));
+    }
+    deps::apply_edit(&dir, &request)?;
+    state.apps.run_command(&app, &settings, &layout, &name, &plan.label, &plan.command).await
 }
 
 /// The project's recent command runs, newest first.
@@ -2430,14 +2495,7 @@ fn mcp_token(app: &AppHandle) -> Result<String> {
             return Ok(t.trim().to_string());
         }
     }
-    use std::hash::{BuildHasher, Hasher};
-    let token: String = (0..2)
-        .map(|i| {
-            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-            h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() + i);
-            format!("{:016x}", h.finish())
-        })
-        .collect();
+    let token = control::random_token()?;
     std::fs::create_dir_all(path.parent().unwrap())?;
     std::fs::write(&path, &token)?;
     #[cfg(unix)]
@@ -2777,6 +2835,12 @@ async fn node_install(app: AppHandle, version: String) -> Result<()> {
 #[tauri::command]
 async fn node_use(app: AppHandle, version: String) -> Result<()> {
     node::use_version(&app, &version).await
+}
+
+#[tauri::command]
+async fn node_enable_package_managers(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    node::enable_package_managers(&app, &layout).await
 }
 
 #[tauri::command]
@@ -3374,6 +3438,10 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
                 let settings = state.snapshot().await.0;
                 runtimes::setup_pgadmin(&app, &settings, &layout, &release.version).await
             }
+            Runtime::Conda => {
+                logs::system(&app, logs::Level::Info, "Running the Miniforge installer (a few minutes)");
+                runtimes::setup_conda(&layout, &release.version).await
+            }
             Runtime::Phpredisadmin => {
                 logs::system(&app, logs::Level::Info, "Adding Predis, phpRedisAdmin's Redis client");
                 runtimes::add_predis(&state.http, &layout, &release.version).await
@@ -3968,6 +4036,11 @@ pub fn run() {
             set_site_route,
             project_commands,
             run_project_command,
+            prepare_for_update,
+            project_dependencies,
+            dependencies_outdated,
+            dependency_plan,
+            run_dependency_action,
             stop_project_command,
             save_project_commands,
             apply_services,
@@ -4003,6 +4076,7 @@ pub fn run() {
             node_install,
             node_use,
             node_uninstall,
+            node_enable_package_managers,
             nvm_install,
             tunnel_start,
             tunnel_stop,

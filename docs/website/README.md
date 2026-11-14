@@ -42,7 +42,7 @@ Some features are limited by platform. Runtime availability varies by OS, archit
    - Migrating from Laragon
    - FAQ and troubleshooting
 5. **Changelog**: placeholder until releases start (GitHub Releases can feed it).
-6. **GitHub** link: https://github.com/Shivam-SV/LampRabit
+6. **GitHub** link: https://github.com/LampRabit/LampRabit
 
 ## Brand
 

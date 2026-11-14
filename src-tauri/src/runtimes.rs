@@ -107,10 +107,18 @@ pub enum Runtime {
     /// Git for the Git tab and the terminal when the computer has none: MinGit, Git for
     /// Windows' official portable build. Linux and macOS use the system's Git.
     Git,
+    /// Bun, a JavaScript runtime and package manager (single binary from its GitHub releases).
+    Bun,
+    /// Deno, a JavaScript and TypeScript runtime with its own package manager.
+    Deno,
+    /// uv, Astral's Python package and project manager (single binary).
+    Uv,
+    /// conda through Miniforge (conda-forge's installer), installed into its own folder.
+    Conda,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 44] = [
+    pub const ALL: [Runtime; 48] = [
         Runtime::Apache,
         Runtime::Nginx,
         Runtime::Php,
@@ -155,6 +163,10 @@ impl Runtime {
         Runtime::Maven,
         Runtime::Gradle,
         Runtime::Git,
+        Runtime::Bun,
+        Runtime::Deno,
+        Runtime::Uv,
+        Runtime::Conda,
     ];
 
     pub fn from_id(id: &str) -> Option<Self> {
@@ -207,6 +219,10 @@ impl Runtime {
             Self::Maven => "maven",
             Self::Gradle => "gradle",
             Self::Git => "git",
+            Self::Bun => "bun",
+            Self::Deno => "deno",
+            Self::Uv => "uv",
+            Self::Conda => "conda",
         }
     }
 
@@ -266,6 +282,11 @@ impl Runtime {
             Self::Maven => Path::new("bin").join("mvn"),
             Self::Gradle => Path::new("bin").join("gradle"),
             Self::Git => Path::new("cmd").join("git.exe"),
+            Self::Bun => PathBuf::from(exe("bun")),
+            Self::Deno => PathBuf::from(exe("deno")),
+            Self::Uv => PathBuf::from(exe("uv")),
+            // Written last by `setup_conda`, so a half-finished install doesn't count.
+            Self::Conda => PathBuf::from("installed.txt"),
         }
     }
 }
@@ -416,6 +437,10 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         Runtime::Maven => maven_releases(client).await?,
         Runtime::Gradle => gradle_releases(client).await?,
         Runtime::Git => git_releases(client).await?,
+        Runtime::Bun => bun_releases(client).await?,
+        Runtime::Deno => deno_releases(client).await?,
+        Runtime::Uv => uv_releases(client).await?,
+        Runtime::Conda => conda_releases(client).await?,
     };
     releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
     Ok(releases)
@@ -425,7 +450,7 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
 /// Linux and macOS, and Memcached for Windows (see build/linux/ and
 /// .github/workflows/binaries.yml).
 /// `LAMPRABIT_BINARIES_URL` points elsewhere, for testing new builds or a mirror.
-const LINUX_BUILDS: &str = "https://github.com/Shivam-SV/LampRabit/releases/download/binaries/";
+const LINUX_BUILDS: &str = "https://github.com/LampRabit/LampRabit/releases/download/binaries/";
 
 /// LampRabit's builds of one runtime for this OS and CPU, from the published manifest.
 async fn own_builds(client: &reqwest::Client, runtime: Runtime) -> Result<Vec<Release>> {
@@ -1747,6 +1772,111 @@ pub async fn setup_n8n(layout: &Layout, version: &str) -> Result<()> {
     Ok(())
 }
 
+/// Bun from its GitHub releases ("bun-v1.3.2" tags). Windows on Arm runs the x64 build.
+async fn bun_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let name = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("windows", _) => "bun-windows-x64.zip",
+        ("linux", false) => "bun-linux-x64.zip",
+        ("linux", true) => "bun-linux-aarch64.zip",
+        ("macos", false) => "bun-darwin-x64.zip",
+        ("macos", true) => "bun-darwin-aarch64.zip",
+        _ => return Err(unsupported("Bun")),
+    };
+    let mut releases = github_newest_with(client, Runtime::Bun, "oven-sh/bun", Archive::Zip, name).await?;
+    for r in &mut releases {
+        r.version = r.version.trim_start_matches("bun-v").to_string();
+    }
+    Ok(releases)
+}
+
+/// Deno from its GitHub releases. Windows on Arm runs the x64 build.
+async fn deno_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let target = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("windows", _) => "x86_64-pc-windows-msvc",
+        ("linux", false) => "x86_64-unknown-linux-gnu",
+        ("linux", true) => "aarch64-unknown-linux-gnu",
+        ("macos", false) => "x86_64-apple-darwin",
+        ("macos", true) => "aarch64-apple-darwin",
+        _ => return Err(unsupported("Deno")),
+    };
+    github_newest_with(client, Runtime::Deno, "denoland/deno", Archive::Zip, &format!("deno-{target}.zip")).await
+}
+
+/// uv from Astral's GitHub releases.
+async fn uv_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let (target, archive) = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("windows", false) => ("x86_64-pc-windows-msvc.zip", Archive::Zip),
+        ("windows", true) => ("aarch64-pc-windows-msvc.zip", Archive::Zip),
+        ("linux", false) => ("x86_64-unknown-linux-gnu.tar.gz", Archive::TarGz),
+        ("linux", true) => ("aarch64-unknown-linux-gnu.tar.gz", Archive::TarGz),
+        ("macos", false) => ("x86_64-apple-darwin.tar.gz", Archive::TarGz),
+        ("macos", true) => ("aarch64-apple-darwin.tar.gz", Archive::TarGz),
+        _ => return Err(unsupported("uv")),
+    };
+    github_newest_with(client, Runtime::Uv, "astral-sh/uv", archive, &format!("uv-{target}")).await
+}
+
+/// Where uv keeps the Pythons it downloads: inside LampRabit's folder (bin/ is removed on
+/// uninstall and moved with the folder), not the user's ~/.local/share/uv.
+pub fn uv_env(layout: &Layout) -> Vec<(String, String)> {
+    vec![("UV_PYTHON_INSTALL_DIR".into(), layout.root().join("bin").join("uv-python").to_string_lossy().into_owned())]
+}
+
+/// Miniforge, conda-forge's conda installer, from its GitHub releases. The installer is
+/// saved as the marker and `setup_conda` runs it.
+async fn conda_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let name = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
+        ("windows", _) => "Miniforge3-Windows-x86_64.exe",
+        ("linux", false) => "Miniforge3-Linux-x86_64.sh",
+        ("linux", true) => "Miniforge3-Linux-aarch64.sh",
+        ("macos", false) => "Miniforge3-MacOSX-x86_64.sh",
+        ("macos", true) => "Miniforge3-MacOSX-arm64.sh",
+        _ => return Err(unsupported("Miniforge")),
+    };
+    github_newest_with(client, Runtime::Conda, "conda-forge/miniforge", Archive::File, name).await
+}
+
+/// The conda program of an installed Miniforge.
+pub fn conda_program(home: &Path) -> PathBuf {
+    if cfg!(windows) { home.join("conda").join("Scripts").join("conda.exe") } else { home.join("conda").join("bin").join("conda") }
+}
+
+/// Runs the downloaded Miniforge installer into `<version>/conda`, silently and without
+/// touching PATH, the registry, shortcuts or shell profiles. Leaves nothing behind when it fails.
+pub async fn setup_conda(layout: &Layout, version: &str) -> Result<()> {
+    let home = layout.bin("conda", version);
+    let result = async {
+        let installer = home.join(if cfg!(windows) { "Miniforge3.exe" } else { "Miniforge3.sh" });
+        std::fs::rename(home.join("installed.txt"), &installer)?;
+        let target = home.join("conda");
+        if cfg!(windows) {
+            // NSIS reads /D= as the rest of the command line, so it comes last and unquoted
+            // (spaces are fine there), and it only takes backslashes.
+            let args: Vec<String> = ["/InstallationType=JustMe", "/RegisterPython=0", "/AddToPath=0", "/NoRegistry=1", "/NoShortcuts=1", "/S"]
+                .iter()
+                .map(|s| s.to_string())
+                .chain(std::iter::once(format!("/D={}", target.display().to_string().replace('/', "\\"))))
+                .collect();
+            run_quiet(&installer, &args, &home).await?;
+        } else {
+            let args = vec![installer.to_string_lossy().into_owned(), "-b".to_string(), "-p".to_string(), target.to_string_lossy().into_owned()];
+            run_quiet(Path::new("bash"), &args, &home).await?;
+        }
+        let _ = std::fs::remove_file(&installer);
+        if !conda_program(&home).exists() {
+            return Err(Error::msg("the installer finished without installing conda"));
+        }
+        std::fs::write(home.join("installed.txt"), format!("Miniforge {version}\n"))?;
+        Ok::<_, Error>(())
+    }
+    .await;
+    if let Err(e) = result {
+        let _ = std::fs::remove_dir_all(&home);
+        return Err(Error::msg(format!("Installing Miniforge failed: {e}")));
+    }
+    Ok(())
+}
+
 /// The ollama program of an Ollama installed outside LampRabit (its own installer or app),
 /// which many people already have. LampRabit uses it instead of downloading another.
 pub fn ollama_elsewhere() -> Option<PathBuf> {
@@ -2103,7 +2233,7 @@ pub struct InstallProgress {
 /// Runtimes whose install continues after the download (npm, pip, rustup, Predis): the
 /// installer reports "setup" rather than "done", and the app reports done when it ends.
 pub fn has_setup(runtime: Runtime) -> bool {
-    matches!(runtime, Runtime::Rust | Runtime::N8n | Runtime::Pgadmin | Runtime::Phpredisadmin)
+    matches!(runtime, Runtime::Rust | Runtime::N8n | Runtime::Pgadmin | Runtime::Phpredisadmin | Runtime::Conda)
 }
 
 pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout, release: &Release) -> Result<()> {
@@ -2321,7 +2451,7 @@ pub struct UpdateNotice {
 /// Newer patch releases for installed versions: same "major.minor" line (for example
 /// PHP 8.4.27 → 8.4.30), never a jump to a new minor that could change behaviour.
 pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNotice> {
-    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama, Runtime::Minio, Runtime::Elasticsearch, Runtime::Opensearch, Runtime::N8n, Runtime::Rabbitmq, Runtime::Erlang, Runtime::Go, Runtime::Maven, Runtime::Gradle, Runtime::Git]
+    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached, Runtime::Caddy, Runtime::Java, Runtime::Tomcat, Runtime::Frankenphp, Runtime::Postgres, Runtime::Python, Runtime::Phppgadmin, Runtime::Pgadmin, Runtime::Mongodb, Runtime::Mongosh, Runtime::Mongotools, Runtime::Compass, Runtime::Sqlite, Runtime::Clickhouse, Runtime::Neo4j, Runtime::Meilisearch, Runtime::Typesense, Runtime::Rustfs, Runtime::Ollama, Runtime::Minio, Runtime::Elasticsearch, Runtime::Opensearch, Runtime::N8n, Runtime::Rabbitmq, Runtime::Erlang, Runtime::Go, Runtime::Maven, Runtime::Gradle, Runtime::Git, Runtime::Bun, Runtime::Deno, Runtime::Uv, Runtime::Conda]
         .into_iter()
         .map(|runtime| async move {
             let installed = installed(layout, runtime);

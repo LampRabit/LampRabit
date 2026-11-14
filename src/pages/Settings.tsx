@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -89,7 +90,8 @@ export default function Settings() {
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
-  const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: 5000 });
+  const active = usePageActive();
+  const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: active ? 5000 : false });
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const openDiagnostics = useAppStore((s) => s.setDiagnosticsOpen);
   const openSetupGuide = useAppStore((s) => s.setSetupGuideOpen);
@@ -840,7 +842,7 @@ function UpdatesSection({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: 
       Version {available.version} is available.{" "}
       <button
         className="inline-flex items-center gap-1 font-normal hover:underline"
-        onClick={() => openUrl(`https://github.com/Shivam-SV/LampRabit/releases/tag/v${available.version}`).catch(() => {})}
+        onClick={() => openUrl(`https://github.com/LampRabit/LampRabit/releases/tag/v${available.version}`).catch(() => {})}
       >
         What's new <ExternalLink size={12} />
       </button>

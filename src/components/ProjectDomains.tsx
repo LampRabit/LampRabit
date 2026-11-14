@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowRight, Check, ExternalLink, Plus, Trash2, X } from "lucide-react";
@@ -139,11 +140,12 @@ export default function ProjectDomains({ site, settings }: { site: Site; setting
     }
   };
   const ports = [...new Set([portOf(main, true), ...rows.map((r) => portOf(r.target, false))].filter((p): p is number => p != null))].sort();
+  const active = usePageActive();
   const listening = useQuery({
     queryKey: ["ports-listening", ports.join(",")],
     queryFn: () => api.portsListening(ports),
     enabled: ports.length > 0,
-    refetchInterval: 5000,
+    refetchInterval: active ? 5000 : false,
   });
   const liveness = (port: number | null) => {
     if (port == null || !listening.data) return null;

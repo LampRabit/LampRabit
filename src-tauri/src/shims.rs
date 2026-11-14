@@ -27,6 +27,10 @@ pub fn tool_env(settings: &Settings, layout: &Layout) -> Vec<(String, String)> {
     if let Some(v) = settings.versions.get("java") {
         env.push(("JAVA_HOME".to_string(), path(&layout.bin("java", v))));
     }
+    // uv keeps the Pythons it downloads inside LampRabit's folder.
+    if settings.versions.get("uv").is_some() {
+        env.extend(crate::runtimes::uv_env(layout));
+    }
     // Cargo runs rustc and friends itself; they need the same homes as the shims give it.
     if let Some(v) = settings.versions.get("rust") {
         env.extend(crate::runtimes::rust_env(layout, v));
@@ -202,6 +206,28 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
             let target = home.join("bin").join(exe(name));
             if target.exists() {
                 shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env: env.clone() }])?;
+            }
+        }
+    }
+    // Bun, Deno and uv are single programs; bunx is `bun x` and uvx is `uv tool run`.
+    for (runtime, name, args) in [("bun", "bun", &[][..]), ("bun", "bunx", &["x"][..]), ("deno", "deno", &[][..]), ("uv", "uv", &[][..]), ("uv", "uvx", &["tool", "run"][..])] {
+        let Some(v) = settings.versions.get(runtime) else { continue };
+        let target = layout.bin(runtime, v).join(exe(runtime));
+        if target.exists() {
+            let env = if runtime == "uv" { crate::runtimes::uv_env(layout) } else { Vec::new() };
+            shim(&dir, name, &[Case { folder: None, target, args: args.iter().map(|a| a.to_string()).collect(), env }])?;
+        }
+    }
+    // conda and mamba from Miniforge. `conda activate` needs conda's own shell setup, which
+    // LampRabit doesn't add to your profile; `conda run -n <env>` works without it.
+    if let Some(v) = settings.versions.get("conda") {
+        let home = layout.bin("conda", v);
+        let conda = crate::runtimes::conda_program(&home);
+        for name in ["conda", "mamba"] {
+            // Windows' Miniforge keeps mamba (a native program) in Library\bin, conda in Scripts.
+            let candidates = [conda.with_file_name(exe(name)), home.join("conda").join("Library").join("bin").join(exe(name))];
+            if let Some(target) = candidates.into_iter().find(|t| t.exists()) {
+                shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env: Vec::new() }])?;
             }
         }
     }

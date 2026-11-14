@@ -48,7 +48,11 @@ export type Runtime =
   | "rust"
   | "maven"
   | "gradle"
-  | "git";
+  | "git"
+  | "bun"
+  | "deno"
+  | "uv"
+  | "conda";
 // Labels come from the backend's catalog (catalog.rs), loaded once before the first render
 // (loadLabels), so a runtime is named in one place. An id the catalog doesn't name shows as
 // itself rather than as "undefined".
@@ -431,6 +435,62 @@ export interface NodeStatus {
   current: string | null;
   installed: string[];
   needsElevation: boolean;
+  /** pnpm and Yarn for the default Node version, through corepack. */
+  packageManagers: { id: "pnpm" | "yarn"; enabled: boolean }[];
+  /** The default Node version has corepack (Node 25 and later get it from npm). */
+  corepack: boolean;
+}
+
+export type DependencyManager = "composer" | "npm" | "pnpm" | "yarn" | "bun" | "deno" | "uv" | "poetry" | "pip" | "cargo" | "go" | "maven" | "gradle";
+
+export interface DependencyPackage {
+  name: string;
+  /** What the manifest asks for ("^11.0"); null when it names no version. */
+  wanted: string | null;
+  /** The version in the installed packages or the lock file. */
+  installed: string | null;
+  dev: boolean;
+}
+
+/** One package manager's dependencies in a project (deps.rs). */
+export interface DependencyEcosystem {
+  manager: DependencyManager;
+  label: string;
+  manifest: string;
+  lock: string | null;
+  /** Whether vendor/, node_modules/ or .venv is there; null when the files can't tell. */
+  installed: boolean | null;
+  packages: DependencyPackage[];
+  /** Packages can be added and removed with a command (not Maven and Gradle). */
+  canEdit: boolean;
+  install: string;
+  updateAll: string | null;
+  /** Why its commands can't run yet, and where to get the tool. */
+  missing: string | null;
+  note: string | null;
+}
+
+export interface OutdatedPackage {
+  name: string;
+  current: string | null;
+  latest: string;
+}
+
+export type DependencyAction = "install" | "updateall" | "add" | "remove" | "update" | "upgrade";
+
+export interface DependencyRequest {
+  manager: DependencyManager;
+  action: DependencyAction;
+  package?: string;
+  dev?: boolean;
+  version?: string;
+}
+
+export interface DependencyPlan {
+  label: string;
+  command: string;
+  /** A file change made before the command runs (pip's requirements.txt). */
+  edit: string | null;
 }
 
 export interface NodeRelease {
@@ -482,6 +542,8 @@ export interface MoveCheck {
   free: number | null;
   sameDrive: boolean;
   fileSystem: string | null;
+  /** What moving doesn't carry over. */
+  warnings: string[];
 }
 
 /** A program that keeps the LampRabit folder busy. */
@@ -1001,6 +1063,10 @@ export const api = {
   deleteProject: (name: string, dropDatabase: boolean) => invoke<void>("delete_project", { name, dropDatabase }),
   setSiteRoute: (name: string, port: number | null) => invoke<void>("set_site_route", { name, port }),
   runProjectCommand: (name: string, label: string, command: string) => invoke<void>("run_project_command", { name, label, command }),
+  projectDependencies: (name: string) => invoke<DependencyEcosystem[]>("project_dependencies", { name }),
+  dependenciesOutdated: (name: string, manager: DependencyManager) => invoke<OutdatedPackage[]>("dependencies_outdated", { name, manager }),
+  dependencyPlan: (name: string, request: DependencyRequest) => invoke<DependencyPlan>("dependency_plan", { name, request }),
+  runDependencyAction: (name: string, request: DependencyRequest) => invoke<void>("run_dependency_action", { name, request }),
   stopProjectCommand: (name: string) => invoke<void>("stop_project_command", { name }),
   commandHistory: (name: string) => invoke<CommandRun[]>("command_history", { name }),
   /** Unix ms of each scheduled process's next run, by process name. */
@@ -1021,6 +1087,7 @@ export const api = {
   nodeInstall: (version: string) => invoke<void>("node_install", { version }),
   nodeUse: (version: string) => invoke<void>("node_use", { version }),
   nodeUninstall: (version: string) => invoke<void>("node_uninstall", { version }),
+  nodeEnablePackageManagers: () => invoke<void>("node_enable_package_managers"),
   nvmInstall: () => invoke<void>("nvm_install"),
   runtimeUpdates: () => invoke<UpdateNotice[]>("runtime_updates"),
   phpExtensions: (version: string) => invoke<ExtInfo[]>("php_extensions", { version }),
@@ -1057,6 +1124,7 @@ export const api = {
   applyServices: (start: ServiceKind[], stop: ServiceKind[]) => invoke<string[]>("apply_services", { start, stop }),
   serviceUsage: () => invoke<Usage[]>("service_usage"),
   stopAll: () => invoke<void>("stop_all"),
+  prepareForUpdate: () => invoke<void>("prepare_for_update"),
   uninstallPlan: () => invoke<UninstallPlan>("uninstall_plan"),
   uninstall: () => invoke<UninstallReport>("uninstall"),
   checkPort: (port: number) => invoke<boolean>("check_port", { port }),

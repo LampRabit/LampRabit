@@ -15,7 +15,7 @@ To rotate the key: `npx tauri signer generate -w ~/.tauri/lamprabit-updater.key`
 
 ### The old repository name
 
-The repository was renamed from `LambRabit` to `LampRabit` after 0.1.1 shipped. Versions 0.1.0 and 0.1.1 check `github.com/Shivam-SV/LambRabit/...` for updates and rely on GitHub's rename redirect to reach this repository. **Never create a new repository called `LambRabit`** under this account: it would replace the redirect and those installs would stop receiving updates. Newer versions check the new name first and keep the old one only as a fallback.
+The repository was renamed from `LambRabit` to `LampRabit` after 0.1.1 shipped. Versions 0.1.0 and 0.1.1 check `github.com/Shivam-SV/LambRabit/...` for updates and rely on GitHub's rename redirect to reach this repository. **Never create a new repository called `LambRabit`** under this account: it would replace the redirect and those installs would stop receiving updates. Newer versions check the new name first and keep the old one only as a fallback. The repository then moved to the `LampRabit` organisation (`github.com/LampRabit/LampRabit`); 0.5.1 and older check `Shivam-SV/LampRabit` and rely on GitHub's transfer redirect, so **never create a repository called `LampRabit` under the `Shivam-SV` account either**. Newer versions check the organisation first and keep both old names as fallbacks.
 
 ### Code signing (recommended before a public launch)
 

@@ -23,7 +23,14 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self' ipc: http://ipc.localhost",
+        "connect-src": "'self' ipc: http://ipc.localhost",
+        "img-src": "'self' data:",
+        "font-src": "'self' data:",
+        "style-src": "'self' 'unsafe-inline'"
+      },
+      "dangerousDisableAssetCspModification": ["style-src"]
     }
   },
   "bundle": {
@@ -81,6 +88,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBBODJGOUY2QkY5RjU2QkIKUldTN1ZwKy85dm1DQ2h6VjdINnNMdlc2N3lFbVZBaTN5bzByUWFsdTRXdXAzYTd3MkREb3lXbzgK",
       "endpoints": [
+        "https://github.com/LampRabit/LampRabit/releases/latest/download/latest.json",
         "https://github.com/Shivam-SV/LampRabit/releases/latest/download/latest.json",
         "https://github.com/Shivam-SV/LambRabit/releases/latest/download/latest.json"
       ]

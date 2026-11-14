@@ -2,7 +2,8 @@
 // or Chrome, into scripts/screenshots/out/. Start `npx vite --port 1430` first, or pass
 // --serve to have this script start it. Usage: node scripts/screenshots/shoot.mjs [name…]
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -50,6 +51,8 @@ const views = {
   "titlebar-macos-narrow": "page=sites&os=macos&width=900",
   "titlebar-linux": "page=sites&os=linux&width=900",
   "narrow-sites": "page=sites&tab=git&width=900",
+  dependencies: "page=sites&tab=dependencies",
+  "dependencies-dark": "page=sites&tab=dependencies&theme=dark",
 };
 
 let server;
@@ -58,12 +61,16 @@ if (process.argv.includes("--serve")) {
   await new Promise((r) => setTimeout(r, 4000));
 }
 
+// A throwaway profile: without one, a browser that's already open takes the job and the
+// headless run writes no file.
+const profile = mkdtempSync(join(tmpdir(), "lamprabit-shots-"));
 const only = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 for (const [name, query] of Object.entries(views)) {
   if (only.length && !only.includes(name)) continue;
   const width = /width=(\d+)/.exec(query)?.[1] ?? "1440";
   const file = join(out, `${name}.png`);
-  execFileSync(browser, ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--window-size=${width},900`, "--virtual-time-budget=6000", `--screenshot=${file}`, `http://localhost:1430/scripts/screenshots/index.html?${query}`], { stdio: "ignore" });
+  execFileSync(browser, ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--window-size=${width},900`, `--user-data-dir=${profile}`, "--virtual-time-budget=6000", `--screenshot=${file}`, `http://localhost:1430/scripts/screenshots/index.html?${query}`], { stdio: "ignore" });
   console.log(file);
 }
 server?.kill();
+rmSync(profile, { recursive: true, force: true });

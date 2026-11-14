@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -130,9 +131,11 @@ export default function Overview() {
   const setConnMode = useAppStore((s) => s.setConnMode);
   const openNewProject = useAppStore((s) => s.setNewProjectOpen);
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
-  const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: 15_000 });
+  // Pages stay mounted when hidden; they only poll while on screen.
+  const active = usePageActive();
+  const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: active ? 15_000 : false });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
-  const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: 5000 });
+  const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: active ? 5000 : false });
   const stack = useStack();
 
   const anyInstalled = (services.data ?? []).some((s) => s.installed);

@@ -293,7 +293,7 @@ commands:
       description: Applies new database migrations.
 ```
 
-The Commands tab lists the commands you saved, then the template's `list`, then what `discover` finds. Sources: `package.json` and `composer.json` scripts, `artisan`, `console` (Symfony's `bin/console`), `magento`, `please` (Statamic), `drush`, `cake` and `spark`. Commands run in the project folder with its PHP and Node.js versions first on PATH, one at a time per project, and their output goes to the project's log (Logs → the project). `run` takes the placeholders above.
+The Commands tab lists the commands you saved, then the template's `list`, then what `discover` finds. Sources: `package.json` and `composer.json` scripts, `artisan`, `console` (Symfony's `bin/console`), `magento`, `please` (Statamic), `drush`, `cake` and `spark`; `deno.json` tasks, `pyproject.toml` scripts (run with uv, Poetry or PDM when their lock file is there), `requirements.txt` (installs it into the project's `.venv`), `pom.xml` and `build.gradle` (the common phases and tasks, through `mvnw`/`gradlew` when the project has them, Spring Boot's run included), `Cargo.toml` (cargo's commands and each `[[bin]]`) and `go.mod` (build, test, run, vet, tidy). Commands run in the project folder with its PHP and Node.js versions first on PATH, one at a time per project, and their output goes to the project's log (Logs → the project). `run` takes the placeholders above.
 
 ### Processes
 

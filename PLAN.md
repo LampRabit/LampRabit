@@ -45,9 +45,9 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **20. Headless core and the `lamprabit` CLI**
 - [x] **21. MCP server**
 - [x] **22. Git** (2026-11-12: project Git workflow and Git runtime)
-- [ ] **23. Dependency manager** (part of 25)
+- [x] **23. Dependency manager** (part of 25; 2026-11-14: the project card's Dependencies tab)
 - [x] **24. Languages: Python, Go, Rust, Java** (2026-11-12: runtime, project and template support)
-- [ ] **25. Package managers: npm, pnpm, Yarn, Bun, Deno, pip, conda, uv, Maven, Gradle, Cargo**
+- [x] **25. Package managers: npm, pnpm, Yarn, Bun, Deno, pip, conda, uv, Maven, Gradle, Cargo** (2026-11-14)
 - [x] **26. Movable environment folder** (2026-11-05: the first run asks where the folder goes)
 - [ ] **Later**: Git workflow builder, deployment checklists
 
@@ -278,6 +278,8 @@ Through the `git` CLI, so the user's credential helpers and SSH keys work: statu
 
 ## Phase 23: dependency manager
 
+**Done (2026-11-14), with phase 25:** see below.
+
 Composer and npm/pnpm/yarn/bun panels per project: installed and outdated packages, install/update/require/remove with live output, run with the project's PHP and Node versions. No upgrades without consent; lockfile kept consistent.
 
 ## Phase 24: languages
@@ -292,6 +294,8 @@ Python, Go, Rust and Java, each as a runtime with versions side by side, like PH
 - Templates: Django, Flask, FastAPI, Go (net/http, Gin), Rust (Axum), Spring Boot (start.spring.io), Quarkus.
 
 ## Phase 25: package managers
+
+**Done (2026-11-14):** Bun, Deno and uv (GitHub releases, SHA-256 checked; shims `bun`/`bunx`, `deno`, `uv`/`uvx`, uv's Pythons in `bin/uv-python`) and conda through Miniforge (its installer run silently into `bin/conda/<version>/conda`, no PATH, registry, shortcuts or shell changes; `conda`/`mamba` shims; the folder Move warns that conda can't move) are runtimes under Package managers. The Node.js card turns on pnpm and Yarn through corepack for NVM's default Node (installing corepack from npm on Node 25+). The Commands tab discovers `deno.json` tasks, `pyproject.toml` scripts, `requirements.txt`, Maven phases and Gradle tasks (through mvnw/gradlew), Cargo and Go commands. The project card's **Dependencies** tab (`deps.rs`) lists each package manager's dependencies from the files (Composer, npm, pnpm, Yarn, Bun, Deno, uv, Poetry, pip, Cargo, Go, Maven, Gradle) with the installed versions from vendor/, node_modules/, .venv or the lock file; Check for updates asks Composer, npm and pnpm themselves and the registries otherwise (npm, JSR, PyPI, crates.io, the Go proxy, Maven Central, stable releases only); Install, Update all, Add (dev or not), Remove, Update (within the constraint) and Upgrade (to the newest, changing the constraint) each show their command and run only when confirmed, through the project's command runner, with the project's PHP, Node, Java and Python. pip's add/remove/upgrade also edit requirements.txt. Maven and Gradle are listed and checked; their dependencies are edited in the build file (Maven can set a version with versions:use-dep-version).
 
 Absorbs phase 23. npm comes with Node, pip with Python and Cargo with Rust; pnpm and Yarn come through corepack; Bun, Deno, uv, Maven, Gradle and conda (Miniforge) are runtimes. Command discovery learns `pyproject.toml`, `requirements.txt`, `pom.xml`, `build.gradle(.kts)`, `Cargo.toml` and `deno.json`. Then the dependency panels: installed and outdated packages, add/update/remove with live output, the project's own language versions, nothing upgraded without consent.
 

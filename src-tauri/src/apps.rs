@@ -142,7 +142,7 @@ pub fn pm_commands(pm: PackageManager, path: &OsString) -> Result<PmCommands> {
         }
         PackageManager::Bun => {
             if !on_path("bun", path) {
-                return Err(Error::msg("Bun isn't installed. Install it from bun.sh, or pick another package manager."));
+                return Err(Error::msg("Bun isn't installed. Install it on the Services page (Package managers → Bun), or pick another package manager."));
             }
             PmCommands { id: "bun", run: "bun run".into(), args: "", exec: "bunx".into(), create: "bun create".into(), install: "bun install".into(), add: "bun add".into() }
         }

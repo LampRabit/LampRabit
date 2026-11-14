@@ -3,7 +3,7 @@
 ## General
 
 **Is LampRabit free?**
-Yes. It's free and open source: https://github.com/Shivam-SV/LampRabit
+Yes. It's free and open source: https://github.com/LampRabit/LampRabit
 
 **What does the name mean?**
 LAMP (Linux, Apache, MySQL/MariaDB, PHP), the classic web stack, plus a rabbit: it's quick.

@@ -49,7 +49,7 @@ pub fn endpoint_path() -> Option<PathBuf> {
 pub async fn serve(app: AppHandle, dispatch: Dispatch) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
     let port = listener.local_addr()?.port();
-    let token: String = (0..2).map(|_| format!("{:016x}", rand_u64())).collect();
+    let token = random_token()?;
     let endpoint = Endpoint { port, token: token.clone(), pid: std::process::id(), version: app.package_info().version.to_string() };
     let path = match std::env::var_os("LAMPRABIT_CONTROL_FILE") {
         Some(file) => PathBuf::from(file),
@@ -77,13 +77,12 @@ pub async fn serve(app: AppHandle, dispatch: Dispatch) -> Result<()> {
     Ok(())
 }
 
-/// A random number from the OS's hasher seeds, which are random per process; enough for a
-/// token that only guards a loopback port in the user's own folder.
-fn rand_u64() -> u64 {
-    use std::hash::{BuildHasher, Hasher};
-    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-    h.finish()
+/// 128 random bits from the OS as 32 hex characters, for the tokens that guard LampRabit's
+/// loopback ports (this channel and the MCP server): anything that reads one can drive the app.
+pub fn random_token() -> std::io::Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| std::io::Error::other(format!("no random numbers from the OS: {e}")))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 async fn handle(app: AppHandle, stream: tokio::net::TcpStream, token: &str, dispatch: Dispatch) -> std::io::Result<()> {

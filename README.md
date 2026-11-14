@@ -8,12 +8,12 @@
 
 Apache, Nginx, Caddy, FrankenPHP and Tomcat; databases from MariaDB and MySQL to PostgreSQL, MongoDB and ClickHouse; plus the tools around them. Install runtimes on demand. Every folder in `www` can become `https://<folder>.test`.
 
-[![Latest release](https://img.shields.io/github/v/release/Shivam-SV/LampRabit?label=download&color=59d1a2)](https://github.com/Shivam-SV/LampRabit/releases/latest)
-[![CI](https://github.com/Shivam-SV/LampRabit/actions/workflows/ci.yml/badge.svg)](https://github.com/Shivam-SV/LampRabit/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/LampRabit/LampRabit?label=download&color=59d1a2)](https://github.com/LampRabit/LampRabit/releases/latest)
+[![CI](https://github.com/LampRabit/LampRabit/actions/workflows/ci.yml/badge.svg)](https://github.com/LampRabit/LampRabit/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-1b2028)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20(preview)-1b2028)
 
-[**Website**](https://lamprabit.shivam-vastav33.workers.dev/) · [**Download**](https://github.com/Shivam-SV/LampRabit/releases/latest) · [Features](docs/website/features.md) · [Installation](docs/website/installation.md) · [FAQ](docs/website/faq.md) · [Documentation](#documentation)
+[**Website**](https://lamprabit.shivam-vastav33.workers.dev/) · [**Download**](https://github.com/LampRabit/LampRabit/releases/latest) · [Features](docs/website/features.md) · [Installation](docs/website/installation.md) · [FAQ](docs/website/faq.md) · [Documentation](#documentation)
 
 <img src="docs/screenshots/overview.png" alt="LampRabit overview dashboard with local projects and services" width="820" />
 
@@ -77,7 +77,7 @@ If you've used XAMPP or Laragon, you know the idea: a local development stack yo
 
 ## Download
 
-Get the latest version from the [**Releases page**](https://github.com/Shivam-SV/LampRabit/releases/latest):
+Get the latest version from the [**Releases page**](https://github.com/LampRabit/LampRabit/releases/latest):
 
 | Platform | File | Status |
 |---|---|---|
@@ -141,7 +141,7 @@ Step-by-step guides for moving your sites and databases:
 You need Node.js 22+, Rust (stable) and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
 
 ```bash
-git clone https://github.com/Shivam-SV/LampRabit.git
+git clone https://github.com/LampRabit/LampRabit.git
 cd LampRabit
 npm install
 npm run tauri dev     # run in development
