@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { PageActiveContext } from "./lib/pageActive";
 import PageBoundary from "./components/PageBoundary";
 import clsx from "clsx";
@@ -17,17 +17,11 @@ import {
 import { useAppStore, notifyError } from "./lib/store";
 import { useAppUpdate } from "./lib/updates";
 import Overview from "./pages/Overview";
-import Sites from "./pages/Sites";
-import Logs from "./pages/Logs";
-import Settings from "./pages/Settings";
-import Services from "./pages/Services";
 import Notices from "./components/Notices";
 import BottomNav, { navLayout } from "./components/BottomNav";
 import { PageToolbarProvider } from "./components/PageToolbar";
 import Titlebar from "./components/Titlebar";
 import Diagnostics from "./components/Diagnostics";
-import NewProject from "./components/NewProject";
-import TemplateEditor from "./components/TemplateEditor";
 import FirstRunDialog from "./components/FirstRunDialog";
 import ShortcutsDialog from "./components/ShortcutsDialog";
 import { useHotkeys } from "./lib/shortcuts";
@@ -122,6 +116,30 @@ function useGlobalShortcuts() {
   });
 }
 
+// Home loads with the app; the other pages and the big dialogs are separate chunks, loaded
+// in the background once Home is on screen (preload), so opening them doesn't wait.
+const loadSites = () => import("./pages/Sites");
+const loadServices = () => import("./pages/Services");
+const loadLogs = () => import("./pages/Logs");
+const loadSettings = () => import("./pages/Settings");
+const loadNewProject = () => import("./components/NewProject");
+const loadTemplateEditor = () => import("./components/TemplateEditor");
+const Sites = lazy(loadSites);
+const Services = lazy(loadServices);
+const Logs = lazy(loadLogs);
+const Settings = lazy(loadSettings);
+const NewProject = lazy(loadNewProject);
+const TemplateEditor = lazy(loadTemplateEditor);
+
+function usePreload() {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      for (const load of [loadSites, loadServices, loadLogs, loadSettings, loadNewProject, loadTemplateEditor]) load().catch(() => {});
+    }, 800);
+    return () => clearTimeout(timer);
+  }, []);
+}
+
 const pages: Record<PageId, ReactNode> = {
   overview: <Overview />,
   sites: <Sites />,
@@ -133,6 +151,10 @@ const pages: Record<PageId, ReactNode> = {
 export default function App() {
   const page = useAppStore((s) => s.page);
   const nav = navLayout(useAppStore((s) => s.navPosition));
+  // Mounted only while open (each resets itself on opening).
+  const newProjectOpen = useAppStore((s) => s.newProjectOpen);
+  const templateEditorOpen = useAppStore((s) => !!s.templateEditor);
+  usePreload();
   useGlobalShortcuts();
   useStartupUpdateCheck();
   const scroller = useRef<HTMLDivElement>(null);
@@ -171,7 +193,9 @@ export default function App() {
                 )}
               >
                 <PageActiveContext.Provider value={id === page}>
-                  <PageBoundary>{pages[id]}</PageBoundary>
+                  <PageBoundary>
+                    <Suspense fallback={null}>{pages[id]}</Suspense>
+                  </PageBoundary>
                 </PageActiveContext.Provider>
               </main>
             ))}
@@ -182,8 +206,10 @@ export default function App() {
         </div>
         <Notices />
         <Diagnostics />
-        <NewProject />
-        <TemplateEditor />
+        <Suspense fallback={null}>
+          {newProjectOpen && <NewProject />}
+          {templateEditorOpen && <TemplateEditor />}
+        </Suspense>
         <FirstRunDialog />
         <ShortcutsDialog />
       </div>
