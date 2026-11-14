@@ -640,11 +640,10 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             let version_request = runtime.and_then(|r| crate::langver::request(&path, r));
             let language_version = runtime.and_then(|r| {
                 // rustup runs (and if needed installs) the toolchain the project names.
-                if r == "rust" {
-                    if let Some(req) = &version_request {
+                if r == "rust"
+                    && let Some(req) = &version_request {
                         return Some(req.version.clone());
                     }
-                }
                 let installed = crate::runtimes::installed(layout, crate::runtimes::Runtime::from_id(r)?);
                 version_request
                     .as_ref()
@@ -738,7 +737,7 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             })
         })
         .collect();
-    sites.sort_by(|a, b| b.modified.cmp(&a.modified));
+    sites.sort_by_key(|s| std::cmp::Reverse(s.modified));
     // Two folders can map to the same domain (e.g. "My App" and "my-app"); keep the first.
     let mut seen = BTreeSet::new();
     sites.retain(|s| seen.insert(s.domain.clone()));
@@ -1487,8 +1486,7 @@ mod tests {
 
     #[test]
     fn sites_on_the_other_server_redirect_and_unknown_names_reach_localhost() {
-        let mut settings = Settings::default();
-        settings.web_servers = vec![Server::Apache, Server::Nginx];
+        let mut settings = Settings { web_servers: vec![Server::Apache, Server::Nginx], ..Default::default() };
         let layout = Layout::new(PathBuf::from("/lr"));
         let mut wp = site("blog.test");
         wp.ssl = true;
@@ -1520,8 +1518,7 @@ mod tests {
 
     #[test]
     fn caddy_serves_its_sites_with_our_certificates_and_redirects_the_others() {
-        let mut settings = Settings::default();
-        settings.web_servers = vec![Server::Apache, Server::Caddy];
+        let mut settings = Settings { web_servers: vec![Server::Apache, Server::Caddy], ..Default::default() };
         let layout = Layout::new(PathBuf::from("/lr"));
         let mut blog = site("blog.test");
         blog.ssl = true;
@@ -1570,7 +1567,7 @@ mod tests {
         let back: Settings = toml::from_str(&saved).unwrap();
         assert_eq!(back.versions.get("caddy").map(String::as_str), Some("2.10.2"));
         assert_eq!(back.versions.get("php").map(String::as_str), Some("8.4.1"));
-        assert!(back.versions.other.get("php").is_none(), "known runtimes keep their own field");
+        assert!(!back.versions.other.contains_key("php"), "known runtimes keep their own field");
     }
 
     #[test]
@@ -1581,8 +1578,7 @@ mod tests {
         let mut docs = site("docs.test");
         docs.language = Language::Static;
         for server in Server::ALL {
-            let mut settings = Settings::default();
-            settings.web_servers = vec![server];
+            let settings = Settings { web_servers: vec![server], ..Default::default() };
             for s in [&mut shop, &mut docs] {
                 s.server = server;
             }
@@ -1601,8 +1597,7 @@ mod tests {
         let layout = Layout::new(PathBuf::from("/lr"));
         let plan = [PoolPlan { version: "8.4".into(), port: 9000, workers: 1 }];
         for primary in [Server::Caddy, Server::Frankenphp] {
-            let mut settings = Settings::default();
-            settings.web_servers = vec![primary, Server::Apache];
+            let mut settings = Settings { web_servers: vec![primary, Server::Apache], ..Default::default() };
             settings.versions.php = Some("8.4".into());
             settings.versions.phpmyadmin = Some("5.2.3".into());
             settings.versions.adminer = Some("5.0".into());
@@ -1626,8 +1621,7 @@ mod tests {
 
     #[test]
     fn frankenphp_uses_its_own_php_ports_and_state() {
-        let mut settings = Settings::default();
-        settings.web_servers = vec![Server::Apache, Server::Frankenphp];
+        let settings = Settings { web_servers: vec![Server::Apache, Server::Frankenphp], ..Default::default() };
         let layout = Layout::new(PathBuf::from("/lr"));
         let mut shop = site("shop.test");
         shop.language = Language::Php;
@@ -1689,8 +1683,7 @@ mod tests {
         let public = dir.join("shop").join("public");
         std::fs::create_dir_all(&public).unwrap();
         std::fs::write(public.join("index.php"), "<?php").unwrap();
-        let mut settings = Settings::default();
-        settings.web_servers = vec![Server::Frankenphp];
+        let mut settings = Settings { web_servers: vec![Server::Frankenphp], ..Default::default() };
         let layout = Layout::new(&dir);
         let mut shop = site("shop.test");
         shop.language = Language::Php;

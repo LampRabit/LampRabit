@@ -228,7 +228,7 @@ pub fn strip_ansi(line: &str) -> String {
         if c == '\u{1b}' && chars.peek() == Some(&'[') {
             chars.next();
             // Parameters, then one final letter.
-            while let Some(n) = chars.next() {
+            for n in chars.by_ref() {
                 if n.is_ascii_alphabetic() {
                     break;
                 }
@@ -494,12 +494,11 @@ fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: 
     // otherwise, so nothing leaks into steps that don't apply.
     let mut values = Values(map);
     for v in &template.variables {
-        if let Some(when) = &v.when {
-            if !values.holds(when).unwrap_or(true) {
+        if let Some(when) = &v.when
+            && !values.holds(when).unwrap_or(true) {
                 values.0.insert(format!("vars.{}", v.id), String::new());
                 values.0.insert(format!("raw.vars.{}", v.id), String::new());
             }
-        }
     }
     values
 }
@@ -533,14 +532,13 @@ async fn has_tool(program: &str) -> bool {
 /// Everything a template needs, checked before anything is created: PHP version and
 /// extensions, and the tools its enabled steps use.
 async fn check_requirements(ctx: &Ctx<'_>, req: &NewProject, template: &Template, php: Option<&str>, steps: &[usize], path: &std::ffi::OsString) -> Result<()> {
-    if let (Some(minimum), Some(version)) = (template.requires.php.as_deref().filter(|m| *m != "any"), php) {
-        if !at_least(version, minimum) {
+    if let (Some(minimum), Some(version)) = (template.requires.php.as_deref().filter(|m| *m != "any"), php)
+        && !at_least(version, minimum) {
             return Err(Error::msg(format!(
                 "{} needs PHP {minimum} or newer; this project would use {version}. Pick a newer PHP version (install one from Services → PHP).",
                 template.name
             )));
         }
-    }
     // The drivers for the database picked in the wizard, so templates that support
     // several engines don't have to list one engine's drivers for all of them.
     let mut extensions = template.requires.extensions.clone();

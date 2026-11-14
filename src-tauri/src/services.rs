@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, ffi::OsString, path::{Path, PathBuf}, process::Stdio, sync::Arc, time::Duration};
+use std::{collections::{HashMap, HashSet}, path::{Path, PathBuf}, process::Stdio, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -376,11 +376,10 @@ fn answers(port: u16) -> bool {
 }
 
 fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
-    if kind == ServiceKind::Ollama {
-        if let Some(spec) = system_ollama(settings) {
+    if kind == ServiceKind::Ollama
+        && let Some(spec) = system_ollama(settings) {
             return Ok(spec);
         }
-    }
     let version = kind
         .version(settings)
         .ok_or_else(|| Error::msg(format!("{} is not installed", kind.label())))?;
@@ -981,7 +980,7 @@ async fn server_config_test(spec: &LaunchSpec) -> Option<String> {
     if !spec.path_prepend.is_empty() {
         let existing = std::env::var_os("PATH").unwrap_or_default();
         let paths = spec.path_prepend.iter().cloned().chain(std::env::split_paths(&existing));
-        cmd.env("PATH", std::env::join_paths(paths).unwrap_or(OsString::from(existing)));
+        cmd.env("PATH", std::env::join_paths(paths).unwrap_or(existing));
     }
     procgroup::prepare(&mut cmd);
     let out = cmd.output().await.ok()?;
@@ -1425,7 +1424,7 @@ impl Supervisor {
         if !spec.path_prepend.is_empty() {
             let existing = std::env::var_os("PATH").unwrap_or_default();
             let paths = spec.path_prepend.iter().cloned().chain(std::env::split_paths(&existing));
-            cmd.env("PATH", std::env::join_paths(paths).unwrap_or(OsString::from(existing)));
+            cmd.env("PATH", std::env::join_paths(paths).unwrap_or(existing));
         }
         for (k, v) in &spec.env {
             cmd.env(k, v);
@@ -1588,14 +1587,13 @@ impl Supervisor {
             logs::system(app, Level::Info, format!("{} won't be restarted after its crash", kind.label()));
         }
         let mut running = self.running.lock().await;
-        if let Some(handle) = running.get_mut(&kind) {
-            if let Some(tx) = handle.stop_tx.take() {
+        if let Some(handle) = running.get_mut(&kind)
+            && let Some(tx) = handle.stop_tx.take() {
                 handle.state = ServiceState::Stopping;
                 let _ = tx.send(());
                 emit_status(app, kind, ServiceState::Stopping, None);
                 logs::system(app, Level::Info, format!("Stopping {}", kind.label()));
             }
-        }
     }
 
     /// Applies changed sites to a running web server without dropping its connections:

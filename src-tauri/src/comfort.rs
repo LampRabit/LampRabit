@@ -31,7 +31,7 @@ pub fn open_terminal(settings: &Settings, layout: &Layout, dir: &Path) -> Result
             .env("PATH", path)
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(windows))]
     {

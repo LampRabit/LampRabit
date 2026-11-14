@@ -158,12 +158,11 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
         Some(v) => Some(layout.bin("ollama", v).join(crate::runtimes::Runtime::Ollama.marker())),
         None => crate::runtimes::ollama_elsewhere(),
     };
-    if let Some(target) = ollama {
-        if target.exists() {
+    if let Some(target) = ollama
+        && target.exists() {
             let env = vec![("OLLAMA_HOST".to_string(), format!("127.0.0.1:{}", settings.ports.ollama))];
             shim(&dir, "ollama", &[Case { folder: None, target, args: Vec::new(), env }])?;
         }
-    }
     // Go's tools (Go finds its own root from where it runs); each project gets the
     // installed Go its go.mod asks for.
     for name in ["go", "gofmt"] {
@@ -386,7 +385,7 @@ mod windows_path {
     }
 
     fn decode(bytes: &[u8]) -> String {
-        let wide: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let wide: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         String::from_utf16_lossy(&wide).trim_end_matches('\0').to_string()
     }
 

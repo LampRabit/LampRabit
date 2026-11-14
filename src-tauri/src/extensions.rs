@@ -186,7 +186,7 @@ async fn download_url(client: &reqwest::Client, name: &str, php: &str) -> Option
     if name == "xdebug" {
         let page = text(client, "https://xdebug.org/download").await?;
         let file = page
-            .split(|c: char| c == '"' || c == '\'' || c == '>' || c == '<' || c == '/')
+            .split(['"', '\'', '>', '<', '/'])
             .find(|t| t.starts_with("php_xdebug-") && t.contains(&format!("-{line}-ts-")) && t.ends_with("-x86_64.dll"))?
             .to_string();
         let version = file.strip_prefix("php_xdebug-")?.split('-').next()?.to_string();

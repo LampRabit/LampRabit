@@ -292,8 +292,8 @@ async fn php_checks(input: &Input<'_>, add: &mut impl FnMut(&str, Severity, Stri
         return;
     };
     // FrankenPHP runs its own PHP, whatever version the project picks.
-    if let Some(req) = input.php_requirement.filter(|_| input.server.0 != "frankenphp") {
-        if satisfies(php, req) == Some(false) {
+    if let Some(req) = input.php_requirement.filter(|_| input.server.0 != "frankenphp")
+        && satisfies(php, req) == Some(false) {
             // The newest installed version that fits, if any.
             let mut fitting: Vec<&String> = input.php_installed.iter().filter(|v| satisfies(v, req) == Some(true)).collect();
             fitting.sort_by_key(|v| version_key(v));
@@ -305,7 +305,6 @@ async fn php_checks(input: &Input<'_>, add: &mut impl FnMut(&str, Severity, Stri
             let hint = if fix.is_some() { "" } else { " Install a version that does on the Services page." };
             add("php-version", Severity::Error, format!("PHP {php} doesn't match the project"), format!("composer.json asks for PHP {req}.{hint}"), fix);
         }
-    }
     let wanted = composer_extensions(input.dir);
     if wanted.is_empty() {
         return;
@@ -470,7 +469,8 @@ pub fn composer_extensions(dir: &Path) -> Vec<String> {
 /// on or off rewrites php.ini). The Health panel checks every 15 seconds; without this,
 /// each check started PHP.
 type ModulesKey = (std::path::PathBuf, Option<std::time::SystemTime>, Option<std::time::SystemTime>);
-static MODULES: std::sync::Mutex<Option<std::collections::HashMap<String, (ModulesKey, Vec<String>)>>> = std::sync::Mutex::new(None);
+type ModulesCache = std::collections::HashMap<String, (ModulesKey, Vec<String>)>;
+static MODULES: std::sync::Mutex<Option<ModulesCache>> = std::sync::Mutex::new(None);
 
 async fn php_modules(layout: &Layout, version: &str) -> Option<Vec<String>> {
     let home = layout.bin("php", version);
@@ -478,11 +478,10 @@ async fn php_modules(layout: &Layout, version: &str) -> Option<Vec<String>> {
     let ini = layout.etc("php").join(version).join("php.ini");
     let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
     let key: ModulesKey = (exe.clone(), modified(&exe), modified(&ini));
-    if let Some((k, mods)) = MODULES.lock().ok()?.get_or_insert_with(Default::default).get(version) {
-        if *k == key {
+    if let Some((k, mods)) = MODULES.lock().ok()?.get_or_insert_with(Default::default).get(version)
+        && *k == key {
             return Some(mods.clone());
         }
-    }
     let mods = run_php_m(&exe, &ini).await?;
     MODULES.lock().ok()?.get_or_insert_with(Default::default).insert(version.to_string(), (key, mods.clone()));
     Some(mods)

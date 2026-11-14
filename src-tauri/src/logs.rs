@@ -371,6 +371,14 @@ impl Tailer {
     }
 }
 
+fn read_range(path: &Path, from: u64, len: u64) -> std::io::Result<Vec<u8>> {
+    let mut file = std::fs::File::open(path)?;
+    file.seek(SeekFrom::Start(from))?;
+    let mut buf = Vec::with_capacity(len as usize);
+    file.take(len).read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,12 +402,4 @@ mod tests {
         assert!(!dir.join("apache-error.2.log").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
-}
-
-fn read_range(path: &Path, from: u64, len: u64) -> std::io::Result<Vec<u8>> {
-    let mut file = std::fs::File::open(path)?;
-    file.seek(SeekFrom::Start(from))?;
-    let mut buf = Vec::with_capacity(len as usize);
-    file.take(len).read_to_end(&mut buf)?;
-    Ok(buf)
 }

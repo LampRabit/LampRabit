@@ -290,11 +290,10 @@ $config = array(
 fn phpmyadmin_secret(layout: &Layout) -> Result<String> {
     use std::hash::{BuildHasher, Hasher};
     let path = layout.etc("phpmyadmin").join("blowfish_secret");
-    if let Ok(secret) = std::fs::read_to_string(&path) {
-        if secret.trim().len() == 32 {
+    if let Ok(secret) = std::fs::read_to_string(&path)
+        && secret.trim().len() == 32 {
             return Ok(secret.trim().to_string());
         }
-    }
     // RandomState is seeded from the OS RNG; two hashers give 32 hex characters.
     let secret: String = (0..2)
         .map(|_| format!("{:016x}", std::collections::hash_map::RandomState::new().build_hasher().finish()))

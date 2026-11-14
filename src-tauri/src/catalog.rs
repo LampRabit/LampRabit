@@ -332,7 +332,7 @@ fn gradle_java(version: &str) -> (&'static str, Option<&'static str>) {
 fn parts(version: &str) -> Vec<u64> {
     version
         .trim_start_matches(['v', 'V'])
-        .split(|c: char| c == '.' || c == '+' || c == '-' || c == '_')
+        .split(['.', '+', '-', '_'])
         .map_while(|p| p.parse().ok())
         .collect()
 }

@@ -142,11 +142,10 @@ async fn connect(endpoint: &Endpoint) -> Option<tokio::net::TcpStream> {
 /// The running app's endpoint; with `launch`, starts LampRabit in the background (in the
 /// tray, no window) when it isn't running, and waits for it.
 pub async fn reach(launch: bool) -> Result<Endpoint> {
-    if let Some(e) = read_endpoint() {
-        if connect(&e).await.is_some() {
+    if let Some(e) = read_endpoint()
+        && connect(&e).await.is_some() {
             return Ok(e);
         }
-    }
     if !launch {
         return Err(Error::msg("LampRabit isn't running. Start it, or drop --no-launch to have the command start it."));
     }
@@ -164,11 +163,10 @@ pub async fn reach(launch: bool) -> Result<Endpoint> {
     cmd.spawn().map_err(|e| Error::msg(format!("Couldn't start LampRabit: {e}")))?;
     for _ in 0..60 {
         tokio::time::sleep(Duration::from_millis(500)).await;
-        if let Some(e) = read_endpoint() {
-            if connect(&e).await.is_some() {
+        if let Some(e) = read_endpoint()
+            && connect(&e).await.is_some() {
                 return Ok(e);
             }
-        }
     }
     Err(Error::msg("LampRabit didn't come up within 30 seconds. Open it once to check it starts."))
 }

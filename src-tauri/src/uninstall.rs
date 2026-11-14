@@ -63,11 +63,10 @@ pub async fn run(layout: &Layout, config_dir: &Path) -> Report {
     let _ = tunnels::set_ngrok_token(None);
     // AI assistants' "lamprabit" entries, and the copy of LampRabit they ran (Windows).
     problems.extend(crate::mcp_clients::remove_all());
-    if let Some(dir) = crate::mcp_clients::launcher_dir().filter(|d| d.exists()) {
-        if let Err(e) = std::fs::remove_dir_all(&dir) {
+    if let Some(dir) = crate::mcp_clients::launcher_dir().filter(|d| d.exists())
+        && let Err(e) = std::fs::remove_dir_all(&dir) {
             problems.push(format!("Couldn't delete {}: {e}. Quit your AI assistants and delete it by hand.", dir.display()));
         }
-    }
     problems.extend(remove_folders(layout, config_dir));
     Report { kept: existing(layout.root(), &KEPT), problems }
 }
@@ -138,16 +137,14 @@ async fn remove_system_changes(layout: &Layout) -> Vec<String> {
         return problems;
     }
 
-    if has_hosts {
-        if let Err(e) = sites::update_hosts(layout, &[]).await {
+    if has_hosts
+        && let Err(e) = sites::update_hosts(layout, &[]).await {
             problems.push(format!("{e} Delete the lines between \"# lampRabit begin\" and \"# lampRabit end\" in {} by hand.", sites::hosts_file().display()));
         }
-    }
-    if trusted {
-        if let Err(e) = ssl::untrust_ca(layout).await {
+    if trusted
+        && let Err(e) = ssl::untrust_ca(layout).await {
             problems.push(e.to_string());
         }
-    }
     problems
 }
 

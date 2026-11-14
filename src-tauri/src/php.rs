@@ -160,7 +160,7 @@ impl PhpPools {
                 alive: p.alive.load(Ordering::Relaxed),
             })
             .collect();
-        out.sort_by(|a, b| a.port.cmp(&b.port));
+        out.sort_by_key(|a| a.port);
         out
     }
 }

@@ -49,11 +49,10 @@ pub struct NodeRelease {
 /// An environment variable from the process, or (Windows) from the registry, where a
 /// fresh NVM install writes it without the running app seeing it.
 fn env_var(name: &str) -> Option<String> {
-    if let Ok(v) = std::env::var(name) {
-        if !v.is_empty() {
+    if let Ok(v) = std::env::var(name)
+        && !v.is_empty() {
             return Some(v);
         }
-    }
     #[cfg(windows)]
     for key in [r"HKCU\Environment", r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment"] {
         let mut cmd = std::process::Command::new("reg");

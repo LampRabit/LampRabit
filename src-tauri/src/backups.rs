@@ -352,7 +352,7 @@ pub fn list(layout: &Layout) -> Vec<Backup> {
         let Ok(entries) = std::fs::read_dir(folder(layout).join(engine.id())) else { continue };
         out.extend(entries.flatten().filter_map(|e| describe(engine, &e.path())));
     }
-    out.sort_by(|a, b| b.created.cmp(&a.created));
+    out.sort_by_key(|b| std::cmp::Reverse(b.created));
     out
 }
 

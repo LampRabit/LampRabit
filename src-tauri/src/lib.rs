@@ -534,7 +534,7 @@ async fn import_project(app: AppHandle, state: State<'_, AppState>, source: Path
 #[tauri::command]
 async fn check_move_target(state: State<'_, AppState>, target: PathBuf) -> Result<relocate::MoveCheck> {
     let root = state.snapshot().await.1.root().to_path_buf();
-    Ok(tauri::async_runtime::spawn_blocking(move || relocate::check(&root, &target)).await.map_err(|e| Error::msg(e.to_string()))?)
+    tauri::async_runtime::spawn_blocking(move || relocate::check(&root, &target)).await.map_err(|e| Error::msg(e.to_string()))
 }
 
 /// Programs other than LampRabit that keep the folder busy.
@@ -600,11 +600,10 @@ async fn move_environment(app: AppHandle, state: State<'_, AppState>, target: Pa
     relocate::repair_venvs(&old, &target);
     let settings = state.update_settings(|s| s.root_dir = target.clone()).await?;
     let layout = Layout::new(&settings.root_dir);
-    if settings.add_to_path {
-        if let Err(e) = shims::set_on_path(&layout, true) {
+    if settings.add_to_path
+        && let Err(e) = shims::set_on_path(&layout, true) {
             logs::system(&app, logs::Level::Warn, format!("Couldn't put the new shims folder on PATH: {e}"));
         }
-    }
     *state.ca_trusted.lock().await = None;
     logs::set_system_file(&app, layout.logs().join("lampRabit.log"));
     logs::system(&app, logs::Level::Info, format!("The LampRabit folder is now {}", target.display()));
@@ -1098,7 +1097,7 @@ async fn sync_sites(app: &AppHandle, state: &AppState) -> Result<()> {
         any_running |= state.supervisor.is_running(kind).await;
     }
     if any_running {
-        restart_web_servers(&app, &state).await
+        restart_web_servers(&app, state).await
     } else {
         let sites = sites::served(&settings, &layout);
         if sites::needs_hosts_file(&settings) && !sites::hosts_in_sync(&sites) {
@@ -1122,11 +1121,10 @@ async fn set_site_ssl(app: AppHandle, state: State<'_, AppState>, name: String, 
 async fn set_site_php(app: AppHandle, state: State<'_, AppState>, name: String, version: Option<String>) -> Result<()> {
     let _op = state.ops.lock().await;
     let (_, layout) = state.snapshot().await;
-    if let Some(v) = &version {
-        if !runtimes::installed(&layout, Runtime::Php).contains(v) {
+    if let Some(v) = &version
+        && !runtimes::installed(&layout, Runtime::Php).contains(v) {
             return Err(Error::msg(format!("PHP {v} is not installed")));
         }
-    }
     let label = version.clone().unwrap_or_else(|| "the active version".into());
     state.update_settings(|s| s.sites.entry(name.clone()).or_default().php = version).await?;
     logs::system(&app, logs::Level::Info, format!("{name} now uses PHP {label}"));
@@ -1308,7 +1306,7 @@ async fn template_from_project(state: State<'_, AppState>, name: String) -> Resu
     let (settings, layout) = state.snapshot().await;
     let dir = project_dir(&layout, &name)?;
     let site = sites::scan(&settings, &layout).into_iter().find(|s| s.name == name);
-    let facts = facts::read(&dir, site.as_ref().and_then(|s| s.framework.as_deref()), "npm").await;
+    let facts = facts::read(&dir, site.as_ref().and_then(|s| s.framework), "npm").await;
     let php = site.as_ref().filter(|s| s.language == sites::Language::Php).and_then(|s| s.php.clone().or_else(|| settings.versions.php.clone()));
     let has_database = site.as_ref().is_some_and(|s| s.database.is_some());
     Ok(templategen::generate(&templategen::Setup {
@@ -1469,7 +1467,7 @@ fn spawn_process_schedules(handle: &AppHandle) {
         for (project, own) in &settings.sites {
             for p in own.processes.iter().filter(|p| p.at_launch) {
                 if let Err(e) = state.apps.start_process(&handle, &settings, &layout, project, &p.name).await {
-                    logs::system(&handle, logs::Level::Warn, &format!("{project}/{}: couldn't start on launch: {e}", p.name));
+                    logs::system(&handle, logs::Level::Warn, format!("{project}/{}: couldn't start on launch: {e}", p.name));
                 }
             }
         }
@@ -1482,11 +1480,10 @@ fn spawn_process_schedules(handle: &AppHandle) {
             for (project, own) in &settings.sites {
                 for p in &own.processes {
                     let Ok(schedule) = cron::Schedule::parse(p.schedule.trim()) else { continue };
-                    if schedule.matches(now) {
-                        if let Err(e) = state.apps.start_process(&handle, &settings, &layout, project, &p.name).await {
-                            logs::system(&handle, logs::Level::Warn, &format!("{project}/{}: the scheduled start failed: {e}", p.name));
+                    if schedule.matches(now)
+                        && let Err(e) = state.apps.start_process(&handle, &settings, &layout, project, &p.name).await {
+                            logs::system(&handle, logs::Level::Warn, format!("{project}/{}: the scheduled start failed: {e}", p.name));
                         }
-                    }
                 }
             }
         }
@@ -1546,12 +1543,11 @@ async fn watch_ports(handle: AppHandle) {
             let reserved: Vec<u16> = own.map(|s| s.processes.iter().filter_map(|p| p.port).filter(|p| Some(*p) != pinned).collect()).unwrap_or_default();
             let detected: Vec<ports::Detected> = found.get(&site.name).map(|d| d.iter().filter(|d| !reserved.contains(&d.port)).cloned().collect()).unwrap_or_default();
             let detected = detected.as_slice();
-            if let (Some(s), Some(first)) = (status, detected.first()) {
-                if s.state == "starting" {
+            if let (Some(s), Some(first)) = (status, detected.first())
+                && s.state == "starting" {
                     let port = managed.filter(|p| detected.iter().any(|d| d.port == *p)).unwrap_or(first.port);
                     state.apps.mark_ready(&handle, &site.name, port).await;
                 }
-            }
             // A main domain set by hand goes where it was told (sites::scan), not where ports lead.
             if own.is_some_and(|s| s.main.is_some()) {
                 next.remove(&site.name);
@@ -1737,21 +1733,19 @@ async fn set_site_processes(app: AppHandle, state: State<'_, AppState>, name: St
         if !p.schedule.trim().is_empty() {
             cron::Schedule::parse(p.schedule.trim()).map_err(|e| Error::msg(format!("{}: {e}", p.name)))?;
         }
-        if let Some(port) = p.port {
-            if port < 1024 || Some(port) == app_port || !ports.insert(port) {
+        if let Some(port) = p.port
+            && (port < 1024 || Some(port) == app_port || !ports.insert(port)) {
                 return Err(Error::msg(format!("{}: port {port} is taken (below 1024, the app's, or another process's). Pick another one.", p.name)));
             }
-        }
     }
     // A domain can't point at a process that's going away, or that no longer has a port.
     if let Some(own) = settings.sites.get(&name) {
         let main = own.main.iter().map(|t| (name.clone(), t));
         for (host, target) in own.domains.iter().map(|d| (d.host.clone(), &d.target)).chain(main) {
-            if let config::DomainTarget::Process { name: target } = target {
-                if !processes.iter().any(|p| &p.name == target && p.port.is_some()) {
+            if let config::DomainTarget::Process { name: target } = target
+                && !processes.iter().any(|p| &p.name == target && p.port.is_some()) {
                     return Err(Error::msg(format!("{host} points to the process {target}. Point it somewhere else first.")));
                 }
-            }
         }
     }
     let removed: Vec<String> = settings.sites.get(&name).map(|s| s.processes.iter().filter(|old| !names.contains(&old.name)).map(|old| old.name.clone()).collect()).unwrap_or_default();
@@ -1907,7 +1901,7 @@ async fn project_dependencies(state: State<'_, AppState>, name: String) -> Resul
     let (settings, layout) = state.snapshot().await;
     let dir = project_dir(&layout, &name)?;
     let path = apps::Apps::command_path(&settings, &layout, &name);
-    Ok(tokio::task::spawn_blocking(move || deps::list(&dir, &path)).await.map_err(|e| Error::msg(e.to_string()))?)
+    tokio::task::spawn_blocking(move || deps::list(&dir, &path)).await.map_err(|e| Error::msg(e.to_string()))
 }
 
 /// The packages with newer releases than the installed ones, for one package manager.
@@ -1992,11 +1986,10 @@ async fn create_project_database(app: AppHandle, state: State<'_, AppState>, nam
     let dir = project_dir(&layout, &name)?;
     let database = sites::scan(&settings, &layout).into_iter().find(|s| s.name == name).and_then(|s| s.database).ok_or_else(|| Error::msg(format!("{name} doesn't name a database in its config.")))?;
     let engine = manage::engine(&settings, &dir).ok_or_else(|| Error::msg("Install MariaDB, MySQL or PostgreSQL first (Services)."))?;
-    if let Some(kind) = engine.service() {
-        if !state.supervisor.is_running(kind).await {
+    if let Some(kind) = engine.service()
+        && !state.supervisor.is_running(kind).await {
             return Err(Error::msg(format!("Start {} first, then create the database.", engine.label())));
         }
-    }
     manage::create(&settings, &layout, &dir, engine, &database).await?;
     logs::system(&app, logs::Level::Info, format!("Created database {database} in {} for {name}", engine.label()));
     Ok(())
@@ -2490,11 +2483,10 @@ async fn control_command(app: AppHandle, cmd: &str, args: serde_json::Value) -> 
 /// app's config folder (readable by the user only).
 fn mcp_token(app: &AppHandle) -> Result<String> {
     let path = app.path().app_config_dir().map_err(|e| Error::msg(e.to_string()))?.join("mcp-token");
-    if let Ok(t) = std::fs::read_to_string(&path) {
-        if t.trim().len() >= 32 {
+    if let Ok(t) = std::fs::read_to_string(&path)
+        && t.trim().len() >= 32 {
             return Ok(t.trim().to_string());
         }
-    }
     let token = control::random_token()?;
     std::fs::create_dir_all(path.parent().unwrap())?;
     std::fs::write(&path, &token)?;
@@ -2694,11 +2686,10 @@ async fn delete_project(app: AppHandle, state: State<'_, AppState>, name: String
     if drop_database {
         let database = sites::scan(&settings, &layout).into_iter().find(|s| s.name == name).and_then(|s| s.database);
         if let (Some(database), Some(engine)) = (database, manage::engine(&settings, &dir)) {
-            if let Some(kind) = engine.service() {
-                if !state.supervisor.is_running(kind).await {
+            if let Some(kind) = engine.service()
+                && !state.supervisor.is_running(kind).await {
                     return Err(Error::msg(format!("Start {} to drop {database}, or delete the project without its database.", engine.label())));
                 }
-            }
             manage::drop(&settings, &layout, engine, &database).await?;
             logs::system(&app, logs::Level::Info, format!("Dropped database {database}"));
         }
@@ -3783,14 +3774,12 @@ pub fn run() {
             let config_dir = app.path().app_config_dir()?;
             let settings_path = config_dir.join("settings.toml");
             // Pre-release builds used the identifier "dev.lamprabit.app"; carry their settings over.
-            if !settings_path.exists() {
-                if let Some(old) = config_dir.parent().map(|p| p.join("dev.lamprabit.app").join("settings.toml")) {
-                    if old.exists() {
+            if !settings_path.exists()
+                && let Some(old) = config_dir.parent().map(|p| p.join("dev.lamprabit.app").join("settings.toml"))
+                    && old.exists() {
                         let _ = std::fs::create_dir_all(&config_dir);
                         let _ = std::fs::copy(&old, &settings_path);
                     }
-                }
-            }
             let mut warnings = Vec::new();
             let (mut settings, broken) = Settings::load_or_recover(&settings_path);
             // A first run: no settings yet, and no LampRabit folder already where they point
@@ -3916,8 +3905,8 @@ pub fn run() {
             });
             // A window bigger than the screen (1280×860 on a 1024×768 display) would open
             // partly off it, hiding its controls: fit it to the screen's work area first.
-            if let Some(w) = app.get_webview_window("main") {
-                if let (Ok(Some(monitor)), Ok(size)) = (w.current_monitor(), w.outer_size()) {
+            if let Some(w) = app.get_webview_window("main")
+                && let (Ok(Some(monitor)), Ok(size)) = (w.current_monitor(), w.outer_size()) {
                     let area = monitor.work_area().size;
                     if size.width > area.width || size.height > area.height {
                         let fitted = tauri::PhysicalSize::new(size.width.min(area.width * 95 / 100), size.height.min(area.height * 95 / 100));
@@ -3925,13 +3914,11 @@ pub fn run() {
                         let _ = w.center();
                     }
                 }
-            }
             // Started with the OS: stay in the tray.
-            if std::env::args().any(|a| a == "--minimized") {
-                if let Some(w) = app.get_webview_window("main") {
+            if std::env::args().any(|a| a == "--minimized")
+                && let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
                 }
-            }
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let state = handle.state::<AppState>();

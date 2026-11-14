@@ -367,11 +367,10 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime, fresh: bool) 
         let releases: Vec<Release> = serde_json::from_slice(&std::fs::read(f).ok()?).ok()?;
         Some((age, releases))
     });
-    if let Some((age, releases)) = &cached {
-        if !fresh && *age < CATALOG_TTL && !releases.is_empty() {
+    if let Some((age, releases)) = &cached
+        && !fresh && *age < CATALOG_TTL && !releases.is_empty() {
             return Ok(releases.clone());
         }
-    }
     match fetch_available(client, runtime).await {
         Ok(releases) => {
             if let (Some(f), Ok(json)) = (&file, serde_json::to_vec(&releases)) {
@@ -442,7 +441,7 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         Runtime::Uv => uv_releases(client).await?,
         Runtime::Conda => conda_releases(client).await?,
     };
-    releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
+    releases.sort_by_key(|r| std::cmp::Reverse(version_key(&r.version)));
     Ok(releases)
 }
 
@@ -2033,7 +2032,7 @@ async fn redis_windows_releases(client: &reqwest::Client) -> Result<Vec<Release>
     if newest.is_empty() {
         return Err(Error::msg("Couldn't find Redis builds for Windows on github.com/redis-windows"));
     }
-    newest.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
+    newest.sort_by_key(|r| std::cmp::Reverse(version_key(&r.version)));
     newest.truncate(4);
     Ok(newest)
 }
@@ -2216,7 +2215,7 @@ pub fn installed(layout: &Layout, runtime: Runtime) -> Vec<String> {
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|name| !name.starts_with('.'))
         .collect();
-    versions.sort_by(|a, b| version_key(b).cmp(&version_key(a)));
+    versions.sort_by_key(|v| std::cmp::Reverse(version_key(v)));
     versions
 }
 
@@ -2291,8 +2290,8 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
             (&release.sha3_256, hex(&hasher_sha3.finalize())),
         ];
         for (expected, actual) in checks {
-            if let Some(expected) = expected {
-                if !actual.eq_ignore_ascii_case(expected) {
+            if let Some(expected) = expected
+                && !actual.eq_ignore_ascii_case(expected) {
                     let head = std::fs::read(&archive_path).map(|b| b.into_iter().take(512).collect::<Vec<u8>>()).unwrap_or_default();
                     let page = String::from_utf8_lossy(&head).to_ascii_lowercase();
                     if page.contains("<html") || page.contains("<!doctype") {
@@ -2300,7 +2299,6 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
                     }
                     return Err(Error::msg(format!("checksum mismatch for {name}: the download doesn't match its published checksum (the file may have been replaced upstream moments ago). Try again in a few minutes.")));
                 }
-            }
         }
 
         progress("extracting", downloaded, total);
