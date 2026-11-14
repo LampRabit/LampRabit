@@ -114,8 +114,12 @@ async fn handle(app: AppHandle, stream: tokio::net::TcpStream, token: &str, disp
 /// Every new log line, as it's written, until the client goes away.
 async fn follow_logs(app: AppHandle, mut write: tokio::net::tcp::OwnedWriteHalf) -> std::io::Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let id = app.listen("log-line", move |event| {
-        let _ = tx.send(event.payload().to_string());
+    // The app sends lines in batches (logs::record); the client gets them one by one.
+    let id = app.listen("log-lines", move |event| {
+        let batch: Vec<serde_json::Value> = serde_json::from_str(event.payload()).unwrap_or_default();
+        for line in batch {
+            let _ = tx.send(line.to_string());
+        }
     });
     let result = async {
         write.write_all(b"{\"ok\":true,\"data\":\"following\"}\n").await?;

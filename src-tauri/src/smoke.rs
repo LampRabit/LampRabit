@@ -127,7 +127,7 @@ impl From<Error> for Outcome {
 /// Runs everything and returns the process exit code: 0 when nothing failed.
 /// `lamprabit status/services/projects/doctor/logs` and an MCP tool call, against the app's
 /// control channel; a request with the wrong token must be refused.
-async fn command_line(with_project: bool) -> std::result::Result<String, Outcome> {
+async fn command_line(app: &AppHandle, with_project: bool) -> std::result::Result<String, Outcome> {
     use serde_json::json;
     let fail = |e: crate::error::Error| Outcome::Failed(e.to_string());
     let endpoint = crate::control::reach(false).await.map_err(fail)?;
@@ -149,6 +149,25 @@ async fn command_line(with_project: bool) -> std::result::Result<String, Outcome
     let mcp = crate::mcp::answer(false, &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "list_services", "arguments": {}}})).await;
     if mcp.as_ref().is_none_or(|m| m["result"]["isError"] == true) {
         return Err(Outcome::Failed(format!("the MCP tool call failed: {mcp:?}")));
+    }
+    // `lamprabit logs --follow`: a line written now reaches a client that follows (the app
+    // sends lines in batches, the client gets them one by one).
+    let marker = format!("smoke follow check {}", std::process::id());
+    let (want, follower_endpoint) = (marker.clone(), endpoint.clone());
+    let follower = tokio::spawn(async move {
+        let mut seen = false;
+        let _ = crate::control::follow(&follower_endpoint, |line| {
+            seen = line["line"].as_str().is_some_and(|l| l.contains(&want));
+            !seen
+        })
+        .await;
+        seen
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    crate::logs::system(app, crate::logs::Level::Info, marker);
+    match tokio::time::timeout(Duration::from_secs(5), follower).await {
+        Ok(Ok(true)) => notes.push("logs --follow streams".into()),
+        _ => return Err(Outcome::Failed("logs --follow didn't receive a new line within 5 seconds".into())),
     }
     let wrong = crate::control::Endpoint { token: "wrong".into(), ..endpoint.clone() };
     if crate::control::call(&wrong, "status", json!({})).await.is_ok() {
@@ -203,7 +222,7 @@ pub async fn run(app: AppHandle, options: Options) -> i32 {
 
     // The command line and MCP, through the control channel as `lamprabit` uses it.
     let started = Instant::now();
-    let outcome = command_line(installed.contains(&Runtime::Php)).await;
+    let outcome = command_line(&app, installed.contains(&Runtime::Php)).await;
     report.add("command line and MCP".into(), started, outcome);
 
     app.state::<AppState>().supervisor.shutdown().await;

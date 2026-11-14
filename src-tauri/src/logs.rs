@@ -44,6 +44,45 @@ pub struct LogHub {
     inner: Mutex<(u64, VecDeque<LogLine>)>,
     /// Where system events are persisted (`logs/lampRabit.log`).
     system_file: Mutex<Option<PathBuf>>,
+    /// Lines not sent to the window yet. They go together as one `log-lines` event every
+    /// 50 ms: a busy service writes hundreds a second, and an event per line kept the
+    /// window's thread busy.
+    pending: Mutex<Vec<LogLine>>,
+}
+
+/// How long new lines wait to be sent together.
+const BATCH: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Keeps a line for pages that open later and queues it for the window.
+fn record(app: &AppHandle, make: impl FnOnce(u64) -> LogLine) {
+    let hub = app.state::<LogHub>();
+    let entry = {
+        let mut guard = hub.inner.lock().unwrap();
+        let (seq, lines) = &mut *guard;
+        *seq += 1;
+        let entry = make(*seq);
+        lines.push_back(entry.clone());
+        if lines.len() > KEEP {
+            lines.pop_front();
+        }
+        entry
+    };
+    let first = {
+        let mut pending = hub.pending.lock().unwrap();
+        pending.push(entry);
+        pending.len() == 1
+    };
+    // The first line of a batch schedules its sending; later ones join it.
+    if first {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(BATCH).await;
+            let batch = std::mem::take(&mut *app.state::<LogHub>().pending.lock().unwrap());
+            if !batch.is_empty() {
+                let _ = app.emit("log-lines", batch);
+            }
+        });
+    }
 }
 
 pub fn set_system_file(app: &AppHandle, path: PathBuf) {
@@ -85,37 +124,13 @@ pub fn system(app: &AppHandle, level: Level, message: impl Into<String>) {
 }
 
 pub fn push(app: &AppHandle, service: &'static str, stream: &'static str, line: String) {
-    let hub = app.state::<LogHub>();
-    let entry = {
-        let mut guard = hub.inner.lock().unwrap();
-        let (seq, lines) = &mut *guard;
-        *seq += 1;
-        let entry = LogLine { id: *seq, service, stream, line, project: None };
-        lines.push_back(entry.clone());
-        if lines.len() > KEEP {
-            lines.pop_front();
-        }
-        entry
-    };
-    let _ = app.emit("log-line", entry);
+    record(app, |id| LogLine { id, service, stream, line, project: None });
 }
 
 /// A line of a project's output (its Node app or a command run for it), for the Logs page.
 /// `stream` is "output", "error" or "command" (the command line itself).
 pub fn push_project(app: &AppHandle, project: &str, stream: &'static str, line: String) {
-    let hub = app.state::<LogHub>();
-    let entry = {
-        let mut guard = hub.inner.lock().unwrap();
-        let (seq, lines) = &mut *guard;
-        *seq += 1;
-        let entry = LogLine { id: *seq, service: "project", stream, line, project: Some(project.to_string()) };
-        lines.push_back(entry.clone());
-        if lines.len() > KEEP {
-            lines.pop_front();
-        }
-        entry
-    };
-    let _ = app.emit("log-line", entry);
+    record(app, |id| LogLine { id, service: "project", stream, line, project: Some(project.to_string()) });
 }
 
 /// A caught dump's one-line summary (dumps.rs), in logs/dumps.log and the Logs page.
@@ -127,19 +142,7 @@ pub fn push_dump(app: &AppHandle, project: Option<String>, line: String) {
             let _ = writeln!(f, "{line}");
         }
     }
-    let hub = app.state::<LogHub>();
-    let entry = {
-        let mut guard = hub.inner.lock().unwrap();
-        let (seq, lines) = &mut *guard;
-        *seq += 1;
-        let entry = LogLine { id: *seq, service: "dumps", stream: "output", line, project };
-        lines.push_back(entry.clone());
-        if lines.len() > KEEP {
-            lines.pop_front();
-        }
-        entry
-    };
-    let _ = app.emit("log-line", entry);
+    record(app, |id| LogLine { id, service: "dumps", stream: "output", line, project });
 }
 
 /// "apache-error.1.log": an older copy kept by `rotate`, not a log of its own.

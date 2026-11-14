@@ -64,7 +64,8 @@ function useBackendEvents() {
         queryClient.invalidateQueries({ queryKey: ["sites"] });
         for (const note of payload) notify("info", note);
       }),
-      listen<RawLogLine>("log-line", ({ payload }) => pushLog(payload)),
+      // Sent in batches every 50 ms (logs.rs).
+      listen<RawLogLine[]>("log-lines", ({ payload }) => payload.forEach(pushLog)),
       listen<InstallProgress>("install-progress", ({ payload }) => {
         setInstall(payload);
         if (payload.stage === "done" || payload.stage === "error") {
