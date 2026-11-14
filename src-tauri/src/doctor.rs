@@ -502,9 +502,7 @@ async fn run_php_m(exe: &Path, ini: &Path) -> Option<Vec<String>> {
     Some(mods)
 }
 
-fn version_key(v: &str) -> Vec<u64> {
-    v.split(['.', '-', '+']).map(|p| p.parse().unwrap_or(0)).collect()
-}
+use crate::version::release as version_key;
 
 /// Whether a version meets a Composer constraint ("^8.2", "~8.1.0", ">=8.1 <8.4",
 /// "^8.2 || ^8.3", "8.3.*", "*"); None when the constraint can't be read.

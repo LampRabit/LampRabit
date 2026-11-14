@@ -64,9 +64,7 @@ pub fn request(dir: &Path, runtime: &str) -> Option<Request> {
     }
 }
 
-fn parts(v: &str) -> Vec<u32> {
-    v.split(|c: char| !c.is_ascii_digit()).filter_map(|p| p.parse().ok()).collect()
-}
+use crate::version::numbers as parts;
 
 /// The installed version that satisfies a request: the exact one, else the newest with
 /// the same major.minor, else (a request like "21") the newest with the same major.

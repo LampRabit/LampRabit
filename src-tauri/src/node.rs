@@ -59,7 +59,7 @@ fn env_var(name: &str) -> Option<String> {
         cmd.args(["query", key, "/v", name]);
         {
             use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000);
+            cmd.creation_flags(crate::procgroup::CREATE_NO_WINDOW);
         }
         if let Ok(out) = cmd.output() {
             let text = String::from_utf8_lossy(&out.stdout);
@@ -112,7 +112,7 @@ fn developer_mode() -> bool {
         use std::os::windows::process::CommandExt;
         let out = std::process::Command::new("reg")
             .args(["query", r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock", "/v", "AllowDevelopmentWithoutDevLicense"])
-            .creation_flags(0x0800_0000)
+            .creation_flags(crate::procgroup::CREATE_NO_WINDOW)
             .output();
         return out.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("0x1"));
     }
@@ -250,8 +250,7 @@ async fn run_tool(program: &std::path::Path, args: &[&str], path: &std::ffi::OsS
     if out.status.success() {
         return Ok(());
     }
-    let text = String::from_utf8_lossy(&out.stderr);
-    let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("it failed").trim().to_string();
+    let last = crate::error::last_line(&out.stderr).unwrap_or_else(|| "it failed".into());
     Err(Error::msg(format!("{} {} failed: {last}", program.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), args.join(" "))))
 }
 

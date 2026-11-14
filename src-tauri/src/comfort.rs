@@ -21,7 +21,7 @@ pub fn open_terminal(settings: &Settings, layout: &Layout, dir: &Path) -> Result
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        use crate::procgroup::CREATE_NO_WINDOW;
         // `start` gives the terminal its own console (and its own input; a cmd spawned
         // directly would inherit LampRabit's empty stdin and exit at once). The first quoted
         // argument is the window title; unquoted, `start` would launch it as a program.
@@ -132,7 +132,7 @@ pub fn vc_runtime() -> VcRuntime {
         use std::os::windows::process::CommandExt;
         if let Ok(out) = std::process::Command::new("reg")
             .args(["query", r"HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64", "/v", "Version"])
-            .creation_flags(0x0800_0000)
+            .creation_flags(crate::procgroup::CREATE_NO_WINDOW)
             .output()
         {
             version = String::from_utf8_lossy(&out.stdout)

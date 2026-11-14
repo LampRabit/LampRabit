@@ -196,9 +196,8 @@ async fn output(dir: &Path, path: &OsString, command: &str) -> Result<String, St
     match tokio::time::timeout(Duration::from_secs(45), child.wait_with_output()).await {
         Ok(Ok(out)) if out.status.success() => Ok(String::from_utf8_lossy(&out.stdout).into_owned()),
         Ok(Ok(out)) => {
-            let err = String::from_utf8_lossy(&out.stderr);
-            let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("it failed");
-            Err(strip_ansi(last.trim()))
+            let last = crate::error::last_line(&out.stderr).unwrap_or_else(|| "it failed".into());
+            Err(strip_ansi(&last))
         }
         Ok(Err(e)) => Err(e.to_string()),
         Err(_) => Err("it took longer than 45 seconds".into()),

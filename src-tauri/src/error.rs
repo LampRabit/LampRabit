@@ -28,3 +28,9 @@ impl Serialize for Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// The last non-empty line a program printed (usually its error), trimmed; what LampRabit
+/// shows when a tool it ran fails.
+pub fn last_line(output: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(output).lines().rev().map(str::trim).find(|l| !l.is_empty()).map(str::to_string)
+}

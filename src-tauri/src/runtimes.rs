@@ -345,9 +345,7 @@ fn line(v: &str) -> String {
     v.split('.').take(2).collect::<Vec<_>>().join(".")
 }
 
-fn version_key(v: &str) -> Vec<u32> {
-    v.split(|c: char| !c.is_ascii_digit()).filter_map(|p| p.parse().ok()).collect()
-}
+use crate::version::numbers as version_key;
 
 /// How long a downloaded catalog is used before it's fetched again.
 const CATALOG_TTL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -1032,16 +1030,7 @@ pub fn pgadmin_package(home: &Path) -> Option<PathBuf> {
 
 /// Runs a setup command, failing with the last line it printed to stderr.
 async fn run_quiet(program: &Path, args: &[String], cwd: &Path) -> Result<()> {
-    let mut cmd = tokio::process::Command::new(program);
-    cmd.args(args).current_dir(cwd).stdin(std::process::Stdio::null());
-    crate::procgroup::prepare(&mut cmd);
-    let out = cmd.output().await?;
-    if out.status.success() {
-        return Ok(());
-    }
-    let text = String::from_utf8_lossy(&out.stderr);
-    let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
-    Err(Error::msg(format!("{} failed: {last}", program.display())))
+    run_quiet_env(program, args, cwd, &[]).await
 }
 
 /// Installs a downloaded pgAdmin wheel into its own virtual environment, with its
@@ -1713,8 +1702,7 @@ async fn run_quiet_env(program: &Path, args: &[String], cwd: &Path, env: &[(Stri
     if out.status.success() {
         return Ok(());
     }
-    let text = String::from_utf8_lossy(&out.stderr);
-    let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
+    let last = crate::error::last_line(&out.stderr).unwrap_or_default();
     Err(Error::msg(format!("{} failed: {last}", program.display())))
 }
 
@@ -1756,8 +1744,7 @@ pub async fn setup_n8n(layout: &Layout, version: &str) -> Result<()> {
         crate::procgroup::prepare(&mut cmd);
         let out = cmd.output().await?;
         if !out.status.success() {
-            let text = String::from_utf8_lossy(&out.stderr);
-            let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
+            let last = crate::error::last_line(&out.stderr).unwrap_or_default();
             return Err(Error::msg(format!("npm install failed: {last}")));
         }
         std::fs::write(home.join("installed.txt"), format!("n8n {version}\n"))?;

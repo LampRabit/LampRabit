@@ -40,6 +40,7 @@ mod templategen;
 mod templates;
 mod tunnels;
 mod uninstall;
+mod version;
 
 use std::{collections::HashSet, path::PathBuf};
 
@@ -3680,7 +3681,7 @@ fn pg_elevated(args: Vec<String>) -> i32 {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
+        cmd.creation_flags(procgroup::CREATE_NO_WINDOW);
     }
     let started = cmd.status();
     let mut file = std::fs::File::open(log).ok();

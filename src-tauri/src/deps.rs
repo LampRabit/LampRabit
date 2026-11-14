@@ -804,9 +804,8 @@ async fn capture(dir: &Path, path: &OsString, env: &[(String, String)], command:
         .map_err(|_| Error::msg(format!("{command} took longer than two minutes. Check your connection and try again.")))??;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if stdout.trim().is_empty() && !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("it failed");
-        return Err(Error::msg(format!("{command} failed: {}", crate::projects::strip_ansi(last.trim()))));
+        let last = crate::error::last_line(&out.stderr).unwrap_or_else(|| "it failed".into());
+        return Err(Error::msg(format!("{command} failed: {}", crate::projects::strip_ansi(&last))));
     }
     Ok(stdout)
 }
@@ -867,10 +866,7 @@ fn prerelease(v: &str) -> bool {
     })
 }
 
-fn version_key(v: &str) -> Vec<u64> {
-    let v = v.trim_start_matches(|c: char| !c.is_ascii_digit());
-    v.split(['.', '-', '+']).map_while(|p| p.parse().ok()).collect()
-}
+use crate::version::release as version_key;
 
 /// Each package's newest stable release from its registry, eight requests at a time.
 async fn registry_latest(client: &reqwest::Client, manager: Manager, names: Vec<String>) -> Vec<(String, String)> {

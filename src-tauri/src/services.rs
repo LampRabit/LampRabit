@@ -1093,11 +1093,7 @@ async fn allow_low_ports(app: &AppHandle, label: &str, ports: &[u16]) -> Result<
     }
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
-}
+use crate::diagnose::now_ms;
 
 struct Handle {
     pid: Option<u32>,

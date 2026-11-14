@@ -328,14 +328,7 @@ fn gradle_java(version: &str) -> (&'static str, Option<&'static str>) {
     }
 }
 
-/// The numeric parts of a version: "v21.0.5+11" → [21, 0, 5].
-fn parts(version: &str) -> Vec<u64> {
-    version
-        .trim_start_matches(['v', 'V'])
-        .split(['.', '+', '-', '_'])
-        .map_while(|p| p.parse().ok())
-        .collect()
-}
+use crate::version::release as parts;
 
 /// Compares only as many parts as `bound` has, missing parts counting as 0.
 fn cmp(version: &[u64], bound: &[u64]) -> std::cmp::Ordering {
