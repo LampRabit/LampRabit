@@ -23,7 +23,11 @@ const MARIADB_TOOLS: &[&str] = &["mariadb", "mariadb-dump", "mariadb-admin"];
 /// Environment for processes that run language tools: JAVA_HOME for the active Java (Maven's
 /// wrapper and Gradle look for it; the `java` shim alone isn't enough for them).
 pub fn tool_env(settings: &Settings, layout: &Layout) -> Vec<(String, String)> {
-    let mut env = Vec::new();
+    // Node (npm, npx, dev servers) trusts the system's certificates, like the browser, not
+    // only its own list: behind a company proxy, VPN or antivirus that re-signs HTTPS, npm
+    // otherwise fails with UNABLE_TO_VERIFY_LEAF_SIGNATURE. It also lets Node reach the
+    // .test sites over HTTPS. Node 22.19 / 24.6 and later read it; older ones ignore it.
+    let mut env = vec![("NODE_USE_SYSTEM_CA".to_string(), "1".to_string())];
     if let Some(v) = settings.versions.get("java") {
         env.push(("JAVA_HOME".to_string(), path(&layout.bin("java", v))));
     }

@@ -80,14 +80,16 @@ macOS remains in preview while platform behavior and runtime coverage are valida
 - [x] The runtime manager reads the manifest for macOS builds and removes `com.apple.quarantine` after checksum verification so downloaded executables can run.
 - [x] Real Redis on Windows replaced Garnet; Memcached is a downloadable runtime on each supported platform; PHP `memcached` and `igbinary` are included in the Linux/macOS PHP builds.
 - [x] Latest CI on 2026-11-13 passed the smoke workflow on Apple Silicon (`macos-latest`) and Intel (`macos-15-intel`), and built and opened the app bundle on both runners. See [workflow run](https://github.com/LampRabit/LampRabit/actions/runs/43377759321). Pull-request smoke runs cover the standard runtime list; heavy services run on the scheduled/full workflow.
-- [ ] Hands-on Mac validation: install and start Apache, Nginx, PHP-FPM, Redis, Memcached, MariaDB and MySQL; confirm common site and database workflows, including paths with spaces and quotes. Keep macOS in preview until this is complete.
+- [x] Hands-on Mac validation (2026-11-14, Apple silicon): Apache and Nginx (switching between them), PHP-FPM, MariaDB, Mailpit; a Laravel project at https://<name>.test with its migrations, phpMyAdmin, mail caught by Mailpit.
+- [ ] Still to try on a Mac: Redis, Memcached and MySQL; a project folder with spaces and quotes in its name.
 
 ### 10.2 macOS platform pieces
 
 - [x] Platform code is present for managed hosts entries, CA trust/removal via `security`, port-conflict discovery via `lsof`, Terminal.app launch, shell PATH shims, process groups and orphan cleanup.
 - [x] Downloaded runtime quarantine is removed only after the archive checksum has been verified.
 - [x] CI builds and opens the macOS app bundle on Apple Silicon and Intel, and runs the service smoke workflow on both.
-- [ ] Hands-on Mac validation remains for the system permission prompts and effects: hosts-file updates, CA trust and removal, ports 80/443, Terminal and PATH behavior, Gatekeeper/runtime launch, and process cleanup.
+- [x] Hands-on Mac validation (2026-11-14): hosts-file updates, CA trust (the padlock in Safari), ports 80/443, LampRabit's Terminal and PATH, runtimes launching without Gatekeeper prompts, closing the window with services kept running. Since then: the traffic lights are centred in the 48 pt title bar (`trafficLightPosition` y 26), and Add to PATH is on by default for new installs.
+- [ ] Still to try on a Mac: CA removal, and that quitting leaves no service processes behind.
 - [x] The macOS Terminal launcher now passes paths as `osascript` arguments and shell-quotes them in AppleScript instead of interpolating them into source. `cargo check` passed on Windows; verify opening a terminal from a path containing spaces and quotes on macOS.
 
 ### 10.3 Stability on all OSes

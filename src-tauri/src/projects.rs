@@ -216,7 +216,8 @@ async fn run(ctx: &Ctx<'_>, program: &Path, args: &[String], cwd: &Path, extra_p
         Ok(())
     } else {
         let tail = tail.lock().unwrap().join("\n");
-        Err(Error::msg(format!("{} failed:\n{tail}", program.file_name().unwrap_or_default().to_string_lossy())))
+        let hint = crate::error::explain(&tail).map(|h| format!("\n\n{h}")).unwrap_or_default();
+        Err(Error::msg(format!("{} failed:\n{tail}{hint}", program.file_name().unwrap_or_default().to_string_lossy())))
     }
 }
 

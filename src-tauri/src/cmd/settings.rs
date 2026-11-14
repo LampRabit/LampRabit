@@ -278,6 +278,15 @@ pub(crate) async fn finish_first_run(app: AppHandle, state: State<'_, AppState>,
     flag.0.store(false, std::sync::atomic::Ordering::Relaxed);
     let settings = state.update_settings(|_| {}).await?;
     logs::system(&app, logs::Level::Info, format!("LampRabit's folder is {}", settings.root_dir.display()));
+    // On by default for new installs, applied now that the folder (and so the commands'
+    // place) is settled; later changes go through Settings → Terminal.
+    if settings.add_to_path {
+        let (_, layout) = state.snapshot().await;
+        match shims::set_on_path(&layout, true) {
+            Ok(()) => logs::system(&app, logs::Level::Info, "LampRabit's commands (php, composer, mysql…) are on your PATH for new terminals"),
+            Err(e) => logs::system(&app, logs::Level::Warn, format!("Couldn't add LampRabit's commands to your PATH: {e}")),
+        }
+    }
     Ok(())
 }
 

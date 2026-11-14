@@ -547,7 +547,7 @@ impl Default for Settings {
             route_mail: true,
             check_updates: true,
             close_to_tray: true,
-            add_to_path: false,
+            add_to_path: true,
             start_services_on_launch: false,
             editor: "code".into(),
             sites: BTreeMap::new(),

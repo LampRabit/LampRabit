@@ -805,7 +805,8 @@ async fn capture(dir: &Path, path: &OsString, env: &[(String, String)], command:
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if stdout.trim().is_empty() && !out.status.success() {
         let last = crate::error::last_line(&out.stderr).unwrap_or_else(|| "it failed".into());
-        return Err(Error::msg(format!("{command} failed: {}", crate::projects::strip_ansi(&last))));
+        let hint = crate::error::explain(&String::from_utf8_lossy(&out.stderr)).map(|h| format!(" {h}")).unwrap_or_default();
+        return Err(Error::msg(format!("{command} failed: {}{hint}", crate::projects::strip_ansi(&last))));
     }
     Ok(stdout)
 }
