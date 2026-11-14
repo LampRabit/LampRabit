@@ -801,14 +801,15 @@ async fn stop_service(app: AppHandle, state: State<'_, AppState>, kind: ServiceK
     Ok(())
 }
 
-/// Starts every installed service; returns one error message per failure.
+/// Starts every installed service except the heavy ones (`ServiceKind::heavy`), for the
+/// tray, start-on-launch and `lamprabit start`; returns one error message per failure.
 #[tauri::command]
 async fn start_all(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<String>> {
     let _op = state.ops.lock().await;
     let (settings, layout) = state.snapshot().await;
     let mut errors = Vec::new();
     for info in state.supervisor.list(&settings, &layout).await {
-        if !info.installed || !info.kind.enabled(&settings) {
+        if !info.installed || !info.kind.enabled(&settings) || info.heavy {
             continue;
         }
         if let Err(e) = state.supervisor.start(&app, info.kind, &settings, &layout).await {

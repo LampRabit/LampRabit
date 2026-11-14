@@ -15,7 +15,7 @@ Usage: lamprabit <command> [arguments] [--json] [--no-launch] [--yes] [--dry-run
   status                         Version, services and how many projects
   services                       Every installed service and its state
   service start|stop|restart <id>
-  start [<profile>]              Start everything installed, or a stack profile
+  start [<profile>]              Start what is installed (not the heavy services), or a profile
   stop                           Stop every service
   profiles                       Stack profiles
 

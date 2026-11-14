@@ -8,6 +8,9 @@ export function serverEnabled(kind: ServiceKind, servers: Settings["webServers"]
   return (servers ?? ["apache"]).includes(kind);
 }
 
+/** The Start all button's tooltip: what it leaves out. */
+export const startAllHint = "Starts the installed services except the heavy ones (Elasticsearch, OpenSearch, ClickHouse, Neo4j, Ollama, n8n, RabbitMQ), which start from their card or a profile. Shift+S";
+
 export const isServer = (kind: ServiceKind): kind is Server => (allServers as string[]).includes(kind);
 
 /** The server with the main ports, localhost and the developer tools. */
@@ -26,6 +29,8 @@ export function useStack() {
   const profile = settings.data?.profiles.find((p) => p.name === activeName) ?? null;
 
   const usable = (services.data ?? []).filter((s) => s.installed && serverEnabled(s.kind, settings.data?.webServers));
+  // What "Start all" starts: the heavy services (Elasticsearch, Ollama…) only from their card or a profile.
+  const startable = usable.filter((s) => !s.heavy);
   const running = usable.filter((s) => s.state === "running" || s.state === "starting");
   // What Stop all can stop: not a service another app runs (Ollama's own app).
   const stoppable = running.filter((s) => !s.external);
@@ -59,7 +64,7 @@ export function useStack() {
   });
 
   const kinds = (list: ServiceInfo[]) => list.map((s) => s.kind);
-  const wanted = profile ? profile.services : kinds(usable);
+  const wanted = profile ? profile.services : kinds(startable);
   // Services not installed (or a disabled web server) can't run, so they don't count.
   const isUp = (list: ServiceKind[]) => {
     const relevant = list.filter((k) => usable.some((s) => s.kind === k));
@@ -73,8 +78,8 @@ export function useStack() {
     busy: apply.isPending || restart.isPending,
     /** Everything Start would start is already running: offer Restart instead. */
     up: isUp(wanted),
-    /** Whether every installed service of `list` (all of them when empty) is running. */
-    isUp: (list: ServiceKind[]) => isUp(list.length ? list : kinds(usable)),
+    /** Whether every installed service of `list` (Start all's when empty) is running. */
+    isUp: (list: ServiceKind[]) => isUp(list.length ? list : kinds(startable)),
     restartRunning: () => restart.mutate(kinds(running)),
     start: (list: ServiceKind[]) => apply.mutate({ start: list, stop: [] }),
     stop: (list: ServiceKind[]) => apply.mutate({ start: [], stop: list }),
@@ -86,9 +91,9 @@ export function useStack() {
             stop: kinds(running).filter((k) => !profile.services.includes(k)),
             processes: { start: profileProcesses, stop: otherProcesses },
           })
-        : apply.mutate({ start: kinds(usable), stop: [] }),
-    /** Every installed service, whatever profile is active. */
-    startAll: () => apply.mutate({ start: kinds(usable), stop: [] }),
+        : apply.mutate({ start: kinds(startable), stop: [] }),
+    /** Every installed service except the heavy ones, whatever profile is active. */
+    startAll: () => apply.mutate({ start: kinds(startable), stop: [] }),
     startProfile: (services: ServiceKind[]) =>
       apply.mutate({ start: services, stop: kinds(running).filter((k) => !services.includes(k)) }),
     /** Every running service, and the active profile's processes. */

@@ -305,7 +305,7 @@ export default function Settings() {
             <AutostartToggle />
             <ToggleRow
               label="Start services when LampRabit opens"
-              hint="Starts every installed service, so your sites are up right after sign-in."
+              hint="Starts the installed services (not the heavy ones like Elasticsearch or Ollama), so your sites are up right after sign-in."
               checked={draft.startServicesOnLaunch}
               onChange={(v) => set({ startServicesOnLaunch: v })}
             />

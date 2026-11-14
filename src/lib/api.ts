@@ -307,6 +307,8 @@ export interface InstallProgress {
 }
 
 export interface ServiceInfo {
+  /** Needs a lot of memory or a slow start: "Start all" leaves it out; its card or a profile starts it. */
+  heavy: boolean;
   kind: ServiceKind;
   label: string;
   state: ServiceState;

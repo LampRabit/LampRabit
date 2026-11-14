@@ -7,7 +7,7 @@ import clsx from "clsx";
 import { api } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
 import { useAppUpdate } from "../lib/updates";
-import { useStack } from "../lib/stack";
+import { startAllHint, useStack } from "../lib/stack";
 import { useEffectiveTheme, useTheme } from "../lib/theme";
 import { useCurrentPageToolbar } from "./PageToolbar";
 import Logo from "./Logo";
@@ -111,7 +111,7 @@ export default function Titlebar() {
             <Download size={14} /> <span className="hidden xl:inline">Set up</span>
           </Button>
         ) : (
-          <Button size="sm" variant="primary" onClick={stack.startStack} disabled={stack.busy} title="Shift+S" aria-label={stack.profile ? `Start ${stack.profile.name}` : "Start all"}>
+          <Button size="sm" variant="primary" onClick={stack.startStack} disabled={stack.busy} title={stack.profile ? "Shift+S" : startAllHint} aria-label={stack.profile ? `Start ${stack.profile.name}` : "Start all"}>
             <Play size={14} /> <span className="hidden xl:inline">{stack.profile ? `Start ${stack.profile.name}` : "Start all"}</span>
           </Button>
         )}

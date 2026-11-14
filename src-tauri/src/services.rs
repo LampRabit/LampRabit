@@ -154,6 +154,16 @@ impl ServiceKind {
         Def { id, label, log, check, slow }
     }
 
+    /// Services that need a lot of memory (a JVM, a model server, Erlang) or several seconds
+    /// to start: "Start all", the tray and start-on-launch leave them out; they start from
+    /// their own card or a stack profile that lists them.
+    pub fn heavy(self) -> bool {
+        matches!(
+            self,
+            ServiceKind::Elasticsearch | ServiceKind::Opensearch | ServiceKind::Clickhouse | ServiceKind::Neo4j | ServiceKind::Ollama | ServiceKind::N8n | ServiceKind::Rabbitmq
+        )
+    }
+
     /// Web servers only run when Settings → Web server includes them.
     pub fn enabled(self, settings: &Settings) -> bool {
         self.web_server().is_none_or(|s| settings.server_enabled(s))
@@ -295,6 +305,8 @@ pub struct ServiceInfo {
     pub problem: Option<Problem>,
     /// Running, but not started by LampRabit (the Ollama app): it can't be stopped here.
     pub external: bool,
+    /// Left out of "Start all" (`ServiceKind::heavy`).
+    pub heavy: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1209,6 +1221,7 @@ impl Supervisor {
                     log_path: kind.log_path(layout),
                     health: handle.filter(|h| h.state == ServiceState::Running).and_then(|_| health.get(&kind).cloned()),
                     problem: problems.get(&kind).cloned(),
+                    heavy: kind.heavy(),
                 }
             })
             .collect()

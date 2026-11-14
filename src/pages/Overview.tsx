@@ -69,7 +69,7 @@ import { formatClock, formatUptime, useNow } from "../lib/time";
 import { randomQuote } from "../lib/quotes";
 import { connection, copyText, envText } from "../lib/connections";
 import { formatBytes, formatCpu, useUsage, useUsageSampler } from "../lib/usage";
-import { isServer, primaryServer, serverEnabled, useStack } from "../lib/stack";
+import { isServer, primaryServer, serverEnabled, startAllHint, useStack } from "../lib/stack";
 import { useHotkeys } from "../lib/shortcuts";
 import { Button, Card, Pill, Segmented } from "../components/ui";
 import Menu from "../components/Menu";
@@ -257,7 +257,7 @@ export default function Overview() {
                   <RotateCcw size={14} /> Restart
                 </Button>
               ) : (
-                <Button variant="primary" onClick={stack.startStack} disabled={stack.busy} title="Shift+S">
+                <Button variant="primary" onClick={stack.startStack} disabled={stack.busy} title={stack.profile ? "Shift+S" : startAllHint}>
                   <Play size={14} /> {stack.profile ? `Start ${stack.profile.name}` : "Start all"}
                 </Button>
               )}

@@ -57,6 +57,7 @@ const service = (kind: string, label: string, state: string, port: number, versi
   health: state === "running" ? { status: "healthy", detail: null, checkedAt: Date.now() } : null,
   problem: null,
   external: false,
+  heavy: false,
 });
 const services = [
   service("apache", "Apache", "running", 80, "2.4.65"),
