@@ -4,14 +4,14 @@
 
 # LampRabit
 
-**A local development environment for PHP, JavaScript, Python, Go, Rust and Java.** Available on Windows and Linux, with macOS in preview.
+**A local development environment for PHP, JavaScript, Python, Go, Rust and Java.** For Windows, macOS and Linux.
 
 Apache, Nginx, Caddy, FrankenPHP and Tomcat; databases from MariaDB and MySQL to PostgreSQL, MongoDB and ClickHouse; plus the tools around them. Install runtimes on demand. Every folder in `www` can become `https://<folder>.test`.
 
 [![Latest release](https://img.shields.io/github/v/release/LampRabit/LampRabit?label=download&color=59d1a2)](https://github.com/LampRabit/LampRabit/releases/latest)
 [![CI](https://github.com/LampRabit/LampRabit/actions/workflows/ci.yml/badge.svg)](https://github.com/LampRabit/LampRabit/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-1b2028)](LICENSE)
-![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20(preview)-1b2028)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-1b2028)
 
 [**Website**](https://lamprabit.shivam-vastav33.workers.dev/) · [**Download**](https://github.com/LampRabit/LampRabit/releases/latest) · [Features](docs/website/features.md) · [Installation](docs/website/installation.md) · [FAQ](docs/website/faq.md) · [Documentation](#documentation)
 
@@ -28,6 +28,7 @@ If you've used XAMPP or Laragon, you know the idea: a local development stack yo
 **Your stack**
 - **A broad local stack.** Apache, Nginx, Caddy, FrankenPHP, Tomcat; PHP, Node.js, Java, Python, Go and Rust; MariaDB, MySQL, PostgreSQL, MongoDB, SQLite, ClickHouse and Neo4j; plus search, storage, queues, AI and mail services. Availability depends on platform; Services explains gaps.
 - **Several versions side by side.** Install runtimes on demand, switch versions, and select project-specific language versions where supported.
+- **Package managers.** Composer, npm, pnpm, Yarn, Bun, Deno, pip, uv, conda, Cargo, Maven and Gradle, ready in LampRabit's terminal.
 - **Stack profiles.** Save the services a kind of project needs, start that stack, and export or import profiles as JSON.
 - **Tools included.** phpMyAdmin, Adminer, phpRedisAdmin and a Mailpit inbox that catches every email your apps send.
 - **PHP extensions.** Switch bundled extensions on or off and install extras like Xdebug and Redis per PHP version.
@@ -40,14 +41,15 @@ If you've used XAMPP or Laragon, you know the idea: a local development stack yo
 - **Node.js projects.** Vite, Next.js, Nuxt, Astro, Express or NestJS on the Node version you choose (from NVM, `.nvmrc` respected) with npm, pnpm, Yarn or Bun. Start the dev server from LampRabit, or run it yourself in a terminal: the domain follows whatever the project listens on, and falls back to its files when it stops.
 - **New projects in seconds.** Templates for Laravel, Symfony, WordPress, Drupal, CakePHP, CodeIgniter, Statamic, Magento and the Node frameworks above, asking the same questions their own installers do (TypeScript, linter, router, modules…), optionally with a fresh database. Write your own in YAML: see [Project templates](docs/templates.md).
 - **More languages and frameworks.** Python, Go, Rust and Java projects, with templates including Django, Flask, FastAPI, Gin, Axum and Spring Boot.
-- **Project commands.** Run artisan, Composer and package.json scripts (and Symfony, Drupal, Magento, Statamic, CakePHP and CodeIgniter commands) from the project, with the output right there and in Logs.
+- **Project commands.** Run artisan, Composer and package.json scripts, Symfony, Drupal, Magento, Statamic, CakePHP and CodeIgniter commands, deno.json tasks, pyproject.toml scripts, and Maven, Gradle, Cargo and Go commands from the project, with the output right there and in Logs.
+- **Dependencies.** See every package a project uses, with installed and newest versions, and install, add, update or remove them; each change shows its command before it runs.
 - **Everything about a project at a glance.** Framework and version, PHP or Node version and what the project requires, whether dependencies are installed, `.env` settings, database and git state.
 - **Per-site choices.** PHP version, web server and HTTPS for each site. In the terminal, `php` and `composer` follow the site's PHP version too.
 - **Share a site.** Public URLs through Cloudflare Tunnel (no account needed) or ngrok.
 - **Several domains and processes.** Route extra domains to project folders or processes; run workers and development servers with restart policies.
 
 **Day to day**
-- **Command line ready.** Put `php`, `composer`, `mysql`, `redis-cli` and friends on your PATH with one switch.
+- **Command line ready.** `php`, `composer`, `mysql`, `redis-cli` and friends are on your PATH (one switch turns it off).
 - **Know what's going on.** Live logs from services and projects with search (regex too), severity and source filters, and export; health checks; port-conflict detection that names the program in the way; and a one-click diagnostics report.
 - **Lives in your tray,** starts with your computer if you want, follows your light or dark theme, has keyboard shortcuts for everything (`?`), and updates itself.
 - **CLI and AI access.** Use `lamprabit` from a terminal or connect supported MCP clients, including Claude, Cursor, VS Code, Windsurf and Codex. See [CLI and MCP](docs/cli.md).
@@ -82,8 +84,8 @@ Get the latest version from the [**Releases page**](https://github.com/LampRabit
 | Platform | File | Status |
 |---|---|---|
 | Windows 10/11 (64-bit) | `…_x64-setup.exe` (recommended) or `…_x64_en-US.msi` | Ready |
-| macOS, Apple Silicon | `…_aarch64.dmg` | Preview |
-| macOS, Intel | `…_x64.dmg` | Preview |
+| macOS, Apple Silicon | `…_aarch64.dmg` | Ready |
+| macOS, Intel | `…_x64.dmg` | Ready |
 | Linux, Debian/Ubuntu | `…_amd64.deb` | Ready |
 | Linux, other distributions | `…_amd64.AppImage` | Ready |
 
@@ -94,10 +96,11 @@ The application and its core workflows run on Windows, macOS and Linux. Runtime 
 | Platform | App package | Runtime coverage |
 |---|---|---|
 | Windows 10/11, x64 | `.exe` / `.msi` | Broad runtime catalog; some community builds are used where upstream has no Windows release. |
-| macOS, Apple Silicon and Intel | `.dmg` | Preview. Runtime availability varies by architecture and service; MariaDB and MySQL builds are included in the current work. |
+| macOS, Apple Silicon and Intel | `.dmg` | Broad runtime catalog, including LampRabit-built Apache, Nginx, PHP and MariaDB; a few services have no macOS or Intel build (listed in the [installation guide](docs/website/installation.md)). |
 | Linux, Debian/Ubuntu and other distributions | `.deb` / `.AppImage` | Broad runtime catalog, including LampRabit-built Apache, Nginx and PHP. |
 
-For precise OS and architecture coverage, refer to the in-app Services catalog and release notes. The same workflow is available from the [CLI](docs/cli.md).
+The [installation guide](docs/website/installation.md#what-can-be-installed-on-each-platform) lists what can be installed on each OS and processor. The same workflow is available from the [CLI](docs/cli.md).
+
 > [!NOTE]
 > Builds aren't code-signed yet. On Windows, click **More info → Run anyway**. On macOS, open **System Settings → Privacy & Security** and click **Open Anyway**. Full steps are in the [installation guide](docs/website/installation.md).
 
@@ -105,7 +108,7 @@ For precise OS and architecture coverage, refer to the in-app Services catalog a
 
 1. Install and open LampRabit.
 2. Go to **Services** and install Apache (or Nginx), PHP and MariaDB. Pick any versions you like.
-3. Click **Start all**.
+3. Click **Start all** (heavy services such as Elasticsearch or Ollama start from their own card or a stack profile).
 4. Put a project in the `www` folder (`C:\lampRabit\www` on Windows, `~/lampRabit/www` elsewhere), or click **New project** on the Sites page.
 5. Open `https://<folder>.test`. For a Node.js project, press **Start** on its Sites page (or run `npm run dev` yourself) first.
 
@@ -133,6 +136,7 @@ Step-by-step guides for moving your sites and databases:
 **Working on LampRabit**
 - [Contributing](CONTRIBUTING.md): setup, checks and conventions
 - [Releasing](RELEASING.md): versions, the release workflow and LampRabit's own runtime builds
+- [Changelog](CHANGELOG.md): what changed in each release
 - [Roadmap](PLAN.md): what's done and what's next
 - [Security policy](SECURITY.md): reporting a vulnerability
 

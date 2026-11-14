@@ -12,7 +12,7 @@ LAMP (Linux, Apache, MySQL/MariaDB, PHP), the classic web stack, plus a rabbit: 
 No. The app and all services run as your normal user. Your system asks for approval only to update the hosts file (when your site list changes) and, on Windows, to confirm trusting LampRabit's certificate.
 
 **Which platforms are supported?**
-Windows, macOS and Linux. One-click downloads cover every runtime on Windows; on macOS and Linux some runtime downloads are still coming (see the installation guide).
+Windows, macOS (Apple silicon and Intel) and Linux. A few services have no build for one platform (for example ClickHouse on Windows, OpenSearch on macOS); the installation guide lists them, and the Services page says why.
 
 **Can I use it next to XAMPP or Laragon?**
 Yes, but not at the same time on the same ports. Stop one before starting the other, or give LampRabit different ports in Settings → Ports.
@@ -49,7 +49,7 @@ On Apache, check the project's `.htaccess` (Apache honours it). On Nginx, LampRa
 Install the version on the Services page, then pick it on the site's card (Sites → PHP).
 
 **How do I change a php.ini setting?**
-For one project, add a `.user.ini` file in its served folder (for example `public/.user.ini`) with the settings you need. LampRabit's generated `php.ini` is rewritten on every start, so don't edit it directly.
+For one project, add the lines in its card (Sites → the project → Settings → php.ini), where you can also turn Xdebug on for that project only. A `.user.ini` file in the project's served folder works too. LampRabit's generated `php.ini` is rewritten on every start, so don't edit it directly.
 
 **Pages are slow when several requests run at once (Windows).**
 Raise Settings → Web server → **PHP workers per version** (default 4).
@@ -57,13 +57,30 @@ Raise Settings → Web server → **PHP workers per version** (default 4).
 ## Databases
 
 **What are the database credentials?**
-Host `127.0.0.1`, port `3306`, user `root`, no password.
+Host `127.0.0.1`, user `root`, no password. MariaDB is on port `3306`, MySQL on `3307`, PostgreSQL on `5432`, MongoDB on `27017`. Each service's card shows its connection details and can copy them as `.env` lines.
 
 **How do I open phpMyAdmin?**
 Install it on the Services page (Developer tools), then use the MariaDB card's **Open phpMyAdmin** button or the quick link on Overview. It's also at `http://localhost/phpmyadmin`.
 
 **I switched MariaDB to an older major version and it won't start.**
 LampRabit blocks this to protect your data: the files were last used by a newer MariaDB. Switch back to that version on the Services page. Moving up to a newer version is fine; LampRabit upgrades the system tables automatically.
+
+**How do I back up a database?**
+Open the database server on the Services page and choose **Back up** next to the database. Backups go to the `backups` folder (kept if you uninstall LampRabit) and can be restored into any database name.
+
+## Projects and packages
+
+**How do I update a project's packages?**
+Open the project's **Dependencies** tab. It lists every package manager the project uses (Composer, npm, pnpm, Yarn, Bun, Deno, uv, Poetry, pip, Cargo, Go, Maven, Gradle). **Check for updates** shows newer releases; Update stays within the versions the project allows, Upgrade moves to the newest. Each change shows its command and runs only when you confirm.
+
+**`npm install` fails with UNABLE_TO_VERIFY_LEAF_SIGNATURE.**
+Something on your network (a company proxy, VPN or antivirus) re-signs HTTPS, and Node.js doesn't trust it the way your browser does. LampRabit asks Node to use your system's certificates, which needs Node.js 22.19 / 24.6 or newer: install a newer one on Services → Node.js. Otherwise ask your IT team for the proxy's certificate and run `npm config set cafile <file>`.
+
+**Start all didn't start Elasticsearch (or Ollama, n8n…).**
+On purpose: heavy services (Elasticsearch, OpenSearch, ClickHouse, Neo4j, Ollama, n8n, RabbitMQ) need a lot of memory or a slow start, so they start from their own card or from a stack profile that lists them.
+
+**Can I keep a queue worker or Vite running?**
+Yes: in the project's Commands tab, keep a command running as a **process**. It can restart after a crash, start with the project or with LampRabit, or run on a cron schedule.
 
 ## Email
 
@@ -83,6 +100,9 @@ Install the Microsoft Visual C++ 2015–2022 Redistributable (x64) from Microsof
 
 **Where are the logs?**
 On the Logs page (filter by service, severity and time, and export), and as files in the environment's `logs` folder.
+
+**I moved from Laragon or XAMPP.**
+Settings → General → **Import projects** copies your projects into `www`; the guides for [XAMPP](migrate-from-xampp.md) and [Laragon](migrate-from-laragon.md) cover the databases.
 
 **How do I report a bug?**
 Run diagnostics (Settings → Troubleshooting), save the report with "Hide user name and home folder" on, and attach it to an issue on GitHub.

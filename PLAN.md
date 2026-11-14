@@ -32,7 +32,7 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **8. Release**: installers (NSIS/MSI, dmg, AppImage/deb), signed auto-updates, CI on every push, tag-triggered draft releases (see RELEASING.md)
 - [x] **Polish**: animated logo (ears, eyes, nose every few minutes), page/dialog/list motion, Motion setting (System / Full / Reduced / Off)
 - [x] **9. Linux parity and developer dashboard** (see below)
-- [ ] **10. macOS parity, stability on every OS, safe uninstall** (runtime builds and CI coverage are in place; keep macOS in preview until hands-on platform checks and the compatibility matrix are complete)
+- [x] **10. macOS parity, stability on every OS, safe uninstall** (2026-11-14: checked by hand on a Mac, compatibility matrix published; macOS is supported from 0.6.0, no longer a preview)
 - [x] **11. Service foundation and web servers: Caddy, FrankenPHP, Tomcat (with Java)** (2026-11-05: runtime needs and platform gaps from `catalog.rs`; the frontend's runtime and service labels load from it)
 - [x] **12. Projects: several domains, processes, Node.js serving** (2026-11-05: stack profiles list project processes; `lamprabit.toml` saved and applied from a project's Settings)
 - [x] **13. Logs redesign and dump catcher** (2026-11-05: dump catcher, source sidebar, virtualised list, line details, per-source clear, rotation)
@@ -71,7 +71,7 @@ Phases 10 and up come from an exported product spec (`Preject-features-and-plan.
 
 ## Phase 10: macOS parity, stability on every OS, safe uninstall
 
-macOS remains in preview while platform behavior and runtime coverage are validated. LampRabit now builds Apache, Nginx, PHP, Redis, Memcached and MariaDB for macOS; MySQL uses Oracle CDN archives. Some runtimes remain unavailable on specific architectures or operating systems, as reported by the catalog.
+macOS is supported from 0.6.0 (checked by hand on 2026-11-14). LampRabit builds Apache, Nginx, PHP, Redis, Memcached and MariaDB for macOS; MySQL uses Oracle CDN archives. Some runtimes remain unavailable on specific architectures or operating systems, as reported by the catalog.
 
 ### 10.1 macOS runtimes, Redis and Memcached
 
@@ -94,7 +94,7 @@ macOS remains in preview while platform behavior and runtime coverage are valida
 
 ### 10.3 Stability on all OSes
 - ✅ A cross-platform smoke test (2026-11-04): `lamprabit --smoke-test <folder> <runtime>…` (smoke.rs) installs each runtime with the versions its needs call for into a throwaway folder (own settings, every port +20000), then start → healthy → second start ignored → stop → port free for every service, and one killed service has to come back through "Restart after a crash" and stay stopped after Stop. `.github/workflows/smoke.yml` runs it on Windows, Linux (Xvfb) and macOS for pull requests that touch the backend, weekly with the heavy services, and by hand; platform gaps are reported as skipped with their reason.
-- [ ] Publish a runtime compatibility matrix (runtime × OS × architecture, with unavailability reasons) from the catalogs. This documentation is still missing.
+- [x] Runtime compatibility matrix (runtime × OS × processor, with the reasons) published in docs/website/installation.md (2026-11-14), from catalog.rs and the download catalogs.
 
 ### 10.4 Uninstall ✅ (2026-10-30)
 - `uninstall.rs` removes the folders LampRabit creates under the root (`bin`, `etc`, `logs`, `tmp`, `ssl`, `shims`, nothing else), the root itself only if empty, the settings and (Windows uninstaller) WebView data, the hosts block, the trusted CA (system store and, on Linux, the browsers' NSS databases), the PATH entry, the ngrok token and the Linux sysctl file. Keeps `www/` and `data/`.

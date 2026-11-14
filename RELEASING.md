@@ -29,6 +29,7 @@ See https://v2.tauri.app/distribute/sign/ for details.
 ## Each release
 
 1. Bump the version in **both** `package.json` and `src-tauri/tauri.conf.json` (and `src-tauri/Cargo.toml`) to the same value, for example `0.2.0`.
+   Add the release's notes at the top of `CHANGELOG.md`; they become the GitHub release's notes in step 4.
 2. Commit, then tag and push:
 
    ```bash

@@ -9,22 +9,22 @@ Laragon and LampRabit work the same way: every folder in `www` becomes `folder.t
 | Projects folder | `C:\laragon\www` | `C:\lampRabit\www` |
 | Project URL | `http://myapp.test` | `https://myapp.test`: same domain, HTTPS on by default |
 | PHP versions | One active version for all sites | Several at once; each site picks its own |
-| Web server | Apache or Nginx, one at a time | Apache, Nginx, or both, chosen per site |
+| Web server | Apache or Nginx, one at a time | Apache, Nginx, Caddy or FrankenPHP, several at once, chosen per site |
 | HTTPS | Laragon's certificate authority | LampRabit's certificate authority (trust once) |
 | Hosts file | Lines marked `#laragon magic!` | A marked `# LampRabit` section |
-| Database | MySQL 8 or MariaDB (`root`, no password) | MariaDB (`root`, no password) |
+| Database | MySQL 8 or MariaDB (`root`, no password) | MariaDB and MySQL side by side (`root`, no password), plus PostgreSQL, MongoDB and more |
 | Database tools | HeidiSQL, phpMyAdmin (add-on) | phpMyAdmin and Adminer, one click |
 | Email | Mailpit / Mail Catcher | Mailpit, with PHP `mail()` routed automatically |
 | Run as administrator | Usually | No; asks only for the hosts file and certificate |
-| Quick app (Laravel, WordPress) | Menu → Quick app | Sites → New project, with Laravel, Symfony, WordPress, CakePHP, CodeIgniter, Drupal, Statamic, blank and static templates, plus your own |
+| Quick app (Laravel, WordPress) | Menu → Quick app | Sites → New project: PHP, JavaScript, Python, Go, Rust and Java templates, plus your own |
 | Terminal (Cmder) | Built in | Open terminal (title bar, tray, site cards) with php, composer and mariadb on PATH |
-| Node.js, ngrok | Built in | Ngrok and Cloudflare tunnels on the Sites page; Node.js versions through NVM on the Services page |
+| Node.js, Python, ngrok | Built in | Node.js (through NVM), Python, Java, Go and Rust on the Services page; ngrok and Cloudflare tunnels on the Sites page |
 
 ## Before you start
 
 1. Install LampRabit and its stack (Apache or Nginx, PHP, MariaDB); see the installation guide.
 2. Check which PHP version your projects use in Laragon (Menu → PHP) and install the same versions in LampRabit (Services → PHP). You can install several.
-3. Check whether Laragon runs **MySQL** or **MariaDB** (Menu → MySQL). This matters for Step 3.
+3. Check whether Laragon runs **MySQL** or **MariaDB** (Menu → MySQL). LampRabit can run either (or both); install the same one so your dumps import cleanly.
 
 ## Step 1: Export your databases from Laragon
 
@@ -49,7 +49,7 @@ If you skip this, LampRabit will tell you which Laragon program is in the way wh
 
 ## Step 3: Import your databases
 
-Start MariaDB in LampRabit, then either:
+Start MariaDB (or MySQL, if that's what Laragon ran) in LampRabit, then either:
 
 - **phpMyAdmin:** MariaDB card → Open phpMyAdmin → Import → choose the `.sql` file → Go.
 - **Command line:** MariaDB card → ⋯ → **Open command-line client**:
@@ -64,9 +64,9 @@ Start MariaDB in LampRabit, then either:
 
 Recreate any extra database users you noted.
 
-## Step 4: Move your projects
+## Step 4: Bring your projects
 
-Copy (or move) each project folder from `C:\laragon\www` to `C:\lampRabit\www`. Click **Open www** in LampRabit to open the folder.
+In LampRabit, open Settings → General → **Import projects**. It finds Laragon's `www` folder and copies the projects you pick into `C:\lampRabit\www` (Laragon's copies stay untouched; `vendor` and `node_modules` are skipped, and the project doctor offers to reinstall them). You can also copy the folders by hand: click **Open www** to open the folder.
 
 The domain stays the same: `C:\lampRabit\www\shop` is `https://shop.test`, just like Laragon's `shop.test`. Projects with a `public/` folder (Laravel, Symfony) are served from it automatically, as in Laragon.
 
@@ -76,17 +76,17 @@ Use real folders rather than shortcuts or junctions: LampRabit only picks up act
 
 On the Sites page each site has:
 - **PHP**: leave it on "Default" or choose a specific installed version for that project.
-- **Server** (when Settings → Web server is "Both"): Apache or Nginx.
+- **Server** (when more than one web server is on in Settings → Web server): Apache, Nginx, Caddy or FrankenPHP.
 - **HTTPS**: on by default.
 
-If you used Nginx in Laragon, either set Settings → Web server to **Nginx**, or to **Both** and pick Nginx for those sites. LampRabit's Nginx config routes unknown URLs to `index.php`, like Laragon's.
+If you used Nginx in Laragon, make Nginx the primary server in Settings → Web server, or turn it on next to Apache and pick it for those sites. LampRabit's Nginx config routes unknown URLs to `index.php`, like Laragon's.
 
 ## Step 6: Update project configuration
 
 - **Database:** host `127.0.0.1`, port `3306`, user `root`, empty password, as in Laragon.
 - **URL:** if a project's URL was `http://shop.test`, consider switching it to `https://shop.test` (Laravel `APP_URL`, WordPress `siteurl`/`home`). Plain `http://` still works if you turn HTTPS off for the site.
 - **Mail:** Laravel's default `.env` mail settings for Mailpit (`MAIL_HOST=127.0.0.1`, `MAIL_PORT=1025`) work unchanged. PHP `mail()` is routed to Mailpit automatically.
-- **php.ini tweaks** you made in Laragon: put them in a `.user.ini` file in the project's served folder.
+- **php.ini tweaks** you made in Laragon: add them in the project's card (Settings → php.ini), or in a `.user.ini` file in its served folder.
 - **Custom Apache config** (Laragon's `etc\apache2\sites-enabled`): normal projects need none. For special directives, add a `.conf` file in `C:\lampRabit\etc\apache\sites\`.
 
 ## Step 7: Hosts file and HTTPS
@@ -98,10 +98,6 @@ If you used Nginx in Laragon, either set Settings → Web server to **Nginx**, o
 ## Step 8 (optional): Remove Laragon
 
 Once everything works, uninstall Laragon. Keep your `.sql` export until you're sure nothing is missing.
-
-## What's not there yet
-
-These Laragon features are coming soon to LampRabit:
 
 ## Troubleshooting
 

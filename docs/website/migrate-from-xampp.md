@@ -11,10 +11,10 @@ This guide moves your projects and databases from XAMPP to LampRabit. It takes a
 | Virtual hosts | Edit `httpd-vhosts.conf` and the hosts file by hand | Automatic for every folder |
 | HTTPS | Self-signed, browser warnings | Trusted local certificates |
 | PHP versions | One per XAMPP install | Several side by side, chosen per site |
-| Database | MariaDB (`root`, no password) | MariaDB (`root`, no password) |
+| Database | MariaDB (`root`, no password) | MariaDB (`root`, no password), with MySQL, PostgreSQL and others available |
 | phpMyAdmin | `localhost/phpmyadmin` | `localhost/phpmyadmin` or `phpmyadmin.test` |
 | Email | Mercury / sendmail setup | Mailpit catches all mail, no setup |
-| php.ini | `C:\xampp\php\php.ini`, edited by hand | Generated per PHP version; per-project `.user.ini` |
+| php.ini | `C:\xampp\php\php.ini`, edited by hand | Generated per PHP version; per-project lines in the project's card |
 
 ## Before you start
 
@@ -43,11 +43,9 @@ In the XAMPP Control Panel, stop Apache and MySQL. If you installed them as Wind
 
 If you skip this, LampRabit will tell you exactly which XAMPP program is in the way when you start a service, and offer to stop it.
 
-## Step 3: Copy your projects
+## Step 3: Bring your projects
 
-Copy each project folder from `C:\xampp\htdocs` to `C:\lampRabit\www`. (Click **Open www** in LampRabit to open the folder.)
-
-Skip XAMPP's own folders: `dashboard`, `img`, `webalizer`, `xampp`, and the default `index.php`.
+In LampRabit, open Settings → General → **Import projects**. It finds XAMPP's `htdocs` and copies the projects you pick into `C:\lampRabit\www` (XAMPP's copies stay untouched; its own `dashboard`, `img`, `webalizer` and `xampp` folders are left out). You can also copy them by hand: click **Open www** to open the folder, and skip XAMPP's `dashboard`, `img`, `webalizer`, `xampp` and the default `index.php`.
 
 Each folder becomes a site: `C:\lampRabit\www\shop` is `https://shop.test`. Folder names are turned into domain names in lowercase, with spaces and symbols replaced by dashes (`My Shop` becomes `my-shop.test`).
 
@@ -74,7 +72,7 @@ Recreate any extra database users you noted in Step 1 (phpMyAdmin → User accou
 
 ## Step 6: Bring over php.ini changes
 
-LampRabit generates `php.ini` for each PHP version with developer-friendly defaults (512 MB memory, 128 MB uploads, 120 s execution time, errors displayed, OPcache on). If you changed other settings in XAMPP's `php.ini`, put them in a `.user.ini` file in the project's folder (or its `public/` folder), for example:
+LampRabit generates `php.ini` for each PHP version with developer-friendly defaults (512 MB memory, 128 MB uploads, 120 s execution time, errors displayed, OPcache on). If you changed other settings in XAMPP's `php.ini`, add them in the project's card (Sites → the project → Settings → php.ini), or in a `.user.ini` file in the project's folder (or its `public/` folder), for example:
 
 ```ini
 max_input_vars = 5000

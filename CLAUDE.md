@@ -1,6 +1,6 @@
 # LampRabit: project context
 
-A local PHP development environment (Laragon/XAMPP-style) built with **Tauri v2 (Rust) + React 19 + TypeScript + Tailwind v4**. It downloads and runs Apache or Nginx, several PHP versions side by side, MariaDB, MySQL, Mailpit, Redis, Memcached, and serves every folder in `www/` as `https://<folder>.test`. Windows is the reference platform; Linux has full parity; macOS is in preview.
+A local PHP development environment (Laragon/XAMPP-style) built with **Tauri v2 (Rust) + React 19 + TypeScript + Tailwind v4**. It downloads and runs Apache or Nginx, several PHP versions side by side, MariaDB, MySQL, Mailpit, Redis, Memcached, and serves every folder in `www/` as `https://<folder>.test`. Windows is the reference platform; Linux and macOS have full parity (macOS checked by hand on 2026-11-14 and supported since 0.6.0).
 
 Read [PLAN.md](PLAN.md) for the roadmap and decisions, [RELEASING.md](RELEASING.md) for releases and the Linux runtime builds.
 
