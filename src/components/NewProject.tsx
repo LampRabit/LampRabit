@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api, runtimeLabels, type DbEngine, type PackageManager, type ProjectProgress, type ProjectTemplate, type Server } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { Button, Segmented, Switch, inputClass } from "./ui";
 
 /** Icons a template can name (`icon:`); anything else gets a box. */
@@ -106,7 +106,6 @@ type Phase = { kind: "form" } | { kind: "running" } | { kind: "done"; url: strin
 export default function NewProject() {
   const open = useAppStore((s) => s.newProjectOpen);
   const setOpen = useAppStore((s) => s.setNewProjectOpen);
-  const notify = useAppStore((s) => s.notify);
   const queryClient = useQueryClient();
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings, enabled: open });
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes, enabled: open });
@@ -804,7 +803,7 @@ export default function NewProject() {
               <Button
                 variant="ghost"
                 className="mr-auto"
-                onClick={() => api.openTemplatesFolder().catch((e) => notify("error", String(e)))}
+                onClick={() => api.openTemplatesFolder().catch(notifyError)}
                 title={catalog.data ? `Add your own templates (.yaml) in ${catalog.data.folder}` : undefined}
               >
                 <FolderCog size={15} /> Your templates

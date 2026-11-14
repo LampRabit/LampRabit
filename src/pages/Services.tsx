@@ -13,7 +13,7 @@ import {
 } from "../lib/api";
 import { infoFor, labelFor, meet, needsNote, unmet, useCatalog } from "../lib/catalog";
 import RequirementsDialog from "../components/RequirementsDialog";
-import { installKey, readPref, useAppStore, writePref } from "../lib/store";
+import { installKey, readPref, useAppStore, writePref, notifyError } from "../lib/store";
 import { toolUrl } from "../lib/tools";
 import { useRuntimeUpdates } from "../lib/updates";
 import { runtimeTiles, tileFor } from "../components/runtimes";
@@ -46,7 +46,6 @@ type ServiceSelection = Runtime | "node" | "tunnels";
 const ESSENTIALS: ServiceSelection[] = ["apache", "nginx", "php", "composer", "node", "git", "mariadb", "mysql", "mailpit", "redis", "phpmyadmin"];
 
 export default function Services() {
-  const notify = useAppStore((s) => s.notify);
   const [selected, setSelected] = useState<ServiceSelection>("apache");
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
@@ -214,7 +213,7 @@ export default function Services() {
               note={note}
               action={
                 runtime === "compass" && find("compass")?.active ? (
-                  <Button size="sm" variant="soft" onClick={() => api.openCompass().catch((e) => notify("error", String(e)))}>
+                  <Button size="sm" variant="soft" onClick={() => api.openCompass().catch(notifyError)}>
                     <ExternalLink size={14} /> Open Compass
                   </Button>
                 ) : undefined
@@ -276,12 +275,11 @@ function RuntimeCard({
   const recheck = useMutation({
     mutationFn: () => api.runtimeCatalog(runtime, true),
     onSuccess: (data) => queryClient.setQueryData(["catalog", runtime], data),
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const refresh = () => {
     for (const key of ["installed", "services", "settings", "requirements"]) queryClient.invalidateQueries({ queryKey: [key] });
   };
-  const onError = (e: unknown) => notify("error", String(e));
   const install = useMutation({
     // Needs first (the versions that fit this release), then the release itself.
     mutationFn: async ({ release, requirements = [] }: { release: Release; requirements?: Requirement[] }) => {
@@ -298,7 +296,7 @@ function RuntimeCard({
     onError: (e) => {
       // Whatever got installed before the failure is real; show it.
       refresh();
-      onError(e);
+      notifyError(e);
     },
   });
   // Asks first when this version needs something that isn't in use yet.
@@ -309,13 +307,13 @@ function RuntimeCard({
       if (missing.length === 0) install.mutate({ release });
       else setAsking({ release, requirements: missing });
     },
-    onError,
+    onError: notifyError,
   });
-  const activate = useMutation({ mutationFn: (v: string) => api.setActiveVersion(runtime, v), onSuccess: refresh, onError });
+  const activate = useMutation({ mutationFn: (v: string) => api.setActiveVersion(runtime, v), onSuccess: refresh, onError: notifyError });
   const remove = useMutation({
     mutationFn: (v: string) => api.removeRuntime(runtime, v),
     onSuccess: refresh,
-    onError,
+    onError: notifyError,
   });
 
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
@@ -323,17 +321,17 @@ function RuntimeCard({
   const startService = useMutation({
     mutationFn: () => api.startService(service!.kind),
     onSuccess: refresh,
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const stopService = useMutation({
     mutationFn: () => api.stopService(service!.kind),
     onSuccess: refresh,
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const restartService = useMutation({
     mutationFn: () => api.restartService(service!.kind),
     onSuccess: refresh,
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const serviceBusy = startService.isPending || stopService.isPending || restartService.isPending;
 
@@ -392,7 +390,7 @@ function RuntimeCard({
             </Button>
           )}
           {url && active && (
-            <Button size="sm" variant="soft" onClick={() => openUrl(url).catch(onError)}>
+            <Button size="sm" variant="soft" onClick={() => openUrl(url).catch(notifyError)}>
               <ExternalLink size={14} /> Open
             </Button>
           )}
@@ -441,7 +439,7 @@ function RuntimeCard({
               }
             >
               {folder(active) && (
-                <Button size="sm" onClick={() => openPath(folder(active)!).catch(onError)}>
+                <Button size="sm" onClick={() => openPath(folder(active)!).catch(notifyError)}>
                   <FolderOpen size={13} /> Folder
                 </Button>
               )}
@@ -512,7 +510,6 @@ function RuntimeCard({
  * than offering a second copy to download.
  */
 function SystemOllamaCard({ path }: { path: string }) {
-  const notify = useAppStore((s) => s.notify);
   return (
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center gap-4 px-5 py-4">
@@ -524,7 +521,7 @@ function SystemOllamaCard({ path }: { path: string }) {
             {path}
           </p>
         </div>
-        <Button size="sm" onClick={() => openPath(path.replace(/[\\/][^\\/]+$/, "")).catch((e) => notify("error", String(e)))}>
+        <Button size="sm" onClick={() => openPath(path.replace(/[\\/][^\\/]+$/, "")).catch(notifyError)}>
           <FolderOpen size={14} /> Folder
         </Button>
       </div>

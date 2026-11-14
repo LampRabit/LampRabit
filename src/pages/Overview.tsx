@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -61,14 +62,14 @@ import {
   type SitesInfo,
   type Runtime,
 } from "../lib/api";
-import { readPref, useAppStore, writePref, type Activity } from "../lib/store";
+import { readPref, useAppStore, writePref, type Activity, notifyError } from "../lib/store";
 import { toolUrl } from "../lib/tools";
 import { runtimeTiles } from "../components/runtimes";
 import { formatClock, formatUptime, useNow } from "../lib/time";
 import { randomQuote } from "../lib/quotes";
 import { connection, copyText, envText } from "../lib/connections";
 import { formatBytes, formatCpu, useUsage, useUsageSampler } from "../lib/usage";
-import { isServer, primaryServer, serverEnabled, useStack } from "../lib/stack";
+import { isServer, primaryServer, serverEnabled, startAllHint, useStack } from "../lib/stack";
 import { useHotkeys } from "../lib/shortcuts";
 import { Button, Card, Pill, Segmented } from "../components/ui";
 import Menu from "../components/Menu";
@@ -130,9 +131,11 @@ export default function Overview() {
   const setConnMode = useAppStore((s) => s.setConnMode);
   const openNewProject = useAppStore((s) => s.setNewProjectOpen);
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
-  const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: 15_000 });
+  // Pages stay mounted when hidden; they only poll while on screen.
+  const active = usePageActive();
+  const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: active ? 15_000 : false });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
-  const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: 5000 });
+  const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: active ? 5000 : false });
   const stack = useStack();
 
   const anyInstalled = (services.data ?? []).some((s) => s.installed);
@@ -163,7 +166,7 @@ export default function Overview() {
       if (useAppStore.getState().activeProfile === name) useAppStore.getState().setActiveProfile(null);
       notify("info", `Deleted ${name} profile`);
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
 
   const selectable = list.filter((s) => s.installed);
@@ -188,7 +191,7 @@ export default function Overview() {
   const copy = (text: string, what: string) =>
     navigator.clipboard.writeText(text).then(
       () => notify("info", `Copied ${what}`),
-      (e) => notify("error", String(e)),
+      notifyError,
     );
 
   useHotkeys({
@@ -205,8 +208,8 @@ export default function Overview() {
     },
     s: () => stack.start(chosen.length ? chosen : current?.installed ? [current.kind] : []),
     x: () => stack.stop(chosen.length ? chosen : current?.installed ? [current.kind] : []),
-    r: () => current?.state === "running" && api.restartService(current.kind).catch((e) => notify("error", String(e))),
-    o: () => current && openAction(current, sites.data, settings.data, navigate, notify)?.run(),
+    r: () => current?.state === "running" && api.restartService(current.kind).catch(notifyError),
+    o: () => current && openAction(current, sites.data, settings.data, navigate)?.run(),
     c: () => current?.installed && copy(copyText(connection(current.kind, current.port), connMode), `${current.label} ${connMode === "env" ? ".env" : "URL"}`),
     e: () => setConnMode(connMode === "url" ? "env" : "url"),
     l: () => {
@@ -254,7 +257,7 @@ export default function Overview() {
                   <RotateCcw size={14} /> Restart
                 </Button>
               ) : (
-                <Button variant="primary" onClick={stack.startStack} disabled={stack.busy} title="Shift+S">
+                <Button variant="primary" onClick={stack.startStack} disabled={stack.busy} title={stack.profile ? "Shift+S" : startAllHint}>
                   <Play size={14} /> {stack.profile ? `Start ${stack.profile.name}` : "Start all"}
                 </Button>
               )}
@@ -588,12 +591,10 @@ function openAction(
   sites: SitesInfo | undefined,
   settings: Settings | undefined,
   navigate: (p: "services") => void,
-  notify: (tone: "error", text: string) => void,
 ): { label: string; icon: typeof ExternalLink; run: () => void; always?: boolean } | null {
-  const onError = (e: unknown) => notify("error", String(e));
   const mailUi = settings?.ports.mailUi;
   if (isServer(service.kind)) {
-    return { label: "Open in browser", icon: ExternalLink, run: () => openUrl(connection(service.kind, service.port).url + "/").catch(onError) };
+    return { label: "Open in browser", icon: ExternalLink, run: () => openUrl(connection(service.kind, service.port).url + "/").catch(notifyError) };
   }
   if (service.kind === "mariadb" || service.kind === "mysql" || service.kind === "postgres") {
     // The tool picked last for this database (the ⋯ menu lists the others).
@@ -602,48 +603,48 @@ function openAction(
       const suggest = service.kind === "postgres" ? "adminer" : "phpmyadmin";
       return { label: `Install ${runtimeLabels[suggest]}`, icon: Table2, run: () => navigate("services"), always: true };
     }
-    return { label: `Open ${runtimeLabels[tool.tool]}`, icon: Table2, run: () => openUrl(tool.url).catch(onError) };
+    return { label: `Open ${runtimeLabels[tool.tool]}`, icon: Table2, run: () => openUrl(tool.url).catch(notifyError) };
   }
   if (service.kind === "mongodb") {
     return settings?.versions.compass
-      ? { label: "Open Compass", icon: Table2, run: () => api.openCompass().catch(onError) }
+      ? { label: "Open Compass", icon: Table2, run: () => api.openCompass().catch(notifyError) }
       : { label: "Install Compass", icon: Table2, run: () => navigate("services"), always: true };
   }
   if (service.kind === "meilisearch") {
-    return { label: "Open search preview", icon: ExternalLink, run: () => openUrl(`http://localhost:${service.port}/`).catch(onError) };
+    return { label: "Open search preview", icon: ExternalLink, run: () => openUrl(`http://localhost:${service.port}/`).catch(notifyError) };
   }
   if (service.kind === "minio") {
-    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.minioConsole ?? 9111}/`).catch(onError) };
+    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.minioConsole ?? 9111}/`).catch(notifyError) };
   }
   if (service.kind === "rabbitmq") {
-    return { label: "Open management console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.rabbitmqManagement ?? 15672}/`).catch(onError) };
+    return { label: "Open management console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.rabbitmqManagement ?? 15672}/`).catch(notifyError) };
   }
   if (service.kind === "n8n") {
     const url = toolUrl("n8n", sites, mailUi, service.port);
-    return url ? { label: "Open n8n", icon: ExternalLink, run: () => openUrl(url).catch(onError) } : null;
+    return url ? { label: "Open n8n", icon: ExternalLink, run: () => openUrl(url).catch(notifyError) } : null;
   }
   if (service.kind === "rustfs") {
-    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.rustfsConsole ?? 9101}/`).catch(onError) };
+    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.rustfsConsole ?? 9101}/`).catch(notifyError) };
   }
   if (service.kind === "clickhouse") {
-    return { label: "Open console", icon: Table2, run: () => openUrl(`http://localhost:${service.port}/play`).catch(onError) };
+    return { label: "Open console", icon: Table2, run: () => openUrl(`http://localhost:${service.port}/play`).catch(notifyError) };
   }
   if (service.kind === "neo4j") {
     const url = toolUrl("neo4j", sites, mailUi, service.port);
-    return url ? { label: "Open Neo4j Browser", icon: ExternalLink, run: () => openUrl(url).catch(onError) } : null;
+    return url ? { label: "Open Neo4j Browser", icon: ExternalLink, run: () => openUrl(url).catch(notifyError) } : null;
   }
   if (service.kind === "pgadmin") {
     const url = toolUrl("pgadmin", sites, mailUi, settings?.ports.pgadmin);
-    return url ? { label: "Open pgAdmin", icon: ExternalLink, run: () => openUrl(url).catch(onError) } : null;
+    return url ? { label: "Open pgAdmin", icon: ExternalLink, run: () => openUrl(url).catch(notifyError) } : null;
   }
   if (service.kind === "redis") {
     const url = toolUrl("phpredisadmin", sites, mailUi);
     return url
-      ? { label: "Open phpRedisAdmin", icon: Table2, run: () => openUrl(url).catch(onError) }
+      ? { label: "Open phpRedisAdmin", icon: Table2, run: () => openUrl(url).catch(notifyError) }
       : { label: "Install phpRedisAdmin", icon: Table2, run: () => navigate("services"), always: true };
   }
   if (service.kind === "mailpit") {
-    return { label: "Open inbox", icon: ExternalLink, run: () => openUrl(toolUrl("mailpit", sites, mailUi) ?? "http://localhost:8025/").catch(onError) };
+    return { label: "Open inbox", icon: ExternalLink, run: () => openUrl(toolUrl("mailpit", sites, mailUi) ?? "http://localhost:8025/").catch(notifyError) };
   }
   return null;
 }
@@ -693,11 +694,10 @@ function ServiceRow({
   // PHP's workers belong to no one service; the web servers show them, since that's
   // where a slow page's time goes.
   const php = useUsage((s) => (isServer(service.kind) ? s.latest.php : undefined));
-  const onError = (e: unknown) => notify("error", String(e));
   // A failed start shows on the row itself (ProblemPanel), so no toast for it.
   const start = useMutation({ mutationFn: () => api.startService(service.kind), onError: () => { } });
-  const stop = useMutation({ mutationFn: () => api.stopService(service.kind), onError });
-  const restart = useMutation({ mutationFn: () => api.restartService(service.kind), onError });
+  const stop = useMutation({ mutationFn: () => api.stopService(service.kind), onError: notifyError });
+  const restart = useMutation({ mutationFn: () => api.restartService(service.kind), onError: notifyError });
   const meta = serviceMeta[service.kind];
   const running = service.state === "running";
   // Spawned and waiting to answer (Elasticsearch, n8n… take up to a minute): it can be
@@ -710,7 +710,7 @@ function ServiceRow({
   // Re-renders the row when a different tool is picked from the menu (the choice itself
   // lives in the device's preferences).
   const [, setToolPick] = useState<string | null>(null);
-  const action = openAction(service, sites, settings, navigate, notify);
+  const action = openAction(service, sites, settings, navigate);
   const conn = connection(service.kind, service.port);
   const connValue = copyText(conn, connMode);
 
@@ -739,14 +739,14 @@ function ServiceRow({
           onSelect: () => {
             writePref(`dbTool.${service.kind}`, t.tool);
             setToolPick(t.tool);
-            openUrl(t.url).catch(onError);
+            openUrl(t.url).catch(notifyError);
           },
         }))
       : [];
   const dbMenu = [
     ...toolMenu,
     ...(service.kind === "mariadb" || service.kind === "mysql"
-      ? [{ label: "Open command-line client", icon: <TerminalSquare size={15} />, onSelect: () => api.openDbClient(service.kind as DatabaseKind).catch(onError) }]
+      ? [{ label: "Open command-line client", icon: <TerminalSquare size={15} />, onSelect: () => api.openDbClient(service.kind as DatabaseKind).catch(notifyError) }]
       : []),
   ];
 
@@ -982,7 +982,7 @@ function VcRuntimeBanner() {
       notify("info", "Visual C++ runtime installed");
       status.refetch();
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   if (!status.data?.applicable || status.data.installed) return null;
   return (
@@ -1027,20 +1027,18 @@ function FoldCard({ id, defaultOpen, title, extra, children }: { id: string; def
 /** One-click tools, each saying what it needs before it can open. */
 function QuickShortcuts({ sites, services, settings }: { sites?: SitesInfo; services: ServiceInfo[]; settings?: Settings }) {
   const navigate = useAppStore((s) => s.navigate);
-  const notify = useAppStore((s) => s.notify);
   const mailUi = settings?.ports.mailUi;
   const up = (kind: ServiceKind) => services.some((s) => s.kind === kind && s.state === "running");
   const web = primaryServer(settings);
   const db = up("mariadb") || up("mysql");
 
   const installed = (kind: ServiceKind) => services.some((s) => s.kind === kind && s.installed);
-  const onError = (e: unknown) => notify("error", String(e));
   const webTool = (tool: "phpmyadmin" | "adminer" | "phpredisadmin") => () => {
     const url = toolUrl(tool, sites, mailUi);
-    if (url) openUrl(url).catch(onError);
+    if (url) openUrl(url).catch(notifyError);
   };
   const tools = [
-    { tool: "mailpit" as const, label: "Mailpit inbox", ready: up("mailpit"), need: "Start Mailpit", readyText: "Open inbox", installed: installed("mailpit"), open: () => openUrl(toolUrl("mailpit", sites, mailUi) ?? "http://localhost:8025/").catch(onError) },
+    { tool: "mailpit" as const, label: "Mailpit inbox", ready: up("mailpit"), need: "Start Mailpit", readyText: "Open inbox", installed: installed("mailpit"), open: () => openUrl(toolUrl("mailpit", sites, mailUi) ?? "http://localhost:8025/").catch(notifyError) },
     { tool: "phpmyadmin" as const, label: "phpMyAdmin", ready: up(web) && db, need: `Start ${serviceLabels[web]} and a database`, readyText: "Browse databases", installed: !!toolUrl("phpmyadmin", sites, mailUi), open: webTool("phpmyadmin") },
     { tool: "adminer" as const, label: "Adminer", ready: up(web) && db, need: `Start ${serviceLabels[web]} and a database`, readyText: "Lightweight database admin", installed: !!toolUrl("adminer", sites, mailUi), open: webTool("adminer") },
     { tool: "phpredisadmin" as const, label: "phpRedisAdmin", ready: up(web) && up("redis"), need: `Start ${serviceLabels[web]} and Redis`, readyText: "Browse Redis keys", installed: !!toolUrl("phpredisadmin", sites, mailUi), open: webTool("phpredisadmin") },
@@ -1147,8 +1145,6 @@ function ConnectPanel({ services, onCopy }: { services: ServiceInfo[]; onCopy: (
 function ProjectList({ sites, onNew }: { sites: Site[]; onNew: () => void }) {
   const navigate = useAppStore((s) => s.navigate);
   const openSite = useAppStore((s) => s.openSite);
-  const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const recent = [...sites].sort((a, b) => b.modified - a.modified).slice(0, 4);
   return (
     <FoldCard
@@ -1177,10 +1173,10 @@ function ProjectList({ sites, onNew }: { sites: Site[]; onNew: () => void }) {
                 </span>
               </span>
             </button>
-            <Button size="sm" variant="ghost" onClick={() => openUrl(site.url).catch(onError)} aria-label={`Open ${site.domain}`} title={`Open ${site.url}`}>
+            <Button size="sm" variant="ghost" onClick={() => openUrl(site.url).catch(notifyError)} aria-label={`Open ${site.domain}`} title={`Open ${site.url}`}>
               <ExternalLink size={14} />
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`} title="Open the folder">
+            <Button size="sm" variant="ghost" onClick={() => openPath(site.path).catch(notifyError)} aria-label={`Open ${site.name} folder`} title="Open the folder">
               <FolderOpen size={14} />
             </Button>
           </li>

@@ -23,9 +23,17 @@ const MARIADB_TOOLS: &[&str] = &["mariadb", "mariadb-dump", "mariadb-admin"];
 /// Environment for processes that run language tools: JAVA_HOME for the active Java (Maven's
 /// wrapper and Gradle look for it; the `java` shim alone isn't enough for them).
 pub fn tool_env(settings: &Settings, layout: &Layout) -> Vec<(String, String)> {
-    let mut env = Vec::new();
+    // Node (npm, npx, dev servers) trusts the system's certificates, like the browser, not
+    // only its own list: behind a company proxy, VPN or antivirus that re-signs HTTPS, npm
+    // otherwise fails with UNABLE_TO_VERIFY_LEAF_SIGNATURE. It also lets Node reach the
+    // .test sites over HTTPS. Node 22.19 / 24.6 and later read it; older ones ignore it.
+    let mut env = vec![("NODE_USE_SYSTEM_CA".to_string(), "1".to_string())];
     if let Some(v) = settings.versions.get("java") {
         env.push(("JAVA_HOME".to_string(), path(&layout.bin("java", v))));
+    }
+    // uv keeps the Pythons it downloads inside LampRabit's folder.
+    if settings.versions.get("uv").is_some() {
+        env.extend(crate::runtimes::uv_env(layout));
     }
     // Cargo runs rustc and friends itself; they need the same homes as the shims give it.
     if let Some(v) = settings.versions.get("rust") {
@@ -154,12 +162,11 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
         Some(v) => Some(layout.bin("ollama", v).join(crate::runtimes::Runtime::Ollama.marker())),
         None => crate::runtimes::ollama_elsewhere(),
     };
-    if let Some(target) = ollama {
-        if target.exists() {
+    if let Some(target) = ollama
+        && target.exists() {
             let env = vec![("OLLAMA_HOST".to_string(), format!("127.0.0.1:{}", settings.ports.ollama))];
             shim(&dir, "ollama", &[Case { folder: None, target, args: Vec::new(), env }])?;
         }
-    }
     // Go's tools (Go finds its own root from where it runs); each project gets the
     // installed Go its go.mod asks for.
     for name in ["go", "gofmt"] {
@@ -202,6 +209,28 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
             let target = home.join("bin").join(exe(name));
             if target.exists() {
                 shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env: env.clone() }])?;
+            }
+        }
+    }
+    // Bun, Deno and uv are single programs; bunx is `bun x` and uvx is `uv tool run`.
+    for (runtime, name, args) in [("bun", "bun", &[][..]), ("bun", "bunx", &["x"][..]), ("deno", "deno", &[][..]), ("uv", "uv", &[][..]), ("uv", "uvx", &["tool", "run"][..])] {
+        let Some(v) = settings.versions.get(runtime) else { continue };
+        let target = layout.bin(runtime, v).join(exe(runtime));
+        if target.exists() {
+            let env = if runtime == "uv" { crate::runtimes::uv_env(layout) } else { Vec::new() };
+            shim(&dir, name, &[Case { folder: None, target, args: args.iter().map(|a| a.to_string()).collect(), env }])?;
+        }
+    }
+    // conda and mamba from Miniforge. `conda activate` needs conda's own shell setup, which
+    // LampRabit doesn't add to your profile; `conda run -n <env>` works without it.
+    if let Some(v) = settings.versions.get("conda") {
+        let home = layout.bin("conda", v);
+        let conda = crate::runtimes::conda_program(&home);
+        for name in ["conda", "mamba"] {
+            // Windows' Miniforge keeps mamba (a native program) in Library\bin, conda in Scripts.
+            let candidates = [conda.with_file_name(exe(name)), home.join("conda").join("Library").join("bin").join(exe(name))];
+            if let Some(target) = candidates.into_iter().find(|t| t.exists()) {
+                shim(&dir, name, &[Case { folder: None, target, args: Vec::new(), env: Vec::new() }])?;
             }
         }
     }
@@ -360,7 +389,7 @@ mod windows_path {
     }
 
     fn decode(bytes: &[u8]) -> String {
-        let wide: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let wide: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         String::from_utf16_lossy(&wide).trim_end_matches('\0').to_string()
     }
 

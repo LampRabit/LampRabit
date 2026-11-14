@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Plug, Unplug } from "lucide-react";
 import clsx from "clsx";
 import { api, type McpStatus } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { Button, Switch } from "./ui";
 
 /**
@@ -15,7 +15,6 @@ import { Button, Switch } from "./ui";
 export default function McpSettings() {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const status = useQuery({ queryKey: ["mcp-status"], queryFn: api.mcpStatus });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["mcp-status"] });
   const toggle = useMutation({
@@ -25,7 +24,7 @@ export default function McpSettings() {
       refresh();
       queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
-    onError,
+    onError: notifyError,
   });
   const connect = useMutation({
     mutationFn: ({ id, on }: { id: string; on: boolean }) => api.mcpConnect(id, on),
@@ -33,7 +32,7 @@ export default function McpSettings() {
       notify("info", note);
       refresh();
     },
-    onError,
+    onError: notifyError,
   });
   const s = status.data;
   if (!s) return <div className="px-5 py-4 text-sm text-muted">{status.isError ? String(status.error) : "Loading…"}</div>;

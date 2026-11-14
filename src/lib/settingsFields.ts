@@ -77,7 +77,7 @@ export function portsFor(runtime: Runtime, settings: Settings, os?: Os) {
   const server = runtime as Server;
   if ((["apache", "nginx", "caddy", "frankenphp"] as Runtime[]).includes(runtime)) {
     const primary = settings.webServers[0] === server;
-    return portFields.filter((f) => (f.server === server && (f.admin || !primary)) || (primary && !f.server && !f.runtime));
+    return portFields.filter((f) => (f.server === server && (f.admin || !primary)) || (primary && (f.key === "http" || f.key === "https")));
   }
   return portFields.filter((f) => f.runtime === runtime && portShown(f, settings, os));
 }

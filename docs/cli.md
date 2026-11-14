@@ -11,7 +11,7 @@ It talks to the running app, so everything goes through the same code as the but
 | `lamprabit status` | Version, folder, installed services with state and port, number of projects |
 | `lamprabit services` | Every service and its state |
 | `lamprabit service start\|stop\|restart <id>` | One service (`apache`, `nginx`, `mariadb`, `mysql`, `postgres`, `redis`, `mailpit`…) |
-| `lamprabit start [<profile>]` | Everything installed, or a stack profile |
+| `lamprabit start [<profile>]` | Everything installed except the heavy services (Elasticsearch, OpenSearch, ClickHouse, Neo4j, Ollama, n8n, RabbitMQ), or a stack profile |
 | `lamprabit stop` | Every service |
 | `lamprabit profiles` | Stack profiles |
 | `lamprabit projects` | Projects in `www/` with their `.test` URLs |

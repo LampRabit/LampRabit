@@ -676,11 +676,10 @@ impl Template {
             if [d.root.is_some(), d.port.is_some(), d.process.is_some()].iter().filter(|x| **x).count() > 1 {
                 return Err(Error::msg(format!("domain {}: give one of root, port or process", d.name)));
             }
-            if let Some(name) = &d.process {
-                if !self.processes.iter().any(|p| &p.name == name && p.port.is_some()) {
+            if let Some(name) = &d.process
+                && !self.processes.iter().any(|p| &p.name == name && p.port.is_some()) {
                     return Err(Error::msg(format!("domain {}: process {name} isn't in processes:, or has no port", d.name)));
                 }
-            }
             if let Some(when) = &d.when {
                 parse_condition(when).map_err(|e| Error::msg(format!("domain {}: {e}", d.name)))?;
             }
@@ -972,8 +971,11 @@ fn parse(text: &str) -> Result<Template> {
 }
 
 /// Built-in templates, then the user's (a user template with a built-in's id replaces it).
-pub fn load(layout: &Layout) -> (Vec<(Template, Source, Option<PathBuf>)>, Vec<Broken>) {
-    let mut all: Vec<(Template, Source, Option<PathBuf>)> = BUILT_IN
+/// A template, where it came from, and its file (user templates).
+pub type Loaded = (Template, Source, Option<PathBuf>);
+
+pub fn load(layout: &Layout) -> (Vec<Loaded>, Vec<Broken>) {
+    let mut all: Vec<Loaded> = BUILT_IN
         .iter()
         .map(|(file, text)| (parse(text).unwrap_or_else(|e| panic!("built-in template {file}: {e}")), Source::BuiltIn, None))
         .collect();
@@ -1061,6 +1063,10 @@ pub fn inside(base: &Path, relative: &str) -> Result<PathBuf> {
     }
     Ok(base.join(rel))
 }
+
+/// Written next to your templates the first time the folder is opened. It ends in .txt so
+/// it doesn't show up in the wizard until renamed.
+pub const EXAMPLE: &str = include_str!("../templates/example.yaml.txt");
 
 #[cfg(test)]
 mod tests {
@@ -1197,7 +1203,3 @@ steps:
         assert!(inside(base, "/etc/hosts").is_err());
     }
 }
-
-/// Written next to your templates the first time the folder is opened. It ends in .txt so
-/// it doesn't show up in the wizard until renamed.
-pub const EXAMPLE: &str = include_str!("../templates/example.yaml.txt");

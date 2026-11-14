@@ -29,6 +29,8 @@ pub struct MoveCheck {
     /// A rename (instant) rather than a copy.
     pub same_drive: bool,
     pub file_system: Option<String>,
+    /// What moving doesn't carry over, to know before moving.
+    pub warnings: Vec<String>,
 }
 
 /// A process that holds files in the folder: it runs from it or works inside it.
@@ -126,7 +128,11 @@ pub fn check(current: &Path, target: &Path) -> MoveCheck {
     let mut problems = Vec::new();
     let names = folders();
     let size: u64 = names.iter().map(|n| size_of(&current.join(n))).sum();
-    let mut out = MoveCheck { problems: Vec::new(), size, free: None, same_drive: false, file_system: None };
+    let mut out = MoveCheck { problems: Vec::new(), size, free: None, same_drive: false, file_system: None, warnings: Vec::new() };
+    // conda writes its own folder into its scripts and environments; it can't be moved.
+    if !crate::runtimes::installed(&crate::layout::Layout::new(current.to_path_buf()), crate::runtimes::Runtime::Conda).is_empty() {
+        out.warnings.push("conda (Miniforge) can't be moved with the folder: its environments name their own location. Remove and reinstall conda on the Services page after moving, then recreate its environments.".into());
+    }
     if !target.is_absolute() {
         out.problems.push("Choose a full path, for example D:\\LampRabit or /home/you/LampRabit.".into());
         return out;

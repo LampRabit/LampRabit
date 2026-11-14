@@ -4,7 +4,7 @@ Thanks for helping! Bug reports, ideas and pull requests are all welcome.
 
 ## Reporting bugs and ideas
 
-- Search [existing issues](https://github.com/Shivam-SV/LampRabit/issues) first.
+- Search [existing issues](https://github.com/LampRabit/LampRabit/issues) first.
 - For bugs, use the bug report template and attach the **diagnostics report**: in LampRabit, open Settings → Troubleshooting → Run diagnostics → Copy. It hides your user name and home folder.
 - Security problems: please don't open a public issue; see [SECURITY.md](SECURITY.md).
 
@@ -13,7 +13,7 @@ Thanks for helping! Bug reports, ideas and pull requests are all welcome.
 You need [Node.js](https://nodejs.org/) 22+, [Rust](https://rustup.rs/) (stable) and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS (WebView2 on Windows, Xcode Command Line Tools on macOS, WebKitGTK on Linux).
 
 ```bash
-git clone https://github.com/Shivam-SV/LampRabit.git
+git clone https://github.com/LampRabit/LampRabit.git
 cd LampRabit
 npm install
 npm run tauri dev

@@ -12,7 +12,12 @@ permissions:
   contents: write
 
 jobs:
+  # The same checks as CI (tests on every OS), so a tag can't publish a build whose tests fail.
+  checks:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: checks
     strategy:
       fail-fast: false
       matrix:

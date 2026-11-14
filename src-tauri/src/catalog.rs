@@ -52,7 +52,7 @@ fn groups() -> Vec<Group> {
     vec![
         g("web", "Web and app servers", "Apache, Nginx, Caddy or FrankenPHP serve your sites; Tomcat runs Java web apps behind them. Several can run side by side.", &["apache", "nginx", "caddy", "frankenphp", "tomcat"]),
         g("languages", "Languages", "Several versions side by side; projects pick theirs.", &["php", "java", "python", "go", "rust", "node"]),
-        g("packages", "Package managers", "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH.", &["composer", "maven", "gradle"]),
+        g("packages", "Package managers", "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH. npm comes with Node.js (pnpm and Yarn through corepack), pip with Python, Cargo with Rust; each project's Dependencies tab uses them.", &["composer", "bun", "deno", "uv", "conda", "maven", "gradle"]),
         g("databases", "Databases", "They can all run side by side, each on its own port.", &["mariadb", "mysql", "postgres", "mongodb", "clickhouse", "neo4j", "sqlite"]),
         g("search", "Search", "Full-text search engines for your apps.", &["meilisearch", "typesense", "elasticsearch", "opensearch"]),
         g("storage", "Storage", "S3-compatible object storage. Their storage folder can be anywhere, even outside the LampRabit folder.", &["rustfs", "minio"]),
@@ -185,6 +185,10 @@ fn info(runtime: Runtime) -> RuntimeInfo {
             "MinGit, Git for Windows' official portable build (SHA-256 checked), for the Git tab, Clone and LampRabit's terminal. A Git already installed on the computer works too",
             (!win).then_some("LampRabit uses your system's Git here: install it with your package manager (sudo apt install git), or xcode-select --install on macOS."),
         ),
+        Runtime::Bun => ("Bun", "JavaScript runtime and packages", "Bun's official builds from GitHub (checksum checked); bun and bunx work in LampRabit's terminal, and projects with a bun.lock use it", None),
+        Runtime::Deno => ("Deno", "JavaScript and TypeScript", "Deno's official builds from GitHub (checksum checked); deno works in LampRabit's terminal", None),
+        Runtime::Uv => ("uv", "Python packages", "Astral's uv from GitHub (checksum checked); uv and uvx work in LampRabit's terminal, and the Pythons uv downloads stay inside LampRabit's folder", None),
+        Runtime::Conda => ("conda", "Python environments", "Miniforge, conda-forge's installer (checksum checked), installed into LampRabit's folder without changing PATH or your shell; conda and mamba work in LampRabit's terminal", None),
         Runtime::Gradle => ("Gradle", "Java builds", "Gradle's official distribution from services.gradle.org (SHA-256 checked); gradle works in LampRabit's terminal on the active Java", None),
         Runtime::Phpredisadmin => ("phpRedisAdmin", "Redis admin", "Browse and edit Redis keys in the browser, like phpMyAdmin", None),
         Runtime::Memcached => (
@@ -324,14 +328,7 @@ fn gradle_java(version: &str) -> (&'static str, Option<&'static str>) {
     }
 }
 
-/// The numeric parts of a version: "v21.0.5+11" → [21, 0, 5].
-fn parts(version: &str) -> Vec<u64> {
-    version
-        .trim_start_matches(['v', 'V'])
-        .split(|c: char| c == '.' || c == '+' || c == '-' || c == '_')
-        .map_while(|p| p.parse().ok())
-        .collect()
-}
+use crate::version::release as parts;
 
 /// Compares only as many parts as `bound` has, missing parts counting as 0.
 fn cmp(version: &[u64], bound: &[u64]) -> std::cmp::Ordering {

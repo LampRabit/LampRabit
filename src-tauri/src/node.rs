@@ -24,6 +24,17 @@ pub struct NodeStatus {
     pub installed: Vec<String>,
     /// Windows: switching versions needs admin rights unless Developer Mode is on.
     pub needs_elevation: bool,
+    /// pnpm and Yarn for the default Node version: whether corepack's commands are there.
+    pub package_managers: Vec<NodeTool>,
+    /// The default Node version ships corepack (Node 25 and later don't; it's added from npm).
+    pub corepack: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeTool {
+    pub id: &'static str,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -38,18 +49,17 @@ pub struct NodeRelease {
 /// An environment variable from the process, or (Windows) from the registry, where a
 /// fresh NVM install writes it without the running app seeing it.
 fn env_var(name: &str) -> Option<String> {
-    if let Ok(v) = std::env::var(name) {
-        if !v.is_empty() {
+    if let Ok(v) = std::env::var(name)
+        && !v.is_empty() {
             return Some(v);
         }
-    }
     #[cfg(windows)]
     for key in [r"HKCU\Environment", r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment"] {
         let mut cmd = std::process::Command::new("reg");
         cmd.args(["query", key, "/v", name]);
         {
             use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000);
+            cmd.creation_flags(crate::procgroup::CREATE_NO_WINDOW);
         }
         if let Ok(out) = cmd.output() {
             let text = String::from_utf8_lossy(&out.stdout);
@@ -102,7 +112,7 @@ fn developer_mode() -> bool {
         use std::os::windows::process::CommandExt;
         let out = std::process::Command::new("reg")
             .args(["query", r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock", "/v", "AllowDevelopmentWithoutDevLicense"])
-            .creation_flags(0x0800_0000)
+            .creation_flags(crate::procgroup::CREATE_NO_WINDOW)
             .output();
         return out.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("0x1"));
     }
@@ -186,7 +196,7 @@ pub async fn status(app: &AppHandle) -> NodeStatus {
         nvm_sh_dir().map(|_| "nvm")
     };
     let Some(manager) = manager else {
-        return NodeStatus { manager: None, manager_version: None, current: None, installed: vec![], needs_elevation: false };
+        return NodeStatus { manager: None, manager_version: None, current: None, installed: vec![], needs_elevation: false, package_managers: vec![], corepack: false };
     };
     let manager_version = nvm(app, &[if cfg!(windows) { "version" } else { "--version" }]).await.ok().map(|v| v.trim().to_string());
     let list = nvm(app, &if cfg!(windows) { vec!["list"] } else { vec!["ls", "--no-colors"] }).await.unwrap_or_default();
@@ -194,13 +204,54 @@ pub async fn status(app: &AppHandle) -> NodeStatus {
     if current.is_none() {
         current = nvm(app, &["current"]).await.ok().map(|c| c.trim().trim_start_matches('v').to_string()).filter(|c| c.contains('.'));
     }
+    let bin = for_project(None, std::path::Path::new(".")).ok().map(|(_, bin)| bin);
+    let has = |name: &str| bin.as_ref().is_some_and(|b| b.join(if cfg!(windows) { format!("{name}.cmd") } else { name.to_string() }).exists());
     NodeStatus {
         manager: Some(manager),
         manager_version,
         current,
         installed,
         needs_elevation: cfg!(windows) && !developer_mode(),
+        package_managers: ["pnpm", "yarn"].into_iter().map(|id| NodeTool { id, enabled: has(id) }).collect(),
+        corepack: has("corepack"),
     }
+}
+
+/// Turns on pnpm and Yarn for NVM's default Node through corepack, which then runs the
+/// version a project's package.json asks for ("packageManager"). Node 25 and later no longer
+/// ship corepack, so it's installed from npm first.
+pub async fn enable_package_managers(app: &AppHandle, layout: &Layout) -> Result<()> {
+    let (version, bin) = for_project(None, std::path::Path::new("."))?;
+    let path = crate::apps::node_path(&bin, layout);
+    let tool = |name: &str| bin.join(if cfg!(windows) { format!("{name}.cmd") } else { name.to_string() });
+    if !tool("corepack").exists() {
+        logs::system(app, Level::Info, format!("Node {version} has no corepack: installing it with npm"));
+        run_tool(&tool("npm"), &["install", "-g", "corepack", "--no-audit", "--no-fund"], &path).await?;
+    }
+    run_tool(&tool("corepack"), &["enable", "pnpm", "yarn"], &path).await?;
+    logs::system(app, Level::Info, format!("pnpm and Yarn are on for Node {version}"));
+    Ok(())
+}
+
+async fn run_tool(program: &std::path::Path, args: &[&str], path: &std::ffi::OsString) -> Result<()> {
+    // .cmd files run through cmd on Windows (Rust refuses to start them directly with arguments).
+    let mut cmd = if cfg!(windows) {
+        let mut c = tokio::process::Command::new("cmd");
+        c.arg("/C").arg(program).args(args);
+        c
+    } else {
+        let mut c = tokio::process::Command::new(program);
+        c.args(args);
+        c
+    };
+    cmd.env("PATH", path).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    procgroup::prepare(&mut cmd);
+    let out = cmd.output().await.map_err(|e| Error::msg(format!("Couldn't run {}: {e}", program.display())))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let last = crate::error::last_line(&out.stderr).unwrap_or_else(|| "it failed".into());
+    Err(Error::msg(format!("{} {} failed: {last}", program.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), args.join(" "))))
 }
 
 /// The newest release of each recent Node major, LTS first, from nodejs.org.

@@ -134,6 +134,8 @@ export function writePref(key: string, value: string | null) {
 let nextId = 1;
 /** Live lines at or below this id are already part of the loaded history. */
 let logCursor = 0;
+let pendingLogs: RawLogLine[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useAppStore = create<AppStore>((set) => ({
   page: "overview",
@@ -183,8 +185,24 @@ export const useAppStore = create<AppStore>((set) => ({
       else installs[key] = p;
       return { installs };
     }),
-  pushLog: (line) =>
-    set((s) => (line.id <= logCursor ? s : { logs: [...s.logs.slice(-(MAX_LOG_LINES - 1)), parseLog(line)], logsDropped: s.logsDropped + (s.logs.length >= MAX_LOG_LINES ? 1 : 0) })),
+  // Lines are applied in batches (every 100 ms): a busy service or dev server can send
+  // hundreds a second, and copying the whole buffer and re-rendering for each one froze the UI.
+  pushLog: (line) => {
+    pendingLogs.push(line);
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      const batch = pendingLogs;
+      pendingLogs = [];
+      set((s) => {
+        const fresh = batch.filter((l) => l.id > logCursor).map((l) => parseLog(l));
+        if (fresh.length === 0) return s;
+        const all = [...s.logs, ...fresh];
+        const dropped = Math.max(0, all.length - MAX_LOG_LINES);
+        return { logs: dropped ? all.slice(dropped) : all, logsDropped: s.logsDropped + dropped };
+      });
+    }, 100);
+  },
   loadHistory: ({ lines, cursor }) =>
     set((s) => {
       logCursor = cursor;
@@ -229,3 +247,6 @@ export const useAppStore = create<AppStore>((set) => ({
   },
   dismiss: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
 }));
+
+/** Shows a failed action's error as a toast: the usual `onError` and `.catch` handler. */
+export const notifyError = (e: unknown) => useAppStore.getState().notify("error", String(e));

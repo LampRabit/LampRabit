@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -32,7 +33,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { allServers, api, runtimeLabels, type EnvPaths, type PortStatus, type Runtime, type Server, type Settings as SettingsT } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { useTheme } from "../lib/theme";
 import { useMotion } from "../lib/motion";
 import { installAppUpdate, useAppUpdate } from "../lib/updates";
@@ -89,7 +90,8 @@ export default function Settings() {
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
-  const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: 5000 });
+  const active = usePageActive();
+  const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: active ? 5000 : false });
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const openDiagnostics = useAppStore((s) => s.setDiagnosticsOpen);
   const openSetupGuide = useAppStore((s) => s.setSetupGuideOpen);
@@ -176,7 +178,7 @@ export default function Settings() {
       }
       notify("info", "Settings applied. Running services that use them were restarted.");
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
 
 
@@ -303,7 +305,7 @@ export default function Settings() {
             <AutostartToggle />
             <ToggleRow
               label="Start services when LampRabit opens"
-              hint="Starts every installed service, so your sites are up right after sign-in."
+              hint="Starts the installed services (not the heavy ones like Elasticsearch or Ollama), so your sites are up right after sign-in."
               checked={draft.startServicesOnLaunch}
               onChange={(v) => set({ startServicesOnLaunch: v })}
             />
@@ -553,7 +555,7 @@ export default function Settings() {
                     setDraft({ ...draft, catchDumps: v });
                     queryClient.invalidateQueries({ queryKey: ["settings"] });
                   },
-                  (e) => notify("error", String(e)),
+                  notifyError,
                 )
               }
             />
@@ -783,7 +785,7 @@ function SharingSection() {
       queryClient.invalidateQueries({ queryKey: ["ngrok-token"] });
       notify("info", t ? "Ngrok authtoken saved to your system keychain" : "Ngrok authtoken removed");
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
 
   return (
@@ -840,7 +842,7 @@ function UpdatesSection({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: 
       Version {available.version} is available.{" "}
       <button
         className="inline-flex items-center gap-1 font-normal hover:underline"
-        onClick={() => openUrl(`https://github.com/Shivam-SV/LampRabit/releases/tag/v${available.version}`).catch(() => {})}
+        onClick={() => openUrl(`https://github.com/LampRabit/LampRabit/releases/tag/v${available.version}`).catch(() => {})}
       >
         What's new <ExternalLink size={12} />
       </button>

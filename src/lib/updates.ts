@@ -35,13 +35,17 @@ export const useAppUpdate = create<UpdateStore>((set) => ({
 export async function installAppUpdate(update: Update, onProgress: (pct: number | null) => void) {
   let total = 0;
   let done = 0;
-  await update.downloadAndInstall((event) => {
+  await update.download((event) => {
     if (event.event === "Started") total = event.data.contentLength ?? 0;
     if (event.event === "Progress") {
       done += event.data.chunkLength;
       onProgress(total ? Math.round((done / total) * 100) : null);
     }
   });
+  // Only once the download is complete: services stop cleanly (databases flush) before the
+  // installer takes over, which on Windows ends the app without its usual shutdown.
+  await api.prepareForUpdate().catch(() => {});
+  await update.install();
   await relaunch();
 }
 

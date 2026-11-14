@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Hexagon, Loader2, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 import { api } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { Button, Card, IconTile } from "./ui";
 import { ActiveTile, AvailableList, InstalledTile, InstalledTiles, NoActiveTile, VersionsLayout } from "./versions";
 
@@ -19,24 +19,32 @@ export default function NodeCard() {
     staleTime: 60 * 60 * 1000,
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["node"] });
-  const onError = (e: unknown) => notify("error", String(e));
 
-  const installNvm = useMutation({ mutationFn: api.nvmInstall, onSuccess: refresh, onError });
+  const installNvm = useMutation({ mutationFn: api.nvmInstall, onSuccess: refresh, onError: notifyError });
   const install = useMutation({
     mutationFn: (v: string) => api.nodeInstall(v),
     onSuccess: (_, v) => {
       notify("info", `Node ${v} installed`);
       refresh();
     },
-    onError,
+    onError: notifyError,
   });
-  const use = useMutation({ mutationFn: (v: string) => api.nodeUse(v), onSuccess: refresh, onError });
-  const remove = useMutation({ mutationFn: (v: string) => api.nodeUninstall(v), onSuccess: refresh, onError });
+  const use = useMutation({ mutationFn: (v: string) => api.nodeUse(v), onSuccess: refresh, onError: notifyError });
+  const remove = useMutation({ mutationFn: (v: string) => api.nodeUninstall(v), onSuccess: refresh, onError: notifyError });
+  const enablePms = useMutation({
+    mutationFn: api.nodeEnablePackageManagers,
+    onSuccess: () => {
+      notify("info", "pnpm and Yarn are on");
+      refresh();
+    },
+    onError: notifyError,
+  });
 
   const data = status.data;
   const busy = install.isPending || use.isPending || remove.isPending;
   const others = (data?.installed ?? []).filter((v) => v !== data?.current);
   const choices = (available.data ?? []).filter((r) => !data?.installed.includes(r.version));
+  const pmsOn = !!data?.packageManagers?.length && data.packageManagers.every((p) => p.enabled);
 
   return (
     <Card className="overflow-hidden">
@@ -111,6 +119,24 @@ export default function NodeCard() {
                 />
               ))}
             </InstalledTiles>
+          )}
+          {data.current && (
+            <section className="space-y-2">
+              <h4 className="text-xs font-bold tracking-wider text-muted uppercase">pnpm and Yarn</h4>
+              {pmsOn ? (
+                <p className="text-sm text-muted">On for Node {data.current} through corepack. Each project gets the version its package.json asks for.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted">
+                    Turns on corepack's pnpm and yarn commands for Node {data.current}
+                    {data.corepack ? "" : ", installing corepack from npm first (Node 25 and later don't include it)"}. Until then, projects run them through npx, which is slower.
+                  </p>
+                  <Button size="sm" onClick={() => enablePms.mutate()} disabled={enablePms.isPending}>
+                    {enablePms.isPending ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Turn on pnpm and Yarn
+                  </Button>
+                </>
+              )}
+            </section>
           )}
           <AvailableList
             title={data.current ? "Available to download" : "Choose a version"}

@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, ffi::OsString, path::{Path, PathBuf}, process::Stdio, sync::Arc, time::Duration};
+use std::{collections::{HashMap, HashSet}, path::{Path, PathBuf}, process::Stdio, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -154,6 +154,16 @@ impl ServiceKind {
         Def { id, label, log, check, slow }
     }
 
+    /// Services that need a lot of memory (a JVM, a model server, Erlang) or several seconds
+    /// to start: "Start all", the tray and start-on-launch leave them out; they start from
+    /// their own card or a stack profile that lists them.
+    pub fn heavy(self) -> bool {
+        matches!(
+            self,
+            ServiceKind::Elasticsearch | ServiceKind::Opensearch | ServiceKind::Clickhouse | ServiceKind::Neo4j | ServiceKind::Ollama | ServiceKind::N8n | ServiceKind::Rabbitmq
+        )
+    }
+
     /// Web servers only run when Settings → Web server includes them.
     pub fn enabled(self, settings: &Settings) -> bool {
         self.web_server().is_none_or(|s| settings.server_enabled(s))
@@ -295,6 +305,8 @@ pub struct ServiceInfo {
     pub problem: Option<Problem>,
     /// Running, but not started by LampRabit (the Ollama app): it can't be stopped here.
     pub external: bool,
+    /// Left out of "Start all" (`ServiceKind::heavy`).
+    pub heavy: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -376,11 +388,10 @@ fn answers(port: u16) -> bool {
 }
 
 fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
-    if kind == ServiceKind::Ollama {
-        if let Some(spec) = system_ollama(settings) {
+    if kind == ServiceKind::Ollama
+        && let Some(spec) = system_ollama(settings) {
             return Ok(spec);
         }
-    }
     let version = kind
         .version(settings)
         .ok_or_else(|| Error::msg(format!("{} is not installed", kind.label())))?;
@@ -981,7 +992,7 @@ async fn server_config_test(spec: &LaunchSpec) -> Option<String> {
     if !spec.path_prepend.is_empty() {
         let existing = std::env::var_os("PATH").unwrap_or_default();
         let paths = spec.path_prepend.iter().cloned().chain(std::env::split_paths(&existing));
-        cmd.env("PATH", std::env::join_paths(paths).unwrap_or(OsString::from(existing)));
+        cmd.env("PATH", std::env::join_paths(paths).unwrap_or(existing));
     }
     procgroup::prepare(&mut cmd);
     let out = cmd.output().await.ok()?;
@@ -1094,11 +1105,7 @@ async fn allow_low_ports(app: &AppHandle, label: &str, ports: &[u16]) -> Result<
     }
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
-}
+use crate::diagnose::now_ms;
 
 struct Handle {
     pid: Option<u32>,
@@ -1214,6 +1221,7 @@ impl Supervisor {
                     log_path: kind.log_path(layout),
                     health: handle.filter(|h| h.state == ServiceState::Running).and_then(|_| health.get(&kind).cloned()),
                     problem: problems.get(&kind).cloned(),
+                    heavy: kind.heavy(),
                 }
             })
             .collect()
@@ -1425,7 +1433,7 @@ impl Supervisor {
         if !spec.path_prepend.is_empty() {
             let existing = std::env::var_os("PATH").unwrap_or_default();
             let paths = spec.path_prepend.iter().cloned().chain(std::env::split_paths(&existing));
-            cmd.env("PATH", std::env::join_paths(paths).unwrap_or(OsString::from(existing)));
+            cmd.env("PATH", std::env::join_paths(paths).unwrap_or(existing));
         }
         for (k, v) in &spec.env {
             cmd.env(k, v);
@@ -1588,14 +1596,13 @@ impl Supervisor {
             logs::system(app, Level::Info, format!("{} won't be restarted after its crash", kind.label()));
         }
         let mut running = self.running.lock().await;
-        if let Some(handle) = running.get_mut(&kind) {
-            if let Some(tx) = handle.stop_tx.take() {
+        if let Some(handle) = running.get_mut(&kind)
+            && let Some(tx) = handle.stop_tx.take() {
                 handle.state = ServiceState::Stopping;
                 let _ = tx.send(());
                 emit_status(app, kind, ServiceState::Stopping, None);
                 logs::system(app, Level::Info, format!("Stopping {}", kind.label()));
             }
-        }
     }
 
     /// Applies changed sites to a running web server without dropping its connections:

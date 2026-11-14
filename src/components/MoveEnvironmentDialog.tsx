@@ -5,7 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, Check, FolderInput, FolderOpen, Loader2, Square } from "lucide-react";
 import clsx from "clsx";
 import { api, type MoveCheck } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { notifyError } from "../lib/store";
 import Dialog from "./Dialog";
 import { Button, inputClass } from "./ui";
 
@@ -20,7 +20,6 @@ type Phase = { kind: "pick" } | { kind: "moving"; done: number; total: number } 
  */
 export default function MoveEnvironmentDialog({ current, onClose }: { current: string; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
   const [target, setTarget] = useState("");
   const [check, setCheck] = useState<MoveCheck | null>(null);
   const [checking, setChecking] = useState(false);
@@ -38,7 +37,7 @@ export default function MoveEnvironmentDialog({ current, onClose }: { current: s
       api
         .checkMoveTarget(target.trim())
         .then(setCheck)
-        .catch((e) => setCheck({ problems: [String(e)], size: 0, free: null, sameDrive: false, fileSystem: null }))
+        .catch((e) => setCheck({ problems: [String(e)], size: 0, free: null, sameDrive: false, fileSystem: null, warnings: [] }))
         .finally(() => setChecking(false));
     }, 400);
     return () => clearTimeout(timer);
@@ -61,7 +60,7 @@ export default function MoveEnvironmentDialog({ current, onClose }: { current: s
     api
       .stopEnvironmentHolder(pid)
       .then(() => holders.refetch())
-      .catch((e) => notify("error", String(e)));
+      .catch(notifyError);
   const move = async () => {
     setPhase({ kind: "moving", done: 0, total: check?.size ?? 0 });
     try {
@@ -146,6 +145,12 @@ export default function MoveEnvironmentDialog({ current, onClose }: { current: s
               </p>
             )
           )}
+
+          {check && !checking && check.problems.length === 0 && (check.warnings ?? []).map((w) => (
+            <p key={w} className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warn" aria-hidden /> {w}
+            </p>
+          ))}
 
           {busy.length > 0 && (
             <div className="rounded-lg border border-warn/40 bg-warn/10 p-3">

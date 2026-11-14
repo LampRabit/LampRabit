@@ -57,6 +57,7 @@ const service = (kind: string, label: string, state: string, port: number, versi
   health: state === "running" ? { status: "healthy", detail: null, checkedAt: Date.now() } : null,
   problem: null,
   external: false,
+  heavy: false,
 });
 const services = [
   service("apache", "Apache", "running", 80, "2.4.65"),
@@ -104,6 +105,41 @@ const answers: Record<string, unknown> = {
   list_templates: { templates: [], problems: [] },
   app_statuses: [],
   project_commands: { commands: [], problems: [], sources: [] },
+  project_dependencies: [
+    {
+      manager: "composer",
+      label: "Composer",
+      manifest: "composer.json",
+      lock: "composer.lock",
+      installed: true,
+      packages: [
+        { name: "laravel/framework", wanted: "^12.0", installed: "v12.8.1", dev: false },
+        { name: "laravel/tinker", wanted: "^2.10", installed: "v2.10.1", dev: false },
+        { name: "pestphp/pest", wanted: "^3.8", installed: "v3.8.2", dev: true },
+      ],
+      canEdit: true,
+      install: "composer install",
+      updateAll: "composer update",
+      missing: null,
+      note: null,
+    },
+    {
+      manager: "npm",
+      label: "npm",
+      manifest: "package.json",
+      lock: "package-lock.json",
+      installed: false,
+      packages: [
+        { name: "vite", wanted: "^6.2.4", installed: null, dev: true },
+        { name: "tailwindcss", wanted: "^4.0.0", installed: null, dev: true },
+      ],
+      canEdit: true,
+      install: "npm install",
+      updateAll: "npm update",
+      missing: null,
+      note: null,
+    },
+  ],
   project_facts: {
     package: "laravel/laravel",
     description: "The skeleton application for the Laravel framework.",
@@ -181,7 +217,7 @@ const answers: Record<string, unknown> = {
   runtime_catalog: [{ runtime: "php", version: "8.4.14", url: "https://example.com/php.zip", sha256: null, archive: "zip", label: null }],
   runtime_requirements: [],
   runtime_updates: [],
-  node_status: { manager: "nvm-windows", managerVersion: "1.2.2", current: "24.11.1", installed: ["24.11.1"], needsElevation: false },
+  node_status: { manager: "nvm-windows", managerVersion: "1.2.2", current: "24.11.1", installed: ["24.11.1"], needsElevation: false, packageManagers: [{ id: "pnpm", enabled: true }, { id: "yarn", enabled: false }], corepack: true },
   node_available: [],
   service_usage: services.map((s) => ({ id: s.kind, cpu: s.state === "running" ? 1.2 : 0, memory: s.state === "running" ? 120_000_000 : 0, processes: 1 })),
   port_status: [],

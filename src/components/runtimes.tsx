@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArchiveRestore, GitBranch, BarChart3, Bot, Cog, HardDrive, Inbox, Search, Workflow, Cloud, Code2, Coffee, Compass, Cpu, Feather as FeatherIcon, Flame, Gauge, Leaf, Network, SquareTerminal, Terminal, Database, DatabaseZap, Feather, Layers3, Mail, Package, Radio, Server, ShieldCheck, Table2, TableProperties, Zap } from "lucide-react";
+import { ArchiveRestore, Boxes, Braces, GitBranch, BarChart3, Bot, Cog, HardDrive, Inbox, Search, Workflow, Cloud, Code2, Coffee, Compass, Cpu, Feather as FeatherIcon, Flame, Gauge, Leaf, Network, SquareTerminal, Terminal, Database, DatabaseZap, Feather, Layers3, Mail, Package, Radio, Server, ShieldCheck, Table2, TableProperties, Zap } from "lucide-react";
 import type { Runtime } from "../lib/api";
 
 /** Icon and colour used for each runtime across the app. */
@@ -108,6 +108,26 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     className: "bg-orange-600/10 text-orange-700 dark:text-orange-400",
     text: "text-orange-700 dark:text-orange-400",
     icon: (size) => <GitBranch size={size} strokeWidth={1.75} />,
+  },
+  bun: {
+    className: "bg-amber-500/12 text-amber-700 dark:text-amber-300",
+    text: "text-amber-700 dark:text-amber-300",
+    icon: (size) => <Package size={size} strokeWidth={1.75} />,
+  },
+  deno: {
+    className: "bg-zinc-500/15 text-fg",
+    text: "text-fg",
+    icon: (size) => <Braces size={size} strokeWidth={1.75} />,
+  },
+  uv: {
+    className: "bg-fuchsia-600/10 text-fuchsia-700 dark:text-fuchsia-400",
+    text: "text-fuchsia-700 dark:text-fuchsia-400",
+    icon: (size) => <Zap size={size} strokeWidth={1.75} />,
+  },
+  conda: {
+    className: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
+    text: "text-emerald-700 dark:text-emerald-400",
+    icon: (size) => <Boxes size={size} strokeWidth={1.75} />,
   },
   gradle: {
     className: "bg-teal-600/10 text-teal-700 dark:text-teal-400",

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowRight, Check, ExternalLink, Plus, Trash2, X } from "lucide-react";
 import clsx from "clsx";
 import { api, type DomainTarget, type Settings, type Site } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { notifyError } from "../lib/store";
 import DomainTargetPicker, { targetHint } from "./DomainTargetPicker";
 import { Button, Card } from "./ui";
 
@@ -67,7 +68,6 @@ const iconButton = "flex size-8 shrink-0 items-center justify-center rounded-lg 
  */
 export default function ProjectDomains({ site, settings }: { site: Site; settings?: Settings }) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
   const own = settings?.sites[site.name];
   const suffix = `.${site.domain}`;
   const processes = (own?.processes ?? []).filter((p) => p.port != null).map((p) => p.name);
@@ -90,12 +90,11 @@ export default function ProjectDomains({ site, settings }: { site: Site; setting
   const invalidate = () => {
     for (const key of ["settings", "sites", "services"]) queryClient.invalidateQueries({ queryKey: [key] });
   };
-  const onError = (e: unknown) => notify("error", String(e));
-  const saveMain = useMutation({ mutationFn: () => api.setSiteMain(site.name, main.kind === "main" ? null : main), onSuccess: invalidate, onError });
+  const saveMain = useMutation({ mutationFn: () => api.setSiteMain(site.name, main.kind === "main" ? null : main), onSuccess: invalidate, onError: notifyError });
   const saveList = useMutation({
     mutationFn: (list: Row[]) => api.setSiteDomains(site.name, list.map((r) => ({ host: `${r.label}${suffix}`, target: r.target }))),
     onSuccess: invalidate,
-    onError,
+    onError: notifyError,
   });
 
   const dirtyAt = (i: number) => i >= savedRows.length || !same(rows[i], savedRows[i]);
@@ -117,7 +116,7 @@ export default function ProjectDomains({ site, settings }: { site: Site; setting
     setRows(rows.filter((_, j) => j !== i));
     if (i < savedRows.length) saveList.mutate(savedRows.filter((_, j) => j !== i));
   };
-  const open = (host: string) => openUrl(urlFor(site, host)).catch(onError);
+  const open = (host: string) => openUrl(urlFor(site, host)).catch(notifyError);
 
   const mainDirty = !same(main, savedMain);
   const mainProblem = problem({ label: "main", target: main }, []);
@@ -139,11 +138,12 @@ export default function ProjectDomains({ site, settings }: { site: Site; setting
     }
   };
   const ports = [...new Set([portOf(main, true), ...rows.map((r) => portOf(r.target, false))].filter((p): p is number => p != null))].sort();
+  const active = usePageActive();
   const listening = useQuery({
     queryKey: ["ports-listening", ports.join(",")],
     queryFn: () => api.portsListening(ports),
     enabled: ports.length > 0,
-    refetchInterval: 5000,
+    refetchInterval: active ? 5000 : false,
   });
   const liveness = (port: number | null) => {
     if (port == null || !listening.data) return null;

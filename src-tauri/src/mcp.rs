@@ -120,13 +120,11 @@ async fn call_tool(launch: bool, name: &str, args: &Value) -> Value {
     .await;
     match result {
         Ok(mut data) => {
-            if tool.cmd == "logs" {
-                if let Some(needle) = args["contains"].as_str().map(str::to_lowercase) {
-                    if let Some(lines) = data.as_array_mut() {
+            if tool.cmd == "logs"
+                && let Some(needle) = args["contains"].as_str().map(str::to_lowercase)
+                    && let Some(lines) = data.as_array_mut() {
                         lines.retain(|l| l["line"].as_str().is_some_and(|t| t.to_lowercase().contains(&needle)));
                     }
-                }
-            }
             let text = if data.is_null() { "Done.".to_string() } else { serde_json::to_string_pretty(&data).unwrap_or_default() };
             json!({"content": [{"type": "text", "text": text}], "structuredContent": if data.is_object() { data } else { json!({"result": data}) }})
         }
@@ -175,92 +173,12 @@ pub async fn serve(launch: bool) -> i32 {
             Ok(message) => answer(launch, &message).await,
             Err(_) => Some(json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "Parse error"}})),
         };
-        if let Some(reply) = reply {
-            if out.write_all(format!("{reply}\n").as_bytes()).await.is_err() || out.flush().await.is_err() {
+        if let Some(reply) = reply
+            && (out.write_all(format!("{reply}\n").as_bytes()).await.is_err() || out.flush().await.is_err()) {
                 break;
             }
-        }
     }
     0
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn speaks_mcp() {
-        let init = answer(false, &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})).await.unwrap();
-        assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
-        assert_eq!(init["result"]["serverInfo"]["name"], "lamprabit");
-        assert!(answer(false, &json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await.is_none());
-        let list = answer(false, &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await.unwrap();
-        let tools = list["result"]["tools"].as_array().unwrap();
-        let stop = tools.iter().find(|t| t["name"] == "stop_service").unwrap();
-        assert_eq!(stop["annotations"]["readOnlyHint"], false);
-        assert_eq!(stop["annotations"]["destructiveHint"], true);
-        assert!(tools.iter().find(|t| t["name"] == "read_logs").unwrap()["annotations"]["readOnlyHint"] == true);
-        // No tool exposes the settings.
-        assert!(tools.iter().all(|t| t["name"] != "config"));
-        let unknown = answer(false, &json!({"jsonrpc": "2.0", "id": 3, "method": "resources/list"})).await.unwrap();
-        assert_eq!(unknown["error"]["code"], -32601);
-    }
-
-    /// The HTTP transport, over a real socket: answers with the token, refuses without it or
-    /// from a web page, and takes notifications with 202.
-    #[tokio::test]
-    async fn serves_over_http() {
-        use tokio::io::AsyncReadExt;
-        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        start_http(port, "secret-token".into()).await.unwrap();
-        async fn post(port: u16, body: &str, auth: Option<&str>, origin: Option<&str>) -> (u16, String) {
-            let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-            let crlf = "\r\n";
-            let mut req = format!("POST /mcp HTTP/1.1{crlf}Host: 127.0.0.1{crlf}Content-Type: application/json{crlf}Content-Length: {}{crlf}", body.len());
-            if let Some(a) = auth {
-                req.push_str(&format!("Authorization: Bearer {a}{crlf}"));
-            }
-            if let Some(o) = origin {
-                req.push_str(&format!("Origin: {o}{crlf}"));
-            }
-            req.push_str(crlf);
-            req.push_str(body);
-            s.write_all(req.as_bytes()).await.unwrap();
-            let mut out = String::new();
-            s.read_to_string(&mut out).await.unwrap();
-            let status = out.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
-            let body = out.split("\r\n\r\n").nth(1).unwrap_or_default().to_string();
-            (status, body)
-        }
-        let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#;
-        let (status, body) = post(port, init, Some("secret-token"), None).await;
-        assert_eq!(status, 200);
-        assert!(body.contains("\"lamprabit\""), "{body}");
-        let (status, body) = post(port, r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#, Some("secret-token"), Some("http://localhost:5173")).await;
-        assert_eq!(status, 200);
-        assert!(body.contains("read_logs"));
-        assert_eq!(post(port, r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#, Some("secret-token"), None).await.0, 202);
-        assert_eq!(post(port, init, None, None).await.0, 401);
-        assert_eq!(post(port, init, Some("wrong"), None).await.0, 401);
-        assert_eq!(post(port, init, Some("secret-token"), Some("https://evil.example")).await.0, 403);
-        // A browser gets a page saying what this is, with nothing private on it.
-        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        s.write_all(b"GET /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/html,*/*\r\n\r\n").await.unwrap();
-        let mut page = String::new();
-        s.read_to_string(&mut page).await.unwrap();
-        assert!(page.starts_with("HTTP/1.1 200") && page.contains("Settings → AI assistants") && !page.contains("secret-token"));
-        assert!(http_running());
-        stop_http();
-    }
-
-    #[test]
-    fn maps_tool_arguments() {
-        let tools = tools();
-        let fix = tools.iter().find(|t| t.name == "fix_project_issue").unwrap();
-        assert_eq!(request(fix, &json!({"project": "shop", "id": "env-missing"})), json!({"name": "shop", "id": "env-missing"}));
-        let logs = tools.iter().find(|t| t.name == "read_logs").unwrap();
-        assert_eq!(request(logs, &json!({"lines": 5000}))["lines"], 1000);
-    }
 }
 
 // ---- The same server over HTTP, run by the app itself (Settings → AI assistants). ----
@@ -399,3 +317,82 @@ const BROWSER_PAGE: &str = r#"<!doctype html><html lang="en"><head><meta charset
 <p>To connect an assistant, open LampRabit → <b>Settings → AI assistants</b> and either:</p>
 <ul><li>press <b>Connect</b> next to your assistant, or</li><li>copy the <code>claude mcp add …</code> command or the JSON config shown under <b>Run the MCP server in LampRabit</b>; they include the token.</li></ul>
 </body></html>"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn speaks_mcp() {
+        let init = answer(false, &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})).await.unwrap();
+        assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
+        assert_eq!(init["result"]["serverInfo"]["name"], "lamprabit");
+        assert!(answer(false, &json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await.is_none());
+        let list = answer(false, &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await.unwrap();
+        let tools = list["result"]["tools"].as_array().unwrap();
+        let stop = tools.iter().find(|t| t["name"] == "stop_service").unwrap();
+        assert_eq!(stop["annotations"]["readOnlyHint"], false);
+        assert_eq!(stop["annotations"]["destructiveHint"], true);
+        assert!(tools.iter().find(|t| t["name"] == "read_logs").unwrap()["annotations"]["readOnlyHint"] == true);
+        // No tool exposes the settings.
+        assert!(tools.iter().all(|t| t["name"] != "config"));
+        let unknown = answer(false, &json!({"jsonrpc": "2.0", "id": 3, "method": "resources/list"})).await.unwrap();
+        assert_eq!(unknown["error"]["code"], -32601);
+    }
+
+    /// The HTTP transport, over a real socket: answers with the token, refuses without it or
+    /// from a web page, and takes notifications with 202.
+    #[tokio::test]
+    async fn serves_over_http() {
+        use tokio::io::AsyncReadExt;
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        start_http(port, "secret-token".into()).await.unwrap();
+        async fn post(port: u16, body: &str, auth: Option<&str>, origin: Option<&str>) -> (u16, String) {
+            let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            let crlf = "\r\n";
+            let mut req = format!("POST /mcp HTTP/1.1{crlf}Host: 127.0.0.1{crlf}Content-Type: application/json{crlf}Content-Length: {}{crlf}", body.len());
+            if let Some(a) = auth {
+                req.push_str(&format!("Authorization: Bearer {a}{crlf}"));
+            }
+            if let Some(o) = origin {
+                req.push_str(&format!("Origin: {o}{crlf}"));
+            }
+            req.push_str(crlf);
+            req.push_str(body);
+            s.write_all(req.as_bytes()).await.unwrap();
+            let mut out = String::new();
+            s.read_to_string(&mut out).await.unwrap();
+            let status = out.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
+            let body = out.split("\r\n\r\n").nth(1).unwrap_or_default().to_string();
+            (status, body)
+        }
+        let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#;
+        let (status, body) = post(port, init, Some("secret-token"), None).await;
+        assert_eq!(status, 200);
+        assert!(body.contains("\"lamprabit\""), "{body}");
+        let (status, body) = post(port, r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#, Some("secret-token"), Some("http://localhost:5173")).await;
+        assert_eq!(status, 200);
+        assert!(body.contains("read_logs"));
+        assert_eq!(post(port, r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#, Some("secret-token"), None).await.0, 202);
+        assert_eq!(post(port, init, None, None).await.0, 401);
+        assert_eq!(post(port, init, Some("wrong"), None).await.0, 401);
+        assert_eq!(post(port, init, Some("secret-token"), Some("https://evil.example")).await.0, 403);
+        // A browser gets a page saying what this is, with nothing private on it.
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        s.write_all(b"GET /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/html,*/*\r\n\r\n").await.unwrap();
+        let mut page = String::new();
+        s.read_to_string(&mut page).await.unwrap();
+        assert!(page.starts_with("HTTP/1.1 200") && page.contains("Settings → AI assistants") && !page.contains("secret-token"));
+        assert!(http_running());
+        stop_http();
+    }
+
+    #[test]
+    fn maps_tool_arguments() {
+        let tools = tools();
+        let fix = tools.iter().find(|t| t.name == "fix_project_issue").unwrap();
+        assert_eq!(request(fix, &json!({"project": "shop", "id": "env-missing"})), json!({"name": "shop", "id": "env-missing"}));
+        let logs = tools.iter().find(|t| t.name == "read_logs").unwrap();
+        assert_eq!(request(logs, &json!({"lines": 5000}))["lines"], 1000);
+    }
+}

@@ -142,7 +142,7 @@ pub fn pm_commands(pm: PackageManager, path: &OsString) -> Result<PmCommands> {
         }
         PackageManager::Bun => {
             if !on_path("bun", path) {
-                return Err(Error::msg("Bun isn't installed. Install it from bun.sh, or pick another package manager."));
+                return Err(Error::msg("Bun isn't installed. Install it on the Services page (Package managers → Bun), or pick another package manager."));
             }
             PmCommands { id: "bun", run: "bun run".into(), args: "", exec: "bunx".into(), create: "bun create".into(), install: "bun install".into(), add: "bun add".into() }
         }
@@ -305,7 +305,9 @@ pub fn process_key(project: &str, process: &str) -> String {
 /// Processes to start again after they exited, as (project, process). The restart needs
 /// fresh settings, which the exit watcher doesn't have, so lib.rs's loop does it
 /// (`restart_requests`).
-static RESTARTS: std::sync::LazyLock<(tokio::sync::mpsc::UnboundedSender<(String, String)>, std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<(String, String)>>>)> =
+type Restart = (String, String);
+type RestartChannel = (tokio::sync::mpsc::UnboundedSender<Restart>, std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<Restart>>>);
+static RESTARTS: std::sync::LazyLock<RestartChannel> =
     std::sync::LazyLock::new(|| {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         (tx, std::sync::Mutex::new(Some(rx)))
@@ -438,13 +440,12 @@ impl Apps {
     fn trim_log(layout: &Layout, name: &str) {
         let path = log_file(layout, name);
         let Ok(len) = std::fs::metadata(&path).map(|m| m.len()) else { return };
-        if len > LOG_FILE_MAX {
-            if let Ok(bytes) = std::fs::read(&path) {
+        if len > LOG_FILE_MAX
+            && let Ok(bytes) = std::fs::read(&path) {
                 let half = &bytes[bytes.len() / 2..];
                 let start = half.iter().position(|b| *b == b'\n').map_or(0, |i| i + 1);
                 let _ = std::fs::write(&path, &half[start..]);
             }
-        }
     }
 
     pub async fn start(&self, app: &AppHandle, settings: &Settings, layout: &Layout, name: &str) -> Result<AppStatus> {
@@ -611,12 +612,11 @@ impl Apps {
         if command.is_empty() {
             return Err(Error::msg(format!("Enter the command {process} runs, such as php artisan queue:work.")));
         }
-        if let Some(port) = config.port {
-            if std::net::TcpListener::bind(("127.0.0.1", port)).is_err() {
+        if let Some(port) = config.port
+            && std::net::TcpListener::bind(("127.0.0.1", port)).is_err() {
                 let owner = diagnose::port_owner(port).await.map(|o| format!(" by {} (PID {})", o.name, o.pid)).unwrap_or_default();
                 return Err(Error::msg(format!("Port {port} is already in use{owner}. Stop that program, or give {process} another port.")));
             }
-        }
         let dir = layout.www().join(project).join(&config.cwd);
         if !dir.is_dir() {
             return Err(Error::msg(format!("{process} runs in {project}/{}, which doesn't exist. Pick another folder for it.", config.cwd)));

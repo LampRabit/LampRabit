@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { ArchiveRestore, DatabaseBackup, FolderOpen, Trash2 } from "lucide-react";
 import { api, runtimeLabels, type Backup, type DbEngine } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import Dialog from "./Dialog";
 import { Button, Card, inputClass } from "./ui";
 
@@ -34,7 +34,6 @@ export default function BackupsPanel({ engine }: { engine: DbEngine }) {
     : /^[A-Za-z0-9_-]{1,64}$/.test(target);
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  const onError = (e: unknown) => notify("error", String(e));
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["backups"] });
     queryClient.invalidateQueries({ queryKey: ["databases", engine] });
@@ -45,7 +44,7 @@ export default function BackupsPanel({ engine }: { engine: DbEngine }) {
       notify("info", `Backed up ${b.database} (${size(b.size)})`);
       refresh();
     },
-    onError,
+    onError: notifyError,
   });
   const restore = useMutation({
     mutationFn: ({ path, database }: { path: string; database: string }) => api.restoreBackup(engine, path, database),
@@ -54,9 +53,9 @@ export default function BackupsPanel({ engine }: { engine: DbEngine }) {
       setRestoring(null);
       refresh();
     },
-    onError,
+    onError: notifyError,
   });
-  const remove = useMutation({ mutationFn: api.deleteBackup, onSuccess: refresh, onError, onSettled: () => setDeleting(null) });
+  const remove = useMutation({ mutationFn: api.deleteBackup, onSuccess: refresh, onError: notifyError, onSettled: () => setDeleting(null) });
 
   const mine = (backups.data ?? []).filter((b) => b.engine === engine);
   const sep = paths.data?.os === "windows" ? "\\" : "/";
@@ -70,7 +69,7 @@ export default function BackupsPanel({ engine }: { engine: DbEngine }) {
           <p className="text-xs text-muted">Kept in the backups folder, which uninstalling LampRabit keeps too.</p>
         </div>
         {folder && mine.length > 0 && (
-          <Button size="sm" variant="ghost" onClick={() => openPath(folder).catch(onError)}>
+          <Button size="sm" variant="ghost" onClick={() => openPath(folder).catch(notifyError)}>
             <FolderOpen size={14} /> Folder
           </Button>
         )}

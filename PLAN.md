@@ -32,7 +32,7 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **8. Release**: installers (NSIS/MSI, dmg, AppImage/deb), signed auto-updates, CI on every push, tag-triggered draft releases (see RELEASING.md)
 - [x] **Polish**: animated logo (ears, eyes, nose every few minutes), page/dialog/list motion, Motion setting (System / Full / Reduced / Off)
 - [x] **9. Linux parity and developer dashboard** (see below)
-- [ ] **10. macOS parity, stability on every OS, safe uninstall** (runtime builds and CI coverage are in place; keep macOS in preview until hands-on platform checks and the compatibility matrix are complete)
+- [x] **10. macOS parity, stability on every OS, safe uninstall** (2026-11-14: checked by hand on a Mac, compatibility matrix published; macOS is supported from 0.6.0, no longer a preview)
 - [x] **11. Service foundation and web servers: Caddy, FrankenPHP, Tomcat (with Java)** (2026-11-05: runtime needs and platform gaps from `catalog.rs`; the frontend's runtime and service labels load from it)
 - [x] **12. Projects: several domains, processes, Node.js serving** (2026-11-05: stack profiles list project processes; `lamprabit.toml` saved and applied from a project's Settings)
 - [x] **13. Logs redesign and dump catcher** (2026-11-05: dump catcher, source sidebar, virtualised list, line details, per-source clear, rotation)
@@ -45,9 +45,9 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **20. Headless core and the `lamprabit` CLI**
 - [x] **21. MCP server**
 - [x] **22. Git** (2026-11-12: project Git workflow and Git runtime)
-- [ ] **23. Dependency manager** (part of 25)
+- [x] **23. Dependency manager** (part of 25; 2026-11-14: the project card's Dependencies tab)
 - [x] **24. Languages: Python, Go, Rust, Java** (2026-11-12: runtime, project and template support)
-- [ ] **25. Package managers: npm, pnpm, Yarn, Bun, Deno, pip, conda, uv, Maven, Gradle, Cargo**
+- [x] **25. Package managers: npm, pnpm, Yarn, Bun, Deno, pip, conda, uv, Maven, Gradle, Cargo** (2026-11-14)
 - [x] **26. Movable environment folder** (2026-11-05: the first run asks where the folder goes)
 - [ ] **Later**: Git workflow builder, deployment checklists
 
@@ -71,7 +71,7 @@ Phases 10 and up come from an exported product spec (`Preject-features-and-plan.
 
 ## Phase 10: macOS parity, stability on every OS, safe uninstall
 
-macOS remains in preview while platform behavior and runtime coverage are validated. LampRabit now builds Apache, Nginx, PHP, Redis, Memcached and MariaDB for macOS; MySQL uses Oracle CDN archives. Some runtimes remain unavailable on specific architectures or operating systems, as reported by the catalog.
+macOS is supported from 0.6.0 (checked by hand on 2026-11-14). LampRabit builds Apache, Nginx, PHP, Redis, Memcached and MariaDB for macOS; MySQL uses Oracle CDN archives. Some runtimes remain unavailable on specific architectures or operating systems, as reported by the catalog.
 
 ### 10.1 macOS runtimes, Redis and Memcached
 
@@ -80,19 +80,21 @@ macOS remains in preview while platform behavior and runtime coverage are valida
 - [x] The runtime manager reads the manifest for macOS builds and removes `com.apple.quarantine` after checksum verification so downloaded executables can run.
 - [x] Real Redis on Windows replaced Garnet; Memcached is a downloadable runtime on each supported platform; PHP `memcached` and `igbinary` are included in the Linux/macOS PHP builds.
 - [x] Latest CI on 2026-11-13 passed the smoke workflow on Apple Silicon (`macos-latest`) and Intel (`macos-15-intel`), and built and opened the app bundle on both runners. See [workflow run](https://github.com/LampRabit/LampRabit/actions/runs/43377759321). Pull-request smoke runs cover the standard runtime list; heavy services run on the scheduled/full workflow.
-- [ ] Hands-on Mac validation: install and start Apache, Nginx, PHP-FPM, Redis, Memcached, MariaDB and MySQL; confirm common site and database workflows, including paths with spaces and quotes. Keep macOS in preview until this is complete.
+- [x] Hands-on Mac validation (2026-11-14, Apple silicon): Apache and Nginx (switching between them), PHP-FPM, MariaDB, Mailpit; a Laravel project at https://<name>.test with its migrations, phpMyAdmin, mail caught by Mailpit.
+- [ ] Still to try on a Mac: Redis, Memcached and MySQL; a project folder with spaces and quotes in its name.
 
 ### 10.2 macOS platform pieces
 
 - [x] Platform code is present for managed hosts entries, CA trust/removal via `security`, port-conflict discovery via `lsof`, Terminal.app launch, shell PATH shims, process groups and orphan cleanup.
 - [x] Downloaded runtime quarantine is removed only after the archive checksum has been verified.
 - [x] CI builds and opens the macOS app bundle on Apple Silicon and Intel, and runs the service smoke workflow on both.
-- [ ] Hands-on Mac validation remains for the system permission prompts and effects: hosts-file updates, CA trust and removal, ports 80/443, Terminal and PATH behavior, Gatekeeper/runtime launch, and process cleanup.
+- [x] Hands-on Mac validation (2026-11-14): hosts-file updates, CA trust (the padlock in Safari), ports 80/443, LampRabit's Terminal and PATH, runtimes launching without Gatekeeper prompts, closing the window with services kept running. Since then: the traffic lights are centred in the 48 pt title bar (`trafficLightPosition` y 26), and Add to PATH is on by default for new installs.
+- [ ] Still to try on a Mac: CA removal, and that quitting leaves no service processes behind.
 - [x] The macOS Terminal launcher now passes paths as `osascript` arguments and shell-quotes them in AppleScript instead of interpolating them into source. `cargo check` passed on Windows; verify opening a terminal from a path containing spaces and quotes on macOS.
 
 ### 10.3 Stability on all OSes
 - ✅ A cross-platform smoke test (2026-11-04): `lamprabit --smoke-test <folder> <runtime>…` (smoke.rs) installs each runtime with the versions its needs call for into a throwaway folder (own settings, every port +20000), then start → healthy → second start ignored → stop → port free for every service, and one killed service has to come back through "Restart after a crash" and stay stopped after Stop. `.github/workflows/smoke.yml` runs it on Windows, Linux (Xvfb) and macOS for pull requests that touch the backend, weekly with the heavy services, and by hand; platform gaps are reported as skipped with their reason.
-- [ ] Publish a runtime compatibility matrix (runtime × OS × architecture, with unavailability reasons) from the catalogs. This documentation is still missing.
+- [x] Runtime compatibility matrix (runtime × OS × processor, with the reasons) published in docs/website/installation.md (2026-11-14), from catalog.rs and the download catalogs.
 
 ### 10.4 Uninstall ✅ (2026-10-30)
 - `uninstall.rs` removes the folders LampRabit creates under the root (`bin`, `etc`, `logs`, `tmp`, `ssl`, `shims`, nothing else), the root itself only if empty, the settings and (Windows uninstaller) WebView data, the hosts block, the trusted CA (system store and, on Linux, the browsers' NSS databases), the PATH entry, the ngrok token and the Linux sysctl file. Keeps `www/` and `data/`.
@@ -278,6 +280,8 @@ Through the `git` CLI, so the user's credential helpers and SSH keys work: statu
 
 ## Phase 23: dependency manager
 
+**Done (2026-11-14), with phase 25:** see below.
+
 Composer and npm/pnpm/yarn/bun panels per project: installed and outdated packages, install/update/require/remove with live output, run with the project's PHP and Node versions. No upgrades without consent; lockfile kept consistent.
 
 ## Phase 24: languages
@@ -292,6 +296,8 @@ Python, Go, Rust and Java, each as a runtime with versions side by side, like PH
 - Templates: Django, Flask, FastAPI, Go (net/http, Gin), Rust (Axum), Spring Boot (start.spring.io), Quarkus.
 
 ## Phase 25: package managers
+
+**Done (2026-11-14):** Bun, Deno and uv (GitHub releases, SHA-256 checked; shims `bun`/`bunx`, `deno`, `uv`/`uvx`, uv's Pythons in `bin/uv-python`) and conda through Miniforge (its installer run silently into `bin/conda/<version>/conda`, no PATH, registry, shortcuts or shell changes; `conda`/`mamba` shims; the folder Move warns that conda can't move) are runtimes under Package managers. The Node.js card turns on pnpm and Yarn through corepack for NVM's default Node (installing corepack from npm on Node 25+). The Commands tab discovers `deno.json` tasks, `pyproject.toml` scripts, `requirements.txt`, Maven phases and Gradle tasks (through mvnw/gradlew), Cargo and Go commands. The project card's **Dependencies** tab (`deps.rs`) lists each package manager's dependencies from the files (Composer, npm, pnpm, Yarn, Bun, Deno, uv, Poetry, pip, Cargo, Go, Maven, Gradle) with the installed versions from vendor/, node_modules/, .venv or the lock file; Check for updates asks Composer, npm and pnpm themselves and the registries otherwise (npm, JSR, PyPI, crates.io, the Go proxy, Maven Central, stable releases only); Install, Update all, Add (dev or not), Remove, Update (within the constraint) and Upgrade (to the newest, changing the constraint) each show their command and run only when confirmed, through the project's command runner, with the project's PHP, Node, Java and Python. pip's add/remove/upgrade also edit requirements.txt. Maven and Gradle are listed and checked; their dependencies are edited in the build file (Maven can set a version with versions:use-dep-version).
 
 Absorbs phase 23. npm comes with Node, pip with Python and Cargo with Rust; pnpm and Yarn come through corepack; Bun, Deno, uv, Maven, Gradle and conda (Miniforge) are runtimes. Command discovery learns `pyproject.toml`, `requirements.txt`, `pom.xml`, `build.gradle(.kts)`, `Cargo.toml` and `deno.json`. Then the dependency panels: installed and outdated packages, add/update/remove with live output, the project's own language versions, nothing upgraded without consent.
 

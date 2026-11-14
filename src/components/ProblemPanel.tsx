@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Stethoscope, X } from "lucide-react";
 import { api, type Problem, type ServiceKind } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import { Button } from "./ui";
 
 /** Why a service failed, what to do about it, and one-click fixes where possible. */
@@ -22,7 +22,7 @@ export default function ProblemPanel({ kind, problem }: { kind: ServiceKind; pro
       setConfirmStop(false);
       dismiss.mutate();
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
 
   return (

@@ -6,7 +6,7 @@ Security fixes go into the latest release. LampRabit updates itself, so make sur
 
 ## Reporting a vulnerability
 
-Please **don't** open a public issue for security problems. Instead, report it privately through GitHub: [Report a vulnerability](https://github.com/Shivam-SV/LampRabit/security/advisories/new).
+Please **don't** open a public issue for security problems. Instead, report it privately through GitHub: [Report a vulnerability](https://github.com/LampRabit/LampRabit/security/advisories/new).
 
 Include what you found, how to reproduce it, and which version and OS you used. You'll get a reply as soon as possible, and credit in the release notes if you'd like.
 

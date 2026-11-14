@@ -112,11 +112,10 @@ fn claude_desktop_file() -> Option<PathBuf> {
 /// ~/.cache/lm-studio; whichever folder exists is the one it reads.
 fn lm_studio_file() -> Option<PathBuf> {
     let documented = home(&[".lmstudio", "mcp.json"])?;
-    if cfg!(target_os = "macos") && !documented.parent().is_some_and(Path::is_dir) {
-        if let Some(cache) = home(&[".cache", "lm-studio", "mcp.json"]).filter(|p| p.parent().is_some_and(Path::is_dir)) {
+    if cfg!(target_os = "macos") && !documented.parent().is_some_and(Path::is_dir)
+        && let Some(cache) = home(&[".cache", "lm-studio", "mcp.json"]).filter(|p| p.parent().is_some_and(Path::is_dir)) {
             return Some(cache);
         }
-    }
     Some(documented)
 }
 
@@ -215,11 +214,10 @@ fn launcher() -> Option<PathBuf> {
 /// LampRabit isn't running; otherwise this program.
 pub fn app_exe() -> std::io::Result<PathBuf> {
     let me = std::env::current_exe()?;
-    if launcher().is_some_and(|l| same_file(&l, &me)) {
-        if let Some(app) = launcher_dir().and_then(|d| std::fs::read_to_string(d.join("app.txt")).ok()).map(|t| PathBuf::from(t.trim())).filter(|p| p.is_file()) {
+    if launcher().is_some_and(|l| same_file(&l, &me))
+        && let Some(app) = launcher_dir().and_then(|d| std::fs::read_to_string(d.join("app.txt")).ok()).map(|t| PathBuf::from(t.trim())).filter(|p| p.is_file()) {
             return Ok(app);
         }
-    }
     Ok(me)
 }
 
@@ -306,11 +304,10 @@ pub fn remove_all() -> Vec<String> {
     for c in clients() {
         let Some(path) = (c.file)() else { continue };
         let has = read(&path, c.shape).is_ok_and(|mut d| has_entry(&mut d, c.shape));
-        if has {
-            if let Err(e) = set(c.id, false) {
+        if has
+            && let Err(e) = set(c.id, false) {
                 problems.push(format!("Couldn't take LampRabit out of {} ({e}); remove its \"lamprabit\" entry from {} by hand.", c.name, path.display()));
             }
-        }
     }
     problems
 }

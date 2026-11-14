@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -29,9 +30,10 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api, runtimeLabels, serviceLabels, type AppStatus, type CommandRun, type Language, type ProjectFacts, type ProjectFile, type ProjectProcess, type Server, type DomainTarget, type ServiceKind, type Settings, type Site, type SitesInfo } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { useAppStore, notifyError } from "../lib/store";
 import Dialog from "../components/Dialog";
 import ProjectDomains from "../components/ProjectDomains";
+import ProjectDependencies from "../components/ProjectDependencies";
 import ProjectGit, { CloneDialog } from "../components/ProjectGit";
 import ProjectDoctor from "../components/ProjectDoctor";
 import ProjectProcesses, { processFrom } from "../components/ProjectProcesses";
@@ -71,14 +73,15 @@ const frameworkStyle: Record<string, string> = {
 const languageLabel: Record<Language, string> = { php: "PHP", node: "Node.js", java: "Java", python: "Python", go: "Go", rust: "Rust", static: "Static" };
 
 type Sort = "recent" | "name";
-type Tab = "overview" | "commands" | "domains" | "git" | "settings";
+type Tab = "overview" | "commands" | "dependencies" | "domains" | "git" | "settings";
 
 export default function Sites() {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const openNewProject = useAppStore((s) => s.setNewProjectOpen);
-  const onError = (e: unknown) => notify("error", String(e));
-  const info = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: 10_000 });
+  // Pages stay mounted when hidden; they only poll while on screen.
+  const active = usePageActive();
+  const info = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: active ? 10_000 : false });
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
   const statuses = useAppStatuses();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["sites"] });
@@ -96,14 +99,14 @@ export default function Sites() {
   const [tab, setTab] = useState<Tab>("overview");
   const [cloning, setCloning] = useState(false);
 
-  const apply = useMutation({ mutationFn: api.applySites, onSuccess: refresh, onError });
+  const apply = useMutation({ mutationFn: api.applySites, onSuccess: refresh, onError: notifyError });
   const trust = useMutation({
     mutationFn: api.trustCa,
     onSuccess: (note) => {
       notify(note ? "error" : "info", note ?? "Certificate trusted. Restart your browser if it still shows a warning.");
       refresh();
     },
-    onError,
+    onError: notifyError,
   });
 
   const data = info.data;
@@ -356,8 +359,6 @@ function Avatar({ site, status, size = "md" }: { site: Site; status?: AppStatus;
 }
 
 function ProjectRow({ site, status, selected, onSelect }: { site: Site; status?: AppStatus; selected: boolean; onSelect: () => void }) {
-  const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const { start, stop } = useAppActions(site.name);
   const active = isActive(status);
   const canRun = site.nodeProject || site.serveMode === "dynamic";
@@ -436,7 +437,7 @@ function ProjectRow({ site, status, selected, onSelect }: { site: Site; status?:
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            openUrl(site.url).catch(onError);
+            openUrl(site.url).catch(notifyError);
           }}
           className="rounded-lg p-1 text-muted hover:bg-surface hover:text-accent-text"
           title={`Open ${site.url}`}
@@ -494,10 +495,10 @@ function DevServerButton({ name, status }: { name: string; status?: AppStatus })
 
 function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Site; info?: SitesInfo; status?: AppStatus; tab: Tab; setTab: (t: Tab) => void; onSelect: (path: string) => void }) {
   const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const app = useAppInfo(site);
-  const facts = useQuery({ queryKey: ["project-facts", site.name], queryFn: () => api.projectFacts(site.name), refetchInterval: 30_000 });
+  const active = usePageActive();
+  const facts = useQuery({ queryKey: ["project-facts", site.name], queryFn: () => api.projectFacts(site.name), refetchInterval: active ? 30_000 : false });
   const tunnel = useProjectTunnel(site);
   const dynamic = site.serveMode === "dynamic";
   // Running from your own terminal (or anything else LampRabit didn't start).
@@ -518,6 +519,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
     { id: "overview", label: "Overview" },
     { id: "git", label: "Git" },
     { id: "commands", label: "Commands" },
+    { id: "dependencies", label: "Dependencies" },
     { id: "domains", label: "Domains" },
     { id: "settings", label: "Settings" },
   ];
@@ -530,7 +532,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
   const hasFramework = !!site.framework && site.framework !== "Static" && site.framework !== "PHP";
   const kindLabel = hasFramework ? site.framework! : languageLabel[site.language];
   // The site only answers while its web server runs.
-  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices, refetchInterval: 5000 });
+  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices, refetchInterval: active ? 5000 : false });
   const web = services.data?.find((s) => s.kind === site.server);
   const serverUp = web?.state === "running";
   const serverName = serviceLabels[site.server];
@@ -575,7 +577,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
               </button>
               <button
                 type="button"
-                onClick={() => openPath(site.path).catch(onError)}
+                onClick={() => openPath(site.path).catch(notifyError)}
                 className="flex min-w-0 items-center gap-1.5 hover:text-accent-text"
                 title={`${site.path}: open the folder`}
               >
@@ -597,7 +599,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
               // The one main button while the site can't answer (unless the dev server's Start already is).
               <Button
                 variant={dynamic && !external && !isActive(status) ? "secondary" : "primary"}
-                onClick={() => api.startService(site.server).then(() => services.refetch(), onError)}
+                onClick={() => api.startService(site.server).then(() => services.refetch(), notifyError)}
                 title={`Start ${serviceLabels[site.server]}`}
               >
                 <Play size={13} className="fill-current" /> Start {serviceLabels[site.server]}
@@ -607,7 +609,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
             <span title={serverUp ? `Open ${site.url}` : offReason} tabIndex={serverUp ? -1 : 0} className="inline-flex rounded-lg">
               <Button
                 variant={!serverUp ? "ghost" : dynamic && !isActive(status) && !external ? "secondary" : "primary"}
-                onClick={() => openUrl(site.url).catch(onError)}
+                onClick={() => openUrl(site.url).catch(notifyError)}
                 disabled={!serverUp}
                 aria-label={serverUp ? "Open site" : `Open site (${offReason})`}
               >
@@ -642,6 +644,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
         <div role="tabpanel" className="-mx-5 border-b border-line/80 bg-bg/60 px-5 py-4">
           {tab === "overview" && <Overview site={site} info={info} settings={settings.data} facts={facts.data} status={status} php={php} onCommands={() => setTab("commands")} />}
           {tab === "commands" && <CommandsTab site={site} settings={settings.data} status={status} />}
+          {tab === "dependencies" && <ProjectDependencies site={site} status={status} />}
           {tab === "domains" && <ProjectDomains site={site} settings={settings.data} />}
           {tab === "git" && <ProjectGit site={site} />}
           {tab === "settings" && <SettingsTab site={site} settings={settings.data} status={status} onRenamed={onSelect} />}
@@ -649,13 +652,13 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
 
         {/* Action toolbar */}
         <div className="-mb-1 flex flex-wrap items-center gap-1.5 pt-3">
-          <Button size="sm" variant="ghost" onClick={() => api.openInEditor(site.path).catch(onError)}>
+          <Button size="sm" variant="ghost" onClick={() => api.openInEditor(site.path).catch(notifyError)}>
             <Code2 size={14} /> Editor
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => api.openTerminal(site.path).catch(onError)}>
+          <Button size="sm" variant="ghost" onClick={() => api.openTerminal(site.path).catch(notifyError)}>
             <SquareTerminal size={14} /> Terminal
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => openPath(site.path).catch(onError)}>
+          <Button size="sm" variant="ghost" onClick={() => openPath(site.path).catch(notifyError)}>
             <FolderOpen size={14} /> Folder
           </Button>
           {(targetDbUrl || site.database) && (
@@ -664,7 +667,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
               variant="ghost"
               onClick={() => {
                 if (targetDbUrl) {
-                  openUrl(targetDbUrl).catch(onError);
+                  openUrl(targetDbUrl).catch(notifyError);
                 } else {
                   useAppStore.getState().navigate("services");
                   notify("info", "Install phpMyAdmin or Adminer in Services to manage databases");
@@ -679,7 +682,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => api.openInEditor(`${site.path}/${facts.data?.envFile}`).catch(onError)}
+              onClick={() => api.openInEditor(`${site.path}/${facts.data?.envFile}`).catch(notifyError)}
               title={`Open ${facts.data.envFile} in editor`}
             >
               <FileText size={14} /> {facts.data.envFile}
@@ -740,11 +743,10 @@ function Overview({
 }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const install = useMutation({
     mutationFn: (manager: string) => (manager === "Composer" ? api.runProjectCommand(site.name, "composer install", "composer install") : api.appInstall(site.name)),
     onSuccess: onCommands,
-    onError,
+    onError: notifyError,
   });
   const dbUrl = site.database ? databaseUrl(site.database, info, settings) : null;
   const siteUrl = site.url.replace(/\/$/, "");
@@ -756,7 +758,7 @@ function Overview({
       notify("info", `APP_URL is now ${siteUrl}`);
       queryClient.invalidateQueries({ queryKey: ["project-facts", site.name] });
     },
-    onError,
+    onError: notifyError,
   });
 
   return (
@@ -823,7 +825,7 @@ function Overview({
             facts?.envFile && (
               <button
                 type="button"
-                onClick={() => api.openInEditor(`${site.path}/${facts.envFile}`).catch(onError)}
+                onClick={() => api.openInEditor(`${site.path}/${facts.envFile}`).catch(notifyError)}
                 className="cursor-pointer text-xs font-semibold text-accent-text hover:underline"
               >
                 Edit {facts.envFile}
@@ -880,15 +882,15 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const navigate = useAppStore((s) => s.navigate);
-  const onError = (e: unknown) => notify("error", String(e));
-  const status = useQuery({ queryKey: ["database-status", site.name], queryFn: () => api.databaseStatus(site.name), refetchInterval: 10_000 });
+  const active = usePageActive();
+  const status = useQuery({ queryKey: ["database-status", site.name], queryFn: () => api.databaseStatus(site.name), refetchInterval: active ? 10_000 : false });
   const create = useMutation({
     mutationFn: () => api.createProjectDatabase(site.name),
     onSuccess: () => {
       notify("info", `Created the database ${database}`);
       status.refetch();
     },
-    onError,
+    onError: notifyError,
   });
   const start = useMutation({
     mutationFn: (kind: ServiceKind) => api.startService(kind),
@@ -896,7 +898,7 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
       status.refetch();
       queryClient.invalidateQueries({ queryKey: ["services"] });
     },
-    onError,
+    onError: notifyError,
   });
   const switchTo = useMutation({
     mutationFn: (engine: "mariadb" | "mysql") => api.switchProjectDatabase(site.name, engine),
@@ -905,7 +907,7 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
       status.refetch();
       for (const key of ["project-facts", "sites"]) queryClient.invalidateQueries({ queryKey: [key] });
     },
-    onError,
+    onError: notifyError,
   });
   const s = status.data;
   // phpMyAdmin only manages MariaDB and MySQL.
@@ -913,7 +915,7 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
 
   let note: ReactNode = null;
   let action: ReactNode = dbUrl && managed && (
-    <Button size="sm" variant="secondary" onClick={() => openUrl(dbUrl).catch(onError)} className="shrink-0 text-xs">
+    <Button size="sm" variant="secondary" onClick={() => openUrl(dbUrl).catch(notifyError)} className="shrink-0 text-xs">
       <ExternalLink size={12} /> Open in manager
     </Button>
   );
@@ -978,15 +980,13 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
  */
 function ProjectInfo({ site, settings, facts, status, php }: { site: Site; settings?: Settings; facts?: ProjectFacts; status?: AppStatus; php: string | null }) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const node = useQuery({ queryKey: ["node"], queryFn: api.nodeStatus, enabled: site.nodeProject });
   const toggleSsl = useMutation({
     mutationFn: (ssl: boolean) => api.setSiteSsl(site.name, ssl),
     onSuccess: () => {
       for (const key of ["sites", "services"]) queryClient.invalidateQueries({ queryKey: [key] });
     },
-    onError,
+    onError: notifyError,
   });
 
   const docroot = site.docroot.slice(site.path.length).replace(/^[\\/]+/, "").replace(/\\/g, "/");
@@ -1045,7 +1045,7 @@ function ProjectInfo({ site, settings, facts, status, php }: { site: Site; setti
           </span>
         </InfoRow>
         <InfoRow label="Main domain" mono>
-          <button type="button" onClick={() => openUrl(site.url).catch(onError)} className="truncate text-accent-text hover:underline" title={`Open ${site.url}`}>
+          <button type="button" onClick={() => openUrl(site.url).catch(notifyError)} className="truncate text-accent-text hover:underline" title={`Open ${site.url}`}>
             {site.url.replace(/\/$/, "")}
           </button>
         </InfoRow>
@@ -1053,7 +1053,7 @@ function ProjectInfo({ site, settings, facts, status, php }: { site: Site; setti
           <InfoRow label="Subdomains" mono>
             <span className="flex min-w-0 flex-wrap justify-end gap-x-3 gap-y-0.5">
               {subdomains.map((host) => (
-                <button key={host} type="button" onClick={() => openUrl(site.url.replace(site.domain, host)).catch(onError)} className="truncate text-accent-text hover:underline" title={`Open ${host}`}>
+                <button key={host} type="button" onClick={() => openUrl(site.url.replace(site.domain, host)).catch(notifyError)} className="truncate text-accent-text hover:underline" title={`Open ${host}`}>
                   {host}
                 </button>
               ))}
@@ -1150,7 +1150,6 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
 function SettingsTab({ site, settings, status, onRenamed }: { site: Site; settings?: Settings; status?: AppStatus; onRenamed: (path: string) => void }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const app = useAppInfo(site);
   const { restart } = useAppActions(site.name);
@@ -1158,14 +1157,14 @@ function SettingsTab({ site, settings, status, onRenamed }: { site: Site; settin
   const onSuccess = () => {
     for (const key of ["sites", "settings", "services", "php-status"]) queryClient.invalidateQueries({ queryKey: [key] });
   };
-  const setPhp = useMutation({ mutationFn: (v: string | null) => api.setSitePhp(site.name, v), onSuccess, onError });
-  const setServer = useMutation({ mutationFn: (v: Server | null) => api.setSiteServer(site.name, v), onSuccess, onError });
-  const setLanguage = useMutation({ mutationFn: (v: string | null) => api.setLanguageVersion(site.name, v), onSuccess, onError });
-  const setWorker = useMutation({ mutationFn: (v: boolean) => api.setSiteWorker(site.name, v), onSuccess, onError });
+  const setPhp = useMutation({ mutationFn: (v: string | null) => api.setSitePhp(site.name, v), onSuccess, onError: notifyError });
+  const setServer = useMutation({ mutationFn: (v: Server | null) => api.setSiteServer(site.name, v), onSuccess, onError: notifyError });
+  const setLanguage = useMutation({ mutationFn: (v: string | null) => api.setLanguageVersion(site.name, v), onSuccess, onError: notifyError });
+  const setWorker = useMutation({ mutationFn: (v: boolean) => api.setSiteWorker(site.name, v), onSuccess, onError: notifyError });
   const restartWorkers = useMutation({
     mutationFn: api.restartFrankenphpWorkers,
     onSuccess: () => notify("info", "FrankenPHP's workers reloaded the code"),
-    onError,
+    onError: notifyError,
   });
   const worker = !!settings?.sites[site.name]?.worker;
   const languageRuntime = (["python", "java", "go", "rust"] as const).find((l) => l === site.language);
@@ -1315,7 +1314,7 @@ function PhpSettings({ site, settings }: { site: Site; settings?: Settings }) {
       notify("info", `Saved ${site.name}'s PHP settings; PHP restarted with them.`);
       for (const key of ["settings", "sites", "services"]) queryClient.invalidateQueries({ queryKey: [key] });
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const small = clsx(inputClass.replace("w-full", ""), "w-32 font-mono");
 
@@ -1394,7 +1393,6 @@ function fileLines(file: ProjectFile, site: Site): [string, string][] {
 function ShareSetup({ site, settings }: { site: Site; settings?: Settings }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
-  const onError = (e: unknown) => notify("error", String(e));
   const [previewing, setPreviewing] = useState(false);
   const file = useQuery({ queryKey: ["project-file", site.name], queryFn: () => api.projectFile(site.name) });
   const save = useMutation({
@@ -1403,7 +1401,7 @@ function ShareSetup({ site, settings }: { site: Site; settings?: Settings }) {
       notify("info", `Saved ${site.name}'s setup to lamprabit.toml`);
       file.refetch();
     },
-    onError,
+    onError: notifyError,
   });
   const apply = useMutation({
     mutationFn: async (f: ProjectFile) => {
@@ -1424,7 +1422,7 @@ function ShareSetup({ site, settings }: { site: Site; settings?: Settings }) {
       for (const key of ["settings", "sites", "services", "project-file"]) queryClient.invalidateQueries({ queryKey: [key] });
     },
     onError: (e) => {
-      onError(e);
+      notifyError(e);
       queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
   });
@@ -1460,7 +1458,7 @@ function ShareSetup({ site, settings }: { site: Site; settings?: Settings }) {
             onClick={() =>
               api.templateFromProject(site.name).then(
                 (yaml) => useAppStore.getState().openTemplateEditor({ yaml }),
-                onError,
+                notifyError,
               )
             }
           >
@@ -1519,7 +1517,7 @@ function ProjectActions({ site, onRenamed }: { site: Site; onRenamed: (path: str
       onRenamed(site.path.slice(0, site.path.length - site.name.length) + next);
       refresh();
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const next = name.trim();
   const domain = site.domain.replace(/^[^.]+/, next.toLowerCase().replace(/[^a-z0-9-]+/g, "-"));
@@ -1563,7 +1561,7 @@ function DeleteProjectDialog({ site, onClose, onDeleted }: { site: Site; onClose
       onClose();
       onDeleted();
     },
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const confirmed = typed.trim() === site.name;
   return (
@@ -1667,7 +1665,6 @@ const duration = (ms: number) => (ms < 1000 ? `${(ms / 1000).toFixed(1)}s` : ms 
 /** The project's last command runs: how each ended and how long it took, one click to run it again. */
 function RecentRuns({ site, status, onShow }: { site: Site; status?: AppStatus; onShow: () => void }) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
   const now = useNow();
   const history = useQuery({ queryKey: ["command-history", site.name], queryFn: () => api.commandHistory(site.name) });
   const running = status?.task ?? null;
@@ -1680,7 +1677,7 @@ function RecentRuns({ site, status, onShow }: { site: Site; status?: AppStatus; 
   const again = useMutation({
     mutationFn: (r: CommandRun) => api.runProjectCommand(site.name, r.label, r.command),
     onSuccess: onShow,
-    onError: (e) => notify("error", String(e)),
+    onError: notifyError,
   });
   const runs = (history.data ?? []).slice(0, 8);
 

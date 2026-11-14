@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Cpu, Pencil, Play, Plus, RotateCw, Sparkles, Square, SquareTerminal, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { api, type ProjectProcess, type RestartPolicy, type Settings, type Site } from "../lib/api";
-import { useAppStore } from "../lib/store";
+import { notifyError } from "../lib/store";
 import Dialog from "./Dialog";
 import { FolderSelect } from "./DomainTargetPicker";
 import { AppState, isActive, useAppStatuses } from "./ProjectRun";
@@ -124,7 +124,6 @@ function ProcessDialog({ site, initial, others, busy, onSave, onClose, onDelete 
   onClose: () => void;
   onDelete?: () => void;
 }) {
-  const notify = useAppStore((s) => s.notify);
   const [p, setP] = useState(initial);
   const [env, setEnv] = useState(envText(initial.env));
   const [more, setMore] = useState(!!initial.cwd || Object.keys(initial.env).length > 0);
@@ -132,7 +131,7 @@ function ProcessDialog({ site, initial, others, busy, onSave, onClose, onDelete 
   const [needsPort, setNeedsPort] = useState(initial.port != null);
   const set = (patch: Partial<ProjectProcess>) => setP((cur) => ({ ...cur, ...patch }));
   const issue = problem(p, others, start, needsPort);
-  const freePort = () => api.appFreePort().then((port) => set({ port }), (e) => notify("error", String(e)));
+  const freePort = () => api.appFreePort().then((port) => set({ port }), notifyError);
   const save = () => {
     if (issue) return;
     onSave({
@@ -316,13 +315,11 @@ export default function ProjectProcesses({ site, settings, offer, onOfferTaken, 
   onShowOutput?: (key: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const notify = useAppStore((s) => s.notify);
   const statuses = useAppStatuses();
   const own = settings?.sites[site.name];
   const saved = own?.processes ?? [];
   // The process in the dialog: an existing one's name, or a new one's starting values.
   const [editing, setEditing] = useState<string | ProjectProcess | null>(null);
-  const onError = (e: unknown) => notify("error", String(e));
   const scheduled = saved.some((p) => p.schedule.trim());
   const nextRuns = useQuery({
     queryKey: ["process-next-runs", site.name, saved.map((p) => p.schedule).join("|")],
@@ -337,16 +334,16 @@ export default function ProjectProcesses({ site, settings, offer, onOfferTaken, 
       setEditing(null);
       queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
-    onError,
+    onError: notifyError,
   });
   const act = useMutation({
     mutationFn: async ({ name, what }: { name: string; what: "start" | "stop" | "restart" }) => {
       if (what === "stop") await api.processStop(site.name, name);
       else await (what === "start" ? api.processStart(site.name, name) : api.processRestart(site.name, name));
     },
-    onError,
+    onError: notifyError,
   });
-  const all = useMutation({ mutationFn: (start: boolean) => api.processesAll(site.name, start), onError });
+  const all = useMutation({ mutationFn: (start: boolean) => api.processesAll(site.name, start), onError: notifyError });
 
   useEffect(() => {
     if (!offer) return;

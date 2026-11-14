@@ -41,8 +41,8 @@ Some features are limited by platform. Runtime availability varies by OS, archit
    - Migrating from XAMPP
    - Migrating from Laragon
    - FAQ and troubleshooting
-5. **Changelog**: placeholder until releases start (GitHub Releases can feed it).
-6. **GitHub** link: https://github.com/Shivam-SV/LampRabit
+5. **Changelog**: from [CHANGELOG.md](../../CHANGELOG.md) (or GitHub Releases).
+6. **GitHub** link: https://github.com/LampRabit/LampRabit
 
 ## Brand
 
@@ -92,7 +92,7 @@ Take these from the app in both light and dark themes at 1280×860:
 2. Services page: "Your stack" diagram with services running, plus a version rail.
 3. Sites page with two or three sites, one on a custom PHP version.
 4. Logs page with a mix of Apache, PHP and System lines.
-5. Settings: Web server card set to "Both".
+5. A project card's Dependencies tab, and its Git tab with a diff.
 6. A service card showing a port-conflict problem panel (start a service while another program holds its port).
 7. Diagnostics dialog.
 

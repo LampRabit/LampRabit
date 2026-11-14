@@ -49,7 +49,7 @@ pub fn endpoint_path() -> Option<PathBuf> {
 pub async fn serve(app: AppHandle, dispatch: Dispatch) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
     let port = listener.local_addr()?.port();
-    let token: String = (0..2).map(|_| format!("{:016x}", rand_u64())).collect();
+    let token = random_token()?;
     let endpoint = Endpoint { port, token: token.clone(), pid: std::process::id(), version: app.package_info().version.to_string() };
     let path = match std::env::var_os("LAMPRABIT_CONTROL_FILE") {
         Some(file) => PathBuf::from(file),
@@ -77,13 +77,12 @@ pub async fn serve(app: AppHandle, dispatch: Dispatch) -> Result<()> {
     Ok(())
 }
 
-/// A random number from the OS's hasher seeds, which are random per process; enough for a
-/// token that only guards a loopback port in the user's own folder.
-fn rand_u64() -> u64 {
-    use std::hash::{BuildHasher, Hasher};
-    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-    h.finish()
+/// 128 random bits from the OS as 32 hex characters, for the tokens that guard LampRabit's
+/// loopback ports (this channel and the MCP server): anything that reads one can drive the app.
+pub fn random_token() -> std::io::Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| std::io::Error::other(format!("no random numbers from the OS: {e}")))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 async fn handle(app: AppHandle, stream: tokio::net::TcpStream, token: &str, dispatch: Dispatch) -> std::io::Result<()> {
@@ -115,8 +114,12 @@ async fn handle(app: AppHandle, stream: tokio::net::TcpStream, token: &str, disp
 /// Every new log line, as it's written, until the client goes away.
 async fn follow_logs(app: AppHandle, mut write: tokio::net::tcp::OwnedWriteHalf) -> std::io::Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let id = app.listen("log-line", move |event| {
-        let _ = tx.send(event.payload().to_string());
+    // The app sends lines in batches (logs::record); the client gets them one by one.
+    let id = app.listen("log-lines", move |event| {
+        let batch: Vec<serde_json::Value> = serde_json::from_str(event.payload()).unwrap_or_default();
+        for line in batch {
+            let _ = tx.send(line.to_string());
+        }
     });
     let result = async {
         write.write_all(b"{\"ok\":true,\"data\":\"following\"}\n").await?;
@@ -143,11 +146,10 @@ async fn connect(endpoint: &Endpoint) -> Option<tokio::net::TcpStream> {
 /// The running app's endpoint; with `launch`, starts LampRabit in the background (in the
 /// tray, no window) when it isn't running, and waits for it.
 pub async fn reach(launch: bool) -> Result<Endpoint> {
-    if let Some(e) = read_endpoint() {
-        if connect(&e).await.is_some() {
+    if let Some(e) = read_endpoint()
+        && connect(&e).await.is_some() {
             return Ok(e);
         }
-    }
     if !launch {
         return Err(Error::msg("LampRabit isn't running. Start it, or drop --no-launch to have the command start it."));
     }
@@ -165,11 +167,10 @@ pub async fn reach(launch: bool) -> Result<Endpoint> {
     cmd.spawn().map_err(|e| Error::msg(format!("Couldn't start LampRabit: {e}")))?;
     for _ in 0..60 {
         tokio::time::sleep(Duration::from_millis(500)).await;
-        if let Some(e) = read_endpoint() {
-            if connect(&e).await.is_some() {
+        if let Some(e) = read_endpoint()
+            && connect(&e).await.is_some() {
                 return Ok(e);
             }
-        }
     }
     Err(Error::msg("LampRabit didn't come up within 30 seconds. Open it once to check it starts."))
 }
