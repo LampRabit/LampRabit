@@ -53,6 +53,9 @@ pub struct Settings {
     /// when absent. Can be outside the LampRabit folder (another drive, a NAS): it isn't
     /// moved with it, and uninstall never deletes it.
     pub storage: BTreeMap<String, PathBuf>,
+    /// Values of the options services declare in their manifest (`settings:`), by service id
+    /// then option name; only what differs from the default is kept.
+    pub service_options: BTreeMap<String, BTreeMap<String, String>>,
     /// Services (by id) started again when they crash, up to a few times in a row.
     pub auto_restart: BTreeSet<String>,
     /// PHP's dump() and dd() go to Logs (VarDumper's server mode) instead of the page.
@@ -555,6 +558,7 @@ impl Default for Settings {
             profiles: Vec::new(),
             default_database: Database::Mariadb,
             storage: BTreeMap::new(),
+            service_options: BTreeMap::new(),
             // n8n's Node process is the one that falls over on large workflows.
             auto_restart: BTreeSet::from(["n8n".to_string()]),
             catch_dumps: false,
@@ -564,6 +568,13 @@ impl Default for Settings {
             log_total_mb: 500,
             developer_name: String::new(),
         }
+    }
+}
+
+impl Ports {
+    /// A port by its name in settings.toml (`mailSmtp`), which service manifests use.
+    pub fn get(&self, key: &str) -> Option<u16> {
+        serde_json::to_value(self).ok()?.get(key)?.as_u64().and_then(|p| u16::try_from(p).ok())
     }
 }
 

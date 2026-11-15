@@ -389,26 +389,21 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime, fresh: bool) 
 
 async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec<Release>> {
     let mut releases = match runtime {
+        // Services whose manifest says where their releases are (src-tauri/services/).
+        _ if crate::manifest::get(runtime.id()).and_then(|m| m.source.here()).is_some_and(|s| !s.builtin) => manifest_releases(client, runtime).await?,
         Runtime::Php => php_releases(client).await?,
         Runtime::Apache => apache_releases(client).await?,
         Runtime::Nginx => nginx_releases(client).await?,
         Runtime::Mariadb => mariadb_releases(client).await?,
-        Runtime::Mailpit => mailpit_releases(client).await?,
         Runtime::Adminer => adminer_releases(client).await?,
         Runtime::Phpmyadmin => phpmyadmin_releases(client).await?,
         Runtime::Ngrok => ngrok_releases(),
         Runtime::Cloudflared => cloudflared_releases(client).await?,
-        Runtime::Redis if cfg!(windows) => redis_windows_releases(client).await?,
-        Runtime::Redis => own_builds(client, Runtime::Redis).await?,
         Runtime::Composer => composer_releases(client).await?,
         Runtime::Mysql => mysql_releases(client).await?,
         Runtime::Phpredisadmin => phpredisadmin_releases(client).await?,
-        Runtime::Memcached => own_builds(client, Runtime::Memcached).await?,
-        Runtime::Caddy => caddy_releases(client).await?,
         Runtime::Java => java_releases(client).await?,
         Runtime::Tomcat => tomcat_releases(client).await?,
-        Runtime::Frankenphp => frankenphp_releases(client).await?,
-        Runtime::Postgres => postgres_releases(client).await?,
         Runtime::Python => python_releases(client).await?,
         Runtime::Phppgadmin => phppgadmin_releases(client).await?,
         Runtime::Pgadmin => pgadmin_releases(client).await?,
@@ -417,17 +412,6 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         Runtime::Mongotools => mongotools_releases(client).await?,
         Runtime::Compass => compass_releases(client).await?,
         Runtime::Sqlite => sqlite_releases(client).await?,
-        Runtime::Clickhouse => clickhouse_releases(client).await?,
-        Runtime::Neo4j => neo4j_releases(client).await?,
-        Runtime::Meilisearch => meilisearch_releases(client).await?,
-        Runtime::Typesense => typesense_releases(client).await?,
-        Runtime::Rustfs => rustfs_releases(client).await?,
-        Runtime::Ollama => ollama_releases(client).await?,
-        Runtime::Minio => own_builds(client, Runtime::Minio).await?,
-        Runtime::Elasticsearch => elasticsearch_releases(client).await?,
-        Runtime::Opensearch => opensearch_releases(client).await?,
-        Runtime::N8n => n8n_releases(client).await?,
-        Runtime::Rabbitmq => rabbitmq_releases(client).await?,
         Runtime::Erlang => erlang_releases(client).await?,
         Runtime::Go => go_releases(client).await?,
         Runtime::Rust => rust_releases(client).await?,
@@ -438,6 +422,7 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         Runtime::Deno => deno_releases(client).await?,
         Runtime::Uv => uv_releases(client).await?,
         Runtime::Conda => conda_releases(client).await?,
+        _ => return Err(unsupported(runtime.id())),
     };
     releases.sort_by_key(|r| std::cmp::Reverse(version_key(&r.version)));
     Ok(releases)
@@ -551,9 +536,6 @@ async fn php_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
 
 /// Apache Lounge only hosts its latest build, so the download page is scraped for it.
 async fn apache_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    if !cfg!(windows) {
-        return own_builds(client, Runtime::Apache).await;
-    }
     const SITE: &str = "https://www.apachelounge.com";
     let page = client
         .get(format!("{SITE}/download/"))
@@ -659,9 +641,6 @@ async fn mariadb_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
 /// nginx.org lists the mainline and stable Windows builds on its download page. It
 /// publishes PGP signatures rather than checksums, so these downloads rely on HTTPS alone.
 async fn nginx_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    if !cfg!(windows) {
-        return own_builds(client, Runtime::Nginx).await;
-    }
     const SITE: &str = "https://nginx.org";
     let page = client
         .get(format!("{SITE}/en/download.html"))
@@ -757,30 +736,6 @@ async fn github_latest(
     }])
 }
 
-async fn mailpit_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let os = match std::env::consts::OS {
-        "windows" => "windows",
-        "macos" => "darwin",
-        "linux" => "linux",
-        _ => return Err(unsupported("Mailpit")),
-    };
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
-    let (ext, archive) = if cfg!(windows) { ("zip", Archive::Zip) } else { ("tar.gz", Archive::TarGz) };
-    let name = format!("mailpit-{os}-{arch}.{ext}");
-    github_latest(client, Runtime::Mailpit, "axllent/mailpit", archive, |n, _| n == name).await
-}
-
-async fn caddy_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let os = match std::env::consts::OS {
-        "windows" => "windows",
-        "macos" => "mac",
-        "linux" => "linux",
-        _ => return Err(unsupported("Caddy")),
-    };
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
-    let (ext, archive) = if cfg!(windows) { ("zip", Archive::Zip) } else { ("tar.gz", Archive::TarGz) };
-    github_latest(client, Runtime::Caddy, "caddyserver/caddy", archive, |n, v| n == format!("caddy_{v}_{os}_{arch}.{ext}")).await
-}
 
 /// The newest Temurin JDK of every LTS line, plus the newest release when it isn't one.
 /// Versions drop the build number ("21.0.5", not "21.0.5+11"), so folders and shims
@@ -851,64 +806,6 @@ async fn tomcat_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
         return Err(Error::msg("Couldn't load the Tomcat versions from dlcdn.apache.org. Check your connection and try again."));
     }
     Ok(releases)
-}
-
-/// FrankenPHP's releases: a static binary on Linux and Apple Silicon, a zip with PHP's
-/// DLLs on Windows. There is no build for Intel Macs.
-async fn frankenphp_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let arm = cfg!(target_arch = "aarch64");
-    let (name, archive) = match std::env::consts::OS {
-        "windows" if !arm => ("frankenphp-windows-x86_64.zip", Archive::Zip),
-        "linux" if arm => ("frankenphp-linux-aarch64", Archive::File),
-        "linux" => ("frankenphp-linux-x86_64", Archive::File),
-        "macos" if arm => ("frankenphp-mac-arm64", Archive::File),
-        "macos" => return Err(Error::msg("FrankenPHP has no build for Intel Macs. Use Caddy, Nginx or Apache with LampRabit's PHP instead.")),
-        _ => return Err(unsupported("FrankenPHP")),
-    };
-    github_latest(client, Runtime::Frankenphp, "php/frankenphp", archive, |n, _| n == name).await
-}
-
-/// The newest build of each supported PostgreSQL major version (14 and up). The project
-/// publishes one release per PostgreSQL version with an archive per platform, and GitHub
-/// gives each a SHA-256.
-async fn postgres_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let arm = cfg!(target_arch = "aarch64");
-    let target = match (std::env::consts::OS, arm) {
-        ("windows", false) => "x86_64-pc-windows-msvc",
-        ("windows", true) => "aarch64-pc-windows-msvc",
-        ("linux", false) => "x86_64-unknown-linux-gnu",
-        ("linux", true) => "aarch64-unknown-linux-gnu",
-        ("macos", false) => "x86_64-apple-darwin",
-        ("macos", true) => "aarch64-apple-darwin",
-        _ => return Err(unsupported("PostgreSQL")),
-    };
-    let (ext, archive) = if cfg!(windows) { ("zip", Archive::Zip) } else { ("tar.gz", Archive::TarGz) };
-    let list = get_json(client, "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases?per_page=100").await?;
-    let mut newest: std::collections::BTreeMap<u32, Release> = Default::default();
-    for release in list.as_array().into_iter().flatten().filter(|r| !r["prerelease"].as_bool().unwrap_or(false)) {
-        let tag = release["tag_name"].as_str().unwrap_or_default();
-        let Some(major) = tag.split('.').next().and_then(|m| m.parse::<u32>().ok()).filter(|&m| m >= 14) else { continue };
-        let name = format!("postgresql-{tag}-{target}.{ext}");
-        let Some(asset) = release["assets"].as_array().into_iter().flatten().find(|a| a["name"].as_str() == Some(name.as_str())) else { continue };
-        if newest.get(&major).is_some_and(|r| version_key(&r.version) >= version_key(tag)) {
-            continue;
-        }
-        newest.insert(major, Release {
-            runtime: Runtime::Postgres,
-            version: tag.to_string(),
-            url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
-            sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
-            sha512: None,
-            md5: None,
-            sha3_256: None,
-            archive,
-            label: Some(format!("PostgreSQL {major}")),
-        });
-    }
-    if newest.is_empty() {
-        return Err(Error::msg("No PostgreSQL builds for this platform were found. Check your connection and try again."));
-    }
-    Ok(newest.into_values().collect())
 }
 
 /// The newest patch of every stable Python line from the latest python-build-standalone
@@ -1236,82 +1133,6 @@ async fn sqlite_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     }])
 }
 
-/// The newest stable (or LTS) ClickHouse: a static build for Linux, a single binary for
-/// macOS. ClickHouse has no Windows build.
-async fn clickhouse_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let arm = cfg!(target_arch = "aarch64");
-    if cfg!(windows) {
-        return Err(Error::msg("ClickHouse has no Windows build. Run it in WSL (Linux), where LampRabit's Linux version can install it."));
-    }
-    let list = get_json(client, "https://api.github.com/repos/ClickHouse/ClickHouse/releases?per_page=30").await?;
-    let release = list
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|r| r["tag_name"].as_str().is_some_and(|t| t.ends_with("-stable") || t.ends_with("-lts")))
-        .ok_or_else(|| Error::msg("Couldn't find a stable ClickHouse release"))?;
-    let tag = release["tag_name"].as_str().unwrap_or_default();
-    let version = tag.trim_start_matches('v').rsplit_once('-').map_or(tag, |(v, _)| v).to_string();
-    let (name, archive) = match std::env::consts::OS {
-        "macos" if arm => ("clickhouse-macos-aarch64".to_string(), Archive::File),
-        "macos" => ("clickhouse-macos".to_string(), Archive::File),
-        _ => (format!("clickhouse-common-static-{version}-{}.tgz", if arm { "arm64" } else { "amd64" }), Archive::TarGz),
-    };
-    let asset = release["assets"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|a| a["name"].as_str() == Some(name.as_str()))
-        .ok_or_else(|| unsupported("ClickHouse"))?;
-    Ok(vec![Release {
-        runtime: Runtime::Clickhouse,
-        version,
-        url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
-        sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
-        sha512: None,
-        md5: None,
-        sha3_256: None,
-        archive,
-        label: Some(if tag.ends_with("-lts") { "LTS".into() } else { "Stable".into() }),
-    }])
-}
-
-/// The newest Neo4j Community release (calendar versions like 2026.10.1, tagged in
-/// neo4j/neo4j), from dist.neo4j.org with the SHA-256 published next to it.
-async fn neo4j_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let tags = get_json(client, "https://api.github.com/repos/neo4j/neo4j/tags?per_page=30").await?;
-    let version = tags
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|t| t["name"].as_str())
-        .filter(|n| n.split('.').count() == 3 && n.split('.').all(|p| p.parse::<u32>().is_ok()))
-        .max_by_key(|n| version_key(n))
-        .ok_or_else(|| Error::msg("Couldn't find Neo4j's latest release"))?
-        .to_string();
-    let (suffix, archive) = if cfg!(windows) { ("windows.zip", Archive::Zip) } else { ("unix.tar.gz", Archive::TarGz) };
-    let url = format!("https://dist.neo4j.org/neo4j-community-{version}-{suffix}");
-    let sha256 = client.get(format!("{url}.sha256")).send().await.ok().filter(|r| r.status().is_success());
-    let sha256 = match sha256 {
-        Some(r) => r.text().await.ok().and_then(|t| t.split_whitespace().next().map(str::to_ascii_lowercase)),
-        None => None,
-    };
-    Ok(vec![Release { runtime: Runtime::Neo4j, version, url, sha256, sha512: None, md5: None, sha3_256: None, archive, label: Some("Community".into()) }])
-}
-
-/// Meilisearch's Community edition (not "enterprise"): one binary per platform.
-async fn meilisearch_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let name = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
-        ("windows", false) => "meilisearch-windows-amd64.exe",
-        ("linux", false) => "meilisearch-linux-amd64",
-        ("linux", true) => "meilisearch-linux-aarch64",
-        ("macos", false) => "meilisearch-macos-amd64",
-        ("macos", true) => "meilisearch-macos-apple-silicon",
-        _ => return Err(unsupported("Meilisearch")),
-    };
-    github_newest_with(client, Runtime::Meilisearch, "meilisearch/meilisearch", Archive::File, name).await
-}
-
 /// Like `github_latest`, but the newest of the recent releases that has the file: a release
 /// sometimes ships without one platform's build (Meilisearch 1.56.2 had no Apple silicon file).
 async fn github_newest_with(client: &reqwest::Client, runtime: Runtime, repo: &str, archive: Archive, name: &str) -> Result<Vec<Release>> {
@@ -1333,151 +1154,43 @@ async fn github_newest_with(client: &reqwest::Client, runtime: Runtime, repo: &s
     Err(Error::msg(format!("No recent {repo} release has a download for this platform ({name}).")))
 }
 
-/// Typesense's server from dl.typesense.org (its GitHub releases have no files). No
-/// checksums are published, so HTTPS covers the download. There's no Windows build.
-async fn typesense_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    if cfg!(windows) {
-        return Err(Error::msg("Typesense has no Windows build. Use Meilisearch, or run Typesense in WSL (Linux), where LampRabit's Linux version can install it."));
+/// A service's releases from its manifest's source for this platform (GitHub releases or
+/// tags, npm, LampRabit's own builds), with published checksum files fetched. A release
+/// whose checksum can't be had is left out: nothing is installed unchecked.
+async fn manifest_releases(client: &reqwest::Client, runtime: Runtime) -> Result<Vec<Release>> {
+    use crate::manifest;
+    let m = manifest::get(runtime.id()).ok_or_else(|| unsupported(runtime.id()))?;
+    if let Some(why) = m.unavailable_here() {
+        return Err(Error::msg(why.to_string()));
     }
-    let latest = get_json(client, "https://api.github.com/repos/typesense/typesense/releases/latest").await?;
-    let version = latest["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
-    if version.is_empty() {
-        return Err(Error::msg("Couldn't find Typesense's latest release"));
+    let src = m.source.here().ok_or_else(|| manifest::no_download(m))?;
+    if src.lamprabit {
+        return own_builds(client, runtime).await;
     }
-    let platform = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
-        ("linux", false) => "linux-amd64",
-        ("linux", true) => "linux-arm64",
-        ("macos", false) => "darwin-amd64",
-        ("macos", true) => "darwin-arm64",
-        _ => return Err(unsupported("Typesense")),
-    };
-    Ok(vec![Release {
-        runtime: Runtime::Typesense,
-        url: format!("https://dl.typesense.org/releases/{version}/typesense-server-{version}-{platform}.tar.gz"),
-        version,
-        sha256: None,
-        sha512: None,
-        md5: None,
-        sha3_256: None,
-        archive: Archive::TarGz,
-        label: None,
-    }])
-}
-
-async fn rustfs_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let name = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
-        ("windows", false) => "windows-x86_64",
-        ("linux", false) => "linux-x86_64-gnu",
-        ("linux", true) => "linux-aarch64-gnu",
-        ("macos", true) => "macos-aarch64",
-        ("macos", false) => return Err(Error::msg("RustFS has no build for Intel Macs.")),
-        _ => return Err(unsupported("RustFS")),
-    };
-    github_latest(client, Runtime::Rustfs, "rustfs/rustfs", Archive::Zip, |n, v| n == format!("rustfs-{name}-v{v}.zip")).await
-}
-
-/// Ollama's own builds (CPU and NVIDIA support; large: about 1.5 GB on Windows and Linux).
-async fn ollama_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let (name, archive) = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
-        ("windows", false) => ("ollama-windows-amd64.zip", Archive::Zip),
-        ("windows", true) => ("ollama-windows-arm64.zip", Archive::Zip),
-        ("linux", false) => ("ollama-linux-amd64.tar.zst", Archive::TarZst),
-        ("linux", true) => ("ollama-linux-arm64.tar.zst", Archive::TarZst),
-        ("macos", _) => ("ollama-darwin.tgz", Archive::TarGz),
-        _ => return Err(unsupported("Ollama")),
-    };
-    let mut releases = github_latest(client, Runtime::Ollama, "ollama/ollama", archive, |n, _| n == name).await?;
-    for r in &mut releases {
-        r.label = Some("Large download".into());
-    }
-    Ok(releases)
-}
-
-/// The newest release of each major version from GitHub release tags ("v9.5.5"), at least `min`.
-async fn newest_per_major(client: &reqwest::Client, repo: &str, min: u32) -> Result<Vec<String>> {
-    let list = get_json(client, &format!("https://api.github.com/repos/{repo}/releases?per_page=50")).await?;
-    let mut newest: std::collections::BTreeMap<u32, String> = Default::default();
-    for r in list.as_array().into_iter().flatten().filter(|r| !r["prerelease"].as_bool().unwrap_or(false) && !r["draft"].as_bool().unwrap_or(false)) {
-        let version = r["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
-        if !version.split('.').all(|p| p.parse::<u32>().is_ok()) {
-            continue;
+    let url = manifest::catalog_url(src).ok_or_else(|| manifest::no_download(m))?;
+    let mut out = Vec::new();
+    let mut missing = None;
+    for found in manifest::select(m, src, &get_json(client, &url).await?)? {
+        let (mut sha256, mut sha512) = (found.sha256, found.sha512);
+        if let Some((is512, file)) = &found.checksum_file {
+            let Some(hash) = published_hash(client, file).await else {
+                missing = Some(file.clone());
+                continue;
+            };
+            if *is512 { sha512 = Some(hash) } else { sha256 = Some(hash) }
         }
-        let Some(major) = version.split('.').next().and_then(|m| m.parse::<u32>().ok()).filter(|&m| m >= min) else { continue };
-        if newest.get(&major).is_none_or(|v| version_key(&version) > version_key(v)) {
-            newest.insert(major, version);
-        }
+        out.push(Release { runtime, version: found.version, url: found.url, sha256, sha512, md5: None, sha3_256: None, archive: found.archive, label: found.label });
     }
-    Ok(newest.into_values().collect())
+    match (out.is_empty(), missing) {
+        (true, Some(file)) => Err(Error::msg(format!("Couldn't get {}'s published checksum ({file}), so LampRabit won't install it. Try again later.", m.name))),
+        _ => Ok(out),
+    }
 }
 
 /// "<hash>  <file>" files published next to archives.
 async fn published_hash(client: &reqwest::Client, url: &str) -> Option<String> {
     let r = client.get(url).send().await.ok()?.error_for_status().ok()?;
     r.text().await.ok()?.split_whitespace().next().map(str::to_ascii_lowercase)
-}
-
-/// Elasticsearch 8 and 9 from Elastic's artifact server, with the SHA-512 next to each.
-async fn elasticsearch_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let (platform, ext, archive) = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
-        ("windows", false) => ("windows-x86_64", "zip", Archive::Zip),
-        ("linux", false) => ("linux-x86_64", "tar.gz", Archive::TarGz),
-        ("linux", true) => ("linux-aarch64", "tar.gz", Archive::TarGz),
-        ("macos", false) => ("darwin-x86_64", "tar.gz", Archive::TarGz),
-        ("macos", true) => ("darwin-aarch64", "tar.gz", Archive::TarGz),
-        _ => return Err(unsupported("Elasticsearch")),
-    };
-    let mut out = Vec::new();
-    for version in newest_per_major(client, "elastic/elasticsearch", 8).await? {
-        let url = format!("https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-{version}-{platform}.{ext}");
-        let sha512 = published_hash(client, &format!("{url}.sha512")).await;
-        out.push(Release { runtime: Runtime::Elasticsearch, version, url, sha256: None, sha512, md5: None, sha3_256: None, archive, label: Some("1 GB+ RAM".into()) });
-    }
-    Ok(out)
-}
-
-/// OpenSearch 2 and 3 from its artifact server. It publishes no macOS build.
-async fn opensearch_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let (platform, ext, archive) = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
-        ("windows", false) => ("windows-x64", "zip", Archive::Zip),
-        ("linux", false) => ("linux-x64", "tar.gz", Archive::TarGz),
-        ("linux", true) => ("linux-arm64", "tar.gz", Archive::TarGz),
-        ("macos", _) => return Err(Error::msg("OpenSearch publishes no macOS build. Use Elasticsearch, which has one.")),
-        _ => return Err(unsupported("OpenSearch")),
-    };
-    let mut out = Vec::new();
-    for version in newest_per_major(client, "opensearch-project/OpenSearch", 2).await? {
-        let url = format!("https://artifacts.opensearch.org/releases/bundle/opensearch/{version}/opensearch-{version}-{platform}.{ext}");
-        let sha512 = published_hash(client, &format!("{url}.sha512")).await;
-        out.push(Release { runtime: Runtime::Opensearch, version, url, sha256: None, sha512, md5: None, sha3_256: None, archive, label: Some("1 GB+ RAM".into()) });
-    }
-    Ok(out)
-}
-
-/// n8n's latest release from npm. The package tarball is saved as the marker file;
-/// `setup_n8n` installs it with its dependencies (npm checks their integrity itself).
-async fn n8n_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let latest = get_json(client, "https://registry.npmjs.org/n8n/latest").await?;
-    let version = latest["version"].as_str().ok_or_else(|| Error::msg("Couldn't read n8n's latest release from npm"))?.to_string();
-    let node = latest["engines"]["node"].as_str().unwrap_or("").to_string();
-    Ok(vec![Release {
-        runtime: Runtime::N8n,
-        url: latest["dist"]["tarball"].as_str().unwrap_or_default().to_string(),
-        version,
-        sha256: None,
-        sha512: None,
-        md5: None,
-        sha3_256: None,
-        archive: Archive::File,
-        label: (!node.is_empty()).then(|| format!("Node {node}")),
-    }])
-}
-
-/// The newest RabbitMQ: the Windows zip, or the generic Unix build (which runs on the
-/// system's Erlang).
-async fn rabbitmq_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let (archive, ext) = if cfg!(windows) { (Archive::Zip, "zip") } else { (Archive::TarXz, "tar.xz") };
-    let platform = if cfg!(windows) { "windows" } else { "generic-unix" };
-    github_latest(client, Runtime::Rabbitmq, "rabbitmq/rabbitmq-server", archive, |n, v| n == format!("rabbitmq-server-{platform}-{v}.{ext}")).await
 }
 
 /// Erlang/OTP for RabbitMQ: the newest of the two latest major versions, from the
@@ -1989,41 +1702,6 @@ async fn mysql_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     Ok(releases)
 }
 
-/// Redis has no official Windows build. The community redis-windows project compiles each
-/// Redis release with MSYS2 (redis-server and redis-cli, with the msys DLLs they need next
-/// to them) and GitHub publishes a SHA-256 for every archive. The newest patch release of
-/// each of the last few lines is offered, like the other catalogs.
-async fn redis_windows_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let list = get_json(client, "https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=60").await?;
-    let mut newest: Vec<Release> = Vec::new();
-    for release in list.as_array().into_iter().flatten().filter(|r| r["prerelease"] == false && r["draft"] == false) {
-        let version = release["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
-        let name = format!("Redis-{version}-Windows-x64-msys2.zip");
-        let Some(asset) = release["assets"].as_array().into_iter().flatten().find(|a| a["name"] == name.as_str()) else { continue };
-        if newest.iter().any(|n| line(&n.version) == line(&version) && version_key(&n.version) >= version_key(&version)) {
-            continue;
-        }
-        newest.retain(|n| line(&n.version) != line(&version));
-        newest.push(Release {
-            runtime: Runtime::Redis,
-            url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
-            sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
-            sha512: None,
-            md5: None,
-            sha3_256: None,
-            version,
-            archive: Archive::Zip,
-            label: Some("redis-windows (community build)".into()),
-        });
-    }
-    if newest.is_empty() {
-        return Err(Error::msg("Couldn't find Redis builds for Windows on github.com/redis-windows"));
-    }
-    newest.sort_by_key(|r| std::cmp::Reverse(version_key(&r.version)));
-    newest.truncate(4);
-    Ok(newest)
-}
-
 /// phpRedisAdmin publishes source releases on GitHub (no separate archives or checksums,
 /// so this relies on HTTPS). Its PHP dependency, Predis, is added after install.
 async fn phpredisadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
@@ -2460,6 +2138,25 @@ pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNot
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every manifest source, against the real GitHub and npm APIs: catches asset names
+    /// that don't exist. `cargo test --lib live_manifest_catalogs -- --ignored --nocapture`
+    /// (set GITHUB_TOKEN: it makes ~20 API calls).
+    #[tokio::test]
+    #[ignore]
+    async fn live_manifest_catalogs() {
+        let client = client();
+        let mut failed = Vec::new();
+        for m in crate::manifest::built_ins().iter().filter(|m| m.source.here().is_some_and(|s| !s.builtin && !s.lamprabit)) {
+            let Some(runtime) = Runtime::from_id(&m.id) else { continue };
+            match manifest_releases(&client, runtime).await {
+                Ok(list) => println!("{:<14} {}", m.id, list.iter().map(|r| format!("{} [{}{}]", r.version, if r.sha256.is_some() { "sha256" } else if r.sha512.is_some() { "sha512" } else { "unchecked" }, r.label.as_ref().map(|l| format!(", {l}")).unwrap_or_default())).collect::<Vec<_>>().join("  ")),
+                Err(e) if m.unavailable_here().is_some() => println!("{:<14} unavailable here: {e}", m.id),
+                Err(e) => failed.push(format!("{}: {e}", m.id)),
+            }
+        }
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
 
     #[test]
     fn reads_git_for_windows_tags() {

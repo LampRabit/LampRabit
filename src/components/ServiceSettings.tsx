@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { FolderOpen, Star } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { allServers, api, runtimeLabels, type Runtime, type Server, type Settings } from "../lib/api";
+import { allServers, api, runtimeLabels, type Runtime, type Server, type ServiceKind, type ServiceOption, type Settings } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
 import { portsFor, serverNotes } from "../lib/settingsFields";
 import ApplyBar from "./ApplyBar";
@@ -36,7 +36,8 @@ function Row({ label, hint, children }: { label: ReactNode; hint?: ReactNode; ch
 /**
  * A service's own settings (ports, whether a web server runs and which one is primary,
  * PHP workers, mail routing, the default database), changed right from its details on
- * the Services page. The same values as in Settings, applied the same way.
+ * the Services page. The same values as in Settings, applied the same way. Below them,
+ * the options its manifest declares (`settings:` in src-tauri/services/<id>.yaml).
  */
 export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
   const queryClient = useQueryClient();
@@ -47,16 +48,32 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
   useEffect(() => {
     if (settings.data) setDraft(settings.data);
   }, [settings.data]);
+  // Only services have manifest options; other runtimes (PHP, Java…) have none.
+  const service = useQuery({ queryKey: ["services"], queryFn: api.listServices }).data?.find((s) => s.kind === runtime);
+  const options = useQuery({
+    queryKey: ["service-options", runtime],
+    queryFn: () => api.serviceOptions(runtime as ServiceKind),
+    enabled: !!service,
+  });
+  const [values, setValues] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (options.data) setValues(Object.fromEntries(options.data.map((o) => [o.name, o.value])));
+  }, [options.data]);
+  const changedOptions = (options.data ?? []).filter((o) => values[o.name] !== undefined && values[o.name] !== o.value);
 
   const apply = useMutation({
     mutationFn: async () => {
       if (!draft) return;
+      // The options first: the backend checks each one, and a bad value stops here.
+      for (const o of changedOptions) await api.setServiceOption(runtime as ServiceKind, o.name, values[o.name]);
       // Everything else comes from the latest copy, so other screens' changes are kept.
       const latest = await api.getSettings();
-      await api.saveSettings({ ...latest, ...pick(draft) });
+      await api.saveSettings({ ...latest, ...pick(draft), serviceOptions: latest.serviceOptions });
+      // Options apply when the service starts.
+      if (changedOptions.length > 0 && service?.state === "running") await api.restartService(service.kind);
     },
     onSuccess: () => {
-      for (const key of ["settings", "services", "sites", "port-status"]) queryClient.invalidateQueries({ queryKey: [key] });
+      for (const key of ["settings", "services", "sites", "port-status", "service-options"]) queryClient.invalidateQueries({ queryKey: [key] });
       notify("info", `${runtimeLabels[runtime]} settings applied`);
     },
     onError: notifyError,
@@ -68,10 +85,11 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
   const workers = runtime === "php" && os === "windows";
   const database = runtime === "mariadb" || runtime === "mysql";
   const storage = runtime === "rustfs" || runtime === "minio";
-  if (!server && fields.length === 0 && !workers && runtime !== "mailpit" && !database && !storage) return null;
+  const declared = options.data ?? [];
+  if (!server && fields.length === 0 && !workers && runtime !== "mailpit" && !database && !storage && declared.length === 0) return null;
 
   const set = (patch: Partial<Settings>) => setDraft({ ...draft, ...patch });
-  const dirty = JSON.stringify(pick(draft)) !== JSON.stringify(pick(settings.data));
+  const dirty = JSON.stringify(pick(draft)) !== JSON.stringify(pick(settings.data)) || changedOptions.length > 0;
   const enabled = !!server && draft.webServers.includes(server);
   const primary = !!server && draft.webServers[0] === server;
 
@@ -179,7 +197,57 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
           />
         </Row>
       )}
-      <ApplyBar dirty={dirty} busy={apply.isPending} onApply={() => apply.mutate()} onDiscard={() => setDraft(settings.data ?? null)} />
+      {declared.map((o) => (
+        <Row key={o.name} label={o.label} hint={o.description}>
+          <OptionField option={o} value={values[o.name] ?? o.value} onChange={(v) => setValues({ ...values, [o.name]: v })} />
+        </Row>
+      ))}
+      <ApplyBar
+        dirty={dirty}
+        busy={apply.isPending}
+        onApply={() => apply.mutate()}
+        onDiscard={() => {
+          setDraft(settings.data ?? null);
+          setValues(Object.fromEntries(declared.map((o) => [o.name, o.value])));
+        }}
+      />
     </Card>
   );
+}
+
+/** The input for one manifest option, by its type. */
+function OptionField({ option, value, onChange }: { option: ServiceOption; value: string; onChange: (v: string) => void }) {
+  switch (option.kind) {
+    case "toggle":
+      return <Switch checked={value === "true"} onChange={(v) => onChange(String(v))} label={option.label} />;
+    case "number":
+      return (
+        <span className="flex items-center gap-2">
+          <input
+            type="number"
+            min={option.min ?? undefined}
+            max={option.max ?? undefined}
+            className={numberInput}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            aria-label={option.label}
+          />
+          {option.unit && <span className="text-sm text-muted">{option.unit}</span>}
+        </span>
+      );
+    case "choice":
+      return option.options.length <= 4 ? (
+        <Segmented value={value} onChange={onChange} options={option.options.map((o) => ({ value: o, label: o }))} />
+      ) : (
+        <select className={clsx(inputClass.replace("w-full", ""), "w-48")} value={value} onChange={(e) => onChange(e.target.value)} aria-label={option.label}>
+          {option.options.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      );
+    default:
+      return <input className={clsx(inputClass.replace("w-full", ""), "w-64")} value={value} onChange={(e) => onChange(e.target.value)} aria-label={option.label} />;
+  }
 }

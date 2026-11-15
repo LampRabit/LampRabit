@@ -1,0 +1,43 @@
+schema: 1
+id: rustfs
+name: RustFS
+category: storage
+blurb: S3 object storage
+origin: "RustFS from its GitHub releases (checksum checked): S3-compatible, with a web console. Access key lamprabit, secret lamprabit-secret"
+unavailable: { value: RustFS has no build for Intel Macs. Use MinIO for S3 storage there., on: [macos-x64] }
+homepage: https://rustfs.com
+license: Apache-2.0
+source:
+  github: rustfs/rustfs
+  assets:
+    windows-x64: { file: "rustfs-windows-x86_64-v{version}.zip", archive: zip }
+    linux-x64: { file: "rustfs-linux-x86_64-gnu-v{version}.zip", archive: zip }
+    linux-arm64: { file: "rustfs-linux-aarch64-gnu-v{version}.zip", archive: zip }
+    macos-arm64: { file: "rustfs-macos-aarch64-v{version}.zip", archive: zip }
+binary: "rustfs{{exe}}"
+ports:
+  # Not the usual 9000/9001, which PHP's FastCGI ports use.
+  api: { default: 9100, setting: rustfs, label: S3 API }
+  console: { default: 9101, setting: rustfsConsole, label: Console }
+# Its buckets can live anywhere, even outside the LampRabit folder (Settings → Storage).
+data: storage
+dirs: ["{{data}}"]
+run:
+  program: "{{home}}/rustfs{{exe}}"
+  env:
+    RUSTFS_VOLUMES: "{{data}}"
+    RUSTFS_ADDRESS: "127.0.0.1:{{port.api}}"
+    RUSTFS_CONSOLE_ENABLE: "true"
+    RUSTFS_CONSOLE_ADDRESS: "127.0.0.1:{{port.console}}"
+    RUSTFS_ACCESS_KEY: lamprabit
+    RUSTFS_SECRET_KEY: lamprabit-secret
+health: { http: { path: /health } }
+config: "{{data}}"
+connection:
+  url: "http://127.0.0.1:{{port.api}}"
+  env:
+    AWS_ENDPOINT: "http://127.0.0.1:{{port.api}}"
+    AWS_ACCESS_KEY_ID: lamprabit
+    AWS_SECRET_ACCESS_KEY: lamprabit-secret
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_USE_PATH_STYLE_ENDPOINT: "true"

@@ -1,0 +1,33 @@
+schema: 1
+id: minio
+name: MinIO
+category: storage
+blurb: S3 object storage
+origin: "MinIO's last release (October 2025), built from its source by LampRabit's CI: the project is archived, so there are no security fixes. Access key lamprabit, secret lamprabit-secret"
+homepage: https://min.io
+license: AGPL-3.0
+source: { lamprabit: true }
+binary: "minio{{exe}}"
+ports:
+  # 9000/9001 are PHP's, 9100/9101 RustFS's.
+  api: { default: 9110, setting: minio, label: S3 API }
+  console: { default: 9111, setting: minioConsole, label: Console }
+data: storage
+dirs: ["{{data}}"]
+run:
+  program: "{{home}}/minio{{exe}}"
+  args: [server, "{{data}}", --address, "127.0.0.1:{{port.api}}", --console-address, "127.0.0.1:{{port.console}}"]
+  env:
+    MINIO_ROOT_USER: lamprabit
+    MINIO_ROOT_PASSWORD: lamprabit-secret
+    MINIO_UPDATE: "off"
+health: { http: { path: /minio/health/live } }
+config: "{{data}}"
+connection:
+  url: "http://127.0.0.1:{{port.api}}"
+  env:
+    AWS_ENDPOINT: "http://127.0.0.1:{{port.api}}"
+    AWS_ACCESS_KEY_ID: lamprabit
+    AWS_SECRET_ACCESS_KEY: lamprabit-secret
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_USE_PATH_STYLE_ENDPOINT: "true"

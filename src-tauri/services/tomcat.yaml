@@ -1,0 +1,25 @@
+# Java projects get a <Host> each in server.xml (configs::render_tomcat), and the Java it
+# runs on depends on Tomcat's major version (configs::tomcat_java): both stay in Rust.
+schema: 1
+id: tomcat
+name: Tomcat
+category: web
+blurb: Runs Java web apps
+origin: Official Apache Tomcat releases (SHA-512 checked); runs on the active Java and serves Java projects behind your web server
+homepage: https://tomcat.apache.org
+license: Apache-2.0
+source: { builtin: true }
+binary: bin/bootstrap.jar
+needs:
+  - { runtime: java, why: Tomcat runs on the active Java }
+ports:
+  http: { default: 8180, setting: tomcatHttp, label: HTTP }
+  shutdown: { default: 8105, setting: tomcatShutdown, label: Shutdown }
+# A 404 for / is fine: only apps under their own Host are deployed.
+health: { http: { path: / } }
+log: tomcat-output.log
+connection:
+  url: "http://127.0.0.1:{{port.http}}"
+  env:
+    TOMCAT_URL: "http://127.0.0.1:{{port.http}}"
+builtin: [prepare, launch]

@@ -1,0 +1,35 @@
+schema: 1
+id: memcached
+name: Memcached
+category: cache
+blurb: Memory cache
+origin:
+  - { value: "nono303's Windows build of Memcached (no official one exists), checked and repackaged by LampRabit", on: [windows] }
+  - { value: "LampRabit's builds of Memcached" }
+homepage: https://memcached.org
+license: BSD-3-Clause
+source: { lamprabit: true }
+binary: "memcached{{exe}}"
+ports:
+  memcached: { default: 11211, setting: memcached }
+# Memory only: nothing is kept in data/memcached, which exists for consistency.
+dirs: ["{{data}}"]
+settings:
+  memory:
+    label: Memory limit
+    description: How much memory Memcached may use; the oldest items go first when it's full.
+    type: number
+    default: 128
+    min: 16
+    max: 65536
+    unit: MB
+run:
+  program: "{{home}}/memcached{{exe}}"
+  args: [-l, 127.0.0.1, -p, "{{port.memcached}}", -m, "{{setting.memory}}"]
+health: { line: { send: "version\r\n", expect: VERSION } }
+config: "{{data}}"
+connection:
+  url: "127.0.0.1:{{port.memcached}}"
+  env:
+    MEMCACHED_HOST: 127.0.0.1
+    MEMCACHED_PORT: "{{port.memcached}}"

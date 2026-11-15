@@ -23,6 +23,7 @@ mod imports;
 mod langver;
 mod layout;
 mod logs;
+mod manifest;
 mod manage;
 mod node;
 mod php;
@@ -819,6 +820,8 @@ pub fn run() {
             log_history,
             clear_logs,
             restart_service,
+            service_options,
+            set_service_option,
             list_sites,
             apply_sites,
             set_site_ssl,

@@ -1,0 +1,21 @@
+schema: 1
+id: frankenphp
+name: FrankenPHP
+category: web
+blurb: Serves your sites
+origin: "Official FrankenPHP releases: Caddy with its own PHP built in, so LampRabit's PHP versions and extensions don't apply to its sites"
+unavailable: { value: FrankenPHP publishes no build for Intel Macs., on: [macos-x64] }
+homepage: https://frankenphp.dev
+license: MIT
+source:
+  github: php/frankenphp
+  assets:
+    windows-x64: { file: frankenphp-windows-x86_64.zip, archive: zip }
+    linux-x64: { file: frankenphp-linux-x86_64, archive: file }
+    linux-arm64: { file: frankenphp-linux-aarch64, archive: file }
+    macos-arm64: { file: frankenphp-mac-arm64, archive: file }
+binary: "frankenphp{{exe}}"
+health: { http: { path: / } }
+log: frankenphp-error.log
+config: "{{etc}}/Caddyfile"
+builtin: [ports, prepare, launch]

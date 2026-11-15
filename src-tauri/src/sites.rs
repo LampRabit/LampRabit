@@ -426,17 +426,11 @@ pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {
     if let Some(ver) = v.get("phppgadmin") {
         add("phppgadmin", "phppgadmin", Some(layout.bin("phppgadmin", ver)), None);
     }
-    if v.mailpit.is_some() {
-        add("mailpit", "mail", None, Some(format!("http://127.0.0.1:{}/", settings.ports.mail_ui)));
-    }
-    if v.get("n8n").is_some() {
-        add("n8n", "n8n", None, Some(format!("http://127.0.0.1:{}/", settings.ports.n8n)));
-    }
-    if v.get("neo4j").is_some() {
-        add("neo4j", "neo4j", None, Some(format!("http://127.0.0.1:{}/", settings.ports.neo4j_http)));
-    }
-    if v.get("pgadmin").is_some() {
-        add("pgadmin", "pgadmin", None, Some(format!("http://127.0.0.1:{}/", settings.ports.pgadmin)));
+    // Services with a web interface (their manifest's `ui`), proxied to its port.
+    for m in crate::manifest::built_ins().iter().filter(|m| v.get(&m.id).is_some()) {
+        let Some(ui) = &m.ui else { continue };
+        let port = ui.port.as_deref().or(m.main_port()).and_then(|p| m.port(settings, p)).unwrap_or_default();
+        add(&m.id, &ui.domain, None, Some(format!("http://127.0.0.1:{port}/")));
     }
     tools
 }

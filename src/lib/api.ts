@@ -323,6 +323,27 @@ export interface ServiceInfo {
   problem: Problem | null;
   /** Running, but not started by LampRabit (the Ollama app): it can't be stopped here. */
   external: boolean;
+  /** How apps connect (a URL and .env lines), from the service's manifest. */
+  connection?: Connection | null;
+}
+
+/** An option a service's manifest declares (`settings:`), with its current value. */
+export interface ServiceOption {
+  name: string;
+  label: string;
+  description: string | null;
+  kind: "text" | "number" | "toggle" | "choice";
+  options: string[];
+  min: number | null;
+  max: number | null;
+  unit: string | null;
+  default: string;
+  value: string;
+}
+
+export interface Connection {
+  url: string;
+  env: [string, string][];
 }
 
 export interface Health {
@@ -868,6 +889,8 @@ export interface Settings {
   defaultDatabase: Database;
   /** Object storage folders by service id (RustFS, MinIO); data/<id> when absent. */
   storage: Record<string, string>;
+  /** Values of the options services declare in their manifest, by service then option (only those changed from the default). */
+  serviceOptions: Record<string, Record<string, string>>;
   /** Services (by id) started again when they crash, a few times in a row at most. */
   autoRestart: string[];
   /** dump() and dd() go to Logs instead of the page. */
@@ -988,6 +1011,8 @@ export const api = {
   startService: (kind: ServiceKind) => invoke<void>("start_service", { kind }),
   stopService: (kind: ServiceKind) => invoke<void>("stop_service", { kind }),
   restartService: (kind: ServiceKind) => invoke<void>("restart_service", { kind }),
+  serviceOptions: (kind: ServiceKind) => invoke<ServiceOption[]>("service_options", { kind }),
+  setServiceOption: (kind: ServiceKind, name: string, value: string) => invoke<ServiceOption[]>("set_service_option", { kind, name, value }),
   listSites: () => invoke<SitesInfo>("list_sites"),
   applySites: () => invoke<void>("apply_sites"),
   setSiteSsl: (name: string, ssl: boolean) => invoke<void>("set_site_ssl", { name, ssl }),

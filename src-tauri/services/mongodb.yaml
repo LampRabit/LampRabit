@@ -1,0 +1,31 @@
+schema: 1
+id: mongodb
+name: MongoDB
+category: databases
+blurb: Stores your documents
+origin: Official MongoDB Community Server releases (checksum checked); each major version keeps its own data folder
+homepage: https://www.mongodb.com
+license: SSPL-1.0
+source: { builtin: true }
+binary: "bin/mongod{{exe}}"
+suggests: [mongosh, compass, mongotools]
+ports:
+  mongodb: { default: 27017, setting: mongodb }
+# MongoDB upgrades its files one major version at a time and never downgrades them.
+data: per-major
+dirs: ["{{data}}"]
+run:
+  program: "{{home}}/bin/mongod{{exe}}"
+  args: [--dbpath, "{{data}}", --port, "{{port.mongodb}}", --bind_ip, 127.0.0.1]
+# A clean shutdown through mongosh when it's installed; otherwise the process is ended and
+# MongoDB recovers from its journal on the next start.
+stop:
+  if_installed: mongosh
+  command: ["{{runtime.mongosh.home}}/bin/mongosh{{exe}}", --quiet, --port, "{{port.mongodb}}", --eval, "try { db.getSiblingDB('admin').shutdownServer() } catch (e) {}"]
+health: { tcp: {} }
+config: "{{data}}"
+connection:
+  url: "mongodb://127.0.0.1:{{port.mongodb}}"
+  env:
+    DB_CONNECTION: mongodb
+    MONGODB_URI: "mongodb://127.0.0.1:{{port.mongodb}}"

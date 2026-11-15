@@ -1,0 +1,26 @@
+# A Python web app in its own virtual environment: the package folder is found at start and
+# LampRabit's PostgreSQL is registered in it (configs::write_pgadmin, register_pgadmin_server).
+schema: 1
+id: pgadmin
+name: pgAdmin
+category: tools
+blurb: PostgreSQL admin
+origin: "PostgreSQL's official admin tool from PyPI, in its own Python environment (needs Python 3.10–3.14); LampRabit's PostgreSQL is added for you"
+homepage: https://www.pgadmin.org
+license: PostgreSQL
+source: { builtin: true }
+binary: installed.txt
+needs:
+  - { runtime: python, min: "3.10", why: pgAdmin runs on Python }
+ports:
+  http: { default: 5050, setting: pgadmin }
+health: { http: { path: /misc/ping } }
+behaviour: { slow: true }
+log: pgadmin.log
+config: "{{data}}"
+ui: { domain: pgadmin, port: http }
+connection:
+  url: "http://127.0.0.1:{{port.http}}"
+  env:
+    PGADMIN_URL: "http://127.0.0.1:{{port.http}}"
+builtin: [prepare, launch]

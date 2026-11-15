@@ -1,0 +1,38 @@
+schema: 1
+id: typesense
+name: Typesense
+category: search
+blurb: Search engine
+origin: "Official Typesense builds from dl.typesense.org (no checksums published). API key: lamprabit"
+unavailable: { value: "Typesense has no Windows build. Run it in WSL, or use Meilisearch.", on: [windows] }
+homepage: https://typesense.org
+license: GPL-3.0
+source:
+  # Versions from its GitHub releases (which have no files); the server from
+  # dl.typesense.org, which publishes no checksums: HTTPS covers the download.
+  github: typesense/typesense
+  url: "https://dl.typesense.org/releases/{version}/{file}"
+  checksum: none
+  assets:
+    linux-x64: { file: "typesense-server-{version}-linux-amd64.tar.gz", archive: targz }
+    linux-arm64: { file: "typesense-server-{version}-linux-arm64.tar.gz", archive: targz }
+    macos-x64: { file: "typesense-server-{version}-darwin-amd64.tar.gz", archive: targz }
+    macos-arm64: { file: "typesense-server-{version}-darwin-arm64.tar.gz", archive: targz }
+binary: typesense-server
+ports:
+  api: { default: 8108, setting: typesense }
+dirs: ["{{data}}"]
+run:
+  program: "{{home}}/typesense-server"
+  # It insists on an API key; a fixed local one, shown in the connection details.
+  args: ["--data-dir={{data}}", --api-key=lamprabit, --listen-address=127.0.0.1, "--api-port={{port.api}}", --enable-cors]
+  cwd: "{{data}}"
+health: { http: { path: /health } }
+config: "{{data}}"
+connection:
+  url: "http://127.0.0.1:{{port.api}}"
+  env:
+    TYPESENSE_HOST: 127.0.0.1
+    TYPESENSE_PORT: "{{port.api}}"
+    TYPESENSE_PROTOCOL: http
+    TYPESENSE_API_KEY: lamprabit

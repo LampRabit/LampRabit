@@ -10,6 +10,7 @@ use crate::{
     config::Settings,
     error::Result,
     layout::Layout,
+    manifest,
     runtimes::{self, Release, Runtime},
 };
 
@@ -76,83 +77,33 @@ pub fn catalog() -> Catalog {
 }
 
 fn info(runtime: Runtime) -> RuntimeInfo {
+    // Services describe themselves in their manifest (src-tauri/services/<id>.yaml).
+    if let Some(m) = manifest::get(runtime.id()) {
+        return RuntimeInfo {
+            id: runtime.id(),
+            label: &m.name,
+            blurb: &m.blurb,
+            source: m.origin.as_ref().and_then(|o| o.pick()).unwrap_or_default(),
+            unavailable: m.unavailable_here(),
+            needs: needs(runtime, None).into_iter().map(|n| n.runtime).collect(),
+            suggests: m.suggests.iter().map(String::as_str).collect(),
+        };
+    }
     let win = cfg!(windows);
-    let mac = cfg!(target_os = "macos");
     let unix = |windows: &'static str, other: &'static str| if win { windows } else { other };
     let (label, blurb, source, unavailable): (&str, &str, &str, Option<&str>) = match runtime {
-        Runtime::Apache => ("Apache", "Serves your sites", unix("Apache Lounge builds", "LampRabit's builds of Apache httpd"), None),
-        Runtime::Nginx => ("Nginx", "Serves your sites", unix("Official nginx.org Windows builds (PGP-signed, no checksum)", "LampRabit's builds of nginx.org releases"), None),
         Runtime::Php => ("PHP", "Runs your code", unix("Thread-safe builds from windows.php.net", "LampRabit's static builds with common extensions built in, Redis and Memcached clients included"), None),
-        Runtime::Caddy => ("Caddy", "Serves your sites", "Official Caddy releases from GitHub; uses LampRabit's certificates and PHP, not its own", None),
-        Runtime::Frankenphp => (
-            "FrankenPHP",
-            "Serves your sites",
-            "Official FrankenPHP releases: Caddy with its own PHP built in, so LampRabit's PHP versions and extensions don't apply to its sites",
-            (mac && cfg!(target_arch = "x86_64")).then_some("FrankenPHP publishes no build for Intel Macs."),
-        ),
-        Runtime::Tomcat => ("Tomcat", "Runs Java web apps", "Official Apache Tomcat releases (SHA-512 checked); runs on the active Java and serves Java projects behind your web server", None),
         Runtime::Java => ("Java", "Runs Java apps", "Eclipse Temurin JDKs from Adoptium (checksum checked); java, javac and jar work in LampRabit's terminal, with JAVA_HOME set", None),
-        Runtime::Mariadb => (
-            "MariaDB",
-            "Stores your data",
-            if mac { "LampRabit's builds of MariaDB's LTS releases (MariaDB publishes none for macOS)" } else { "Official MariaDB releases" },
-            None,
-        ),
-        Runtime::Mysql => (
-            "MySQL",
-            "Stores your data",
-            "Official MySQL releases; runs next to MariaDB on its own port",
-            // Oracle's macOS archives are built for a recent macOS (15 today).
-            None,
-        ),
-        Runtime::Postgres => ("PostgreSQL", "Stores your data", "PostgreSQL built from source for every OS by theseus-rs (checksum checked); psql and pg_dump work in LampRabit's terminal", None),
-        Runtime::Mongodb => ("MongoDB", "Stores your documents", "Official MongoDB Community Server releases (checksum checked); each major version keeps its own data folder", None),
         Runtime::Mongosh => ("mongosh", "MongoDB shell", "MongoDB's shell from its GitHub releases; mongosh works in LampRabit's terminal, and MongoDB uses it to shut down cleanly", None),
         Runtime::Mongotools => ("MongoDB Database Tools", "MongoDB backups", "MongoDB's mongodump and mongorestore (checksum checked); LampRabit's MongoDB backups use them", None),
         Runtime::Compass => ("MongoDB Compass", "MongoDB GUI", "MongoDB's desktop app from its GitHub releases; opens connected to LampRabit's MongoDB", None),
         Runtime::Sqlite => ("SQLite", "File databases", "The sqlite3 shell from sqlite.org (SHA3 checked). PHP has SQLite built in, so projects don't need this to use it; backups use it to copy safely", None),
-        Runtime::Clickhouse => (
-            "ClickHouse",
-            "Analytics database",
-            "Official ClickHouse builds from GitHub. Its web console is at /play on its HTTP port",
-            win.then_some("ClickHouse has no Windows build. Run it in WSL, or use LampRabit on Linux or macOS."),
-        ),
-        Runtime::Neo4j => ("Neo4j", "Graph database", "Neo4j Community from dist.neo4j.org (checksum checked); runs on Java 21+, Neo4j Browser at neo4j.test", None),
-        Runtime::Meilisearch => ("Meilisearch", "Search engine", "Official Meilisearch Community builds from GitHub (checksum checked); runs in development mode, with its search preview at its URL", None),
-        Runtime::Typesense => (
-            "Typesense",
-            "Search engine",
-            "Official Typesense builds from dl.typesense.org (no checksums published). API key: lamprabit",
-            win.then_some("Typesense has no Windows build. Run it in WSL, or use Meilisearch."),
-        ),
-        Runtime::Elasticsearch => ("Elasticsearch", "Search engine", "Official Elasticsearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory", None),
-        Runtime::Opensearch => (
-            "OpenSearch",
-            "Search engine",
-            "Official OpenSearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory",
-            mac.then_some("OpenSearch has no macOS build. Use Elasticsearch, which works the same for most apps."),
-        ),
-        Runtime::Rustfs => (
-            "RustFS",
-            "S3 object storage",
-            "RustFS from its GitHub releases (checksum checked): S3-compatible, with a web console. Access key lamprabit, secret lamprabit-secret",
-            (mac && cfg!(target_arch = "x86_64")).then_some("RustFS has no build for Intel Macs. Use MinIO for S3 storage there."),
-        ),
-        Runtime::Minio => (
-            "MinIO",
-            "S3 object storage",
-            "MinIO's last release (October 2025), built from its source by LampRabit's CI: the project is archived, so there are no security fixes. Access key lamprabit, secret lamprabit-secret",
-            None,
-        ),
-        Runtime::N8n => ("n8n", "Workflow automation", "n8n from npm, installed into its own folder and run on NVM's Node.js (24 or newer). Editor at n8n.test", None),
-        Runtime::Rabbitmq => ("RabbitMQ", "Message queue", "Official RabbitMQ releases (checksum checked) with the management console (user guest, password guest)", None),
         Runtime::Erlang => (
             "Erlang",
             "Runs RabbitMQ",
             "Official Erlang/OTP builds for Windows (checksum checked)",
             (!win).then_some("Erlang has no official Linux or macOS builds: install it with your system's packages (sudo apt install erlang-nox, sudo dnf install erlang, or brew install erlang); RabbitMQ uses it."),
         ),
-        Runtime::Ollama => ("Ollama", "Local AI models", "Ollama's own builds from GitHub (a large download). Models go to LampRabit's data folder; the ollama command uses this server", None),
         Runtime::Go => ("Go", "Runs Go code", "Official Go releases from go.dev (checksum checked); go and gofmt work in LampRabit's terminal", None),
         Runtime::Rust => (
             "Rust",
@@ -165,18 +116,10 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         ),
         Runtime::Python => ("Python", "Runs Python code", "python-build-standalone (the builds uv uses, checksum checked); python and pip work in LampRabit's terminal", None),
         Runtime::Phppgadmin => ("phpPgAdmin", "PostgreSQL admin", "The PostgreSQL web interface in PHP (ReimuHakurei's maintained fork for PHP 8); log in as root without a password", None),
-        Runtime::Pgadmin => ("pgAdmin", "PostgreSQL admin", "PostgreSQL's official admin tool from PyPI, in its own Python environment (needs Python 3.10–3.14); LampRabit's PostgreSQL is added for you", None),
-        Runtime::Mailpit => ("Mailpit", "Catches outgoing mail", "Local SMTP server with a web inbox", None),
         Runtime::Adminer => ("Adminer", "Database admin", "A single-file database manager", None),
         Runtime::Phpmyadmin => ("phpMyAdmin", "Database admin", "The classic MySQL/MariaDB web interface", None),
         Runtime::Ngrok => ("Ngrok", "Public tunnels", "Share sites on a public URL (free account needed)", None),
         Runtime::Cloudflared => ("Cloudflare Tunnel", "Public tunnels", "Cloudflare quick tunnels, no account needed", None),
-        Runtime::Redis => (
-            "Redis",
-            "Cache and queues",
-            unix("Real Redis from the community redis-windows build (Redis has no official Windows build), with redis-cli", "LampRabit's builds of Redis, with redis-cli"),
-            None,
-        ),
         Runtime::Composer => ("Composer", "PHP packages", "PHP's package manager; run composer from the LampRabit terminal", None),
         Runtime::Maven => ("Maven", "Java builds", "Apache Maven from Apache's mirror (SHA-512 checked); mvn works in LampRabit's terminal on the active Java", None),
         Runtime::Git => (
@@ -191,19 +134,11 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         Runtime::Conda => ("conda", "Python environments", "Miniforge, conda-forge's installer (checksum checked), installed into LampRabit's folder without changing PATH or your shell; conda and mamba work in LampRabit's terminal", None),
         Runtime::Gradle => ("Gradle", "Java builds", "Gradle's official distribution from services.gradle.org (SHA-256 checked); gradle works in LampRabit's terminal on the active Java", None),
         Runtime::Phpredisadmin => ("phpRedisAdmin", "Redis admin", "Browse and edit Redis keys in the browser, like phpMyAdmin", None),
-        Runtime::Memcached => (
-            "Memcached",
-            "Memory cache",
-            unix("nono303's Windows build of Memcached (no official one exists), checked and repackaged by LampRabit", "LampRabit's builds of Memcached"),
-            None,
-        ),
+        // Services: from their manifest, above.
+        _ => (runtime.id(), "", "", None),
     };
     let suggests: &[&str] = match runtime {
         Runtime::Php => &["composer"],
-        Runtime::Mariadb | Runtime::Mysql => &["phpmyadmin", "adminer"],
-        Runtime::Postgres => &["adminer", "phppgadmin", "pgadmin"],
-        Runtime::Mongodb => &["mongosh", "compass", "mongotools"],
-        Runtime::Redis => &["phpredisadmin"],
         _ => &[],
     };
     RuntimeInfo {

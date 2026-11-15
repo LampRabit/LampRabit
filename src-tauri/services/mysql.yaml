@@ -1,0 +1,35 @@
+schema: 1
+id: mysql
+name: MySQL
+category: databases
+blurb: Stores your data
+origin: Official MySQL releases; runs next to MariaDB on its own port
+homepage: https://www.mysql.com
+license: GPL-2.0
+source: { builtin: true }
+binary: "bin/mysqld{{exe}}"
+suggests: [phpmyadmin, adminer]
+ports:
+  mysql: { default: 3307, setting: mysqlServer }
+run:
+  program: "{{home}}/bin/mysqld{{exe}}"
+  # --defaults-file must be the first argument; --console keeps errors on stderr on
+  # Windows, where they'd otherwise only go to the event log.
+  args: ["--defaults-file={{etc}}/my.ini", { value: --console, on: [windows] }]
+  env:
+    # Where the libaio link goes when needed (configs::mysql_libraries).
+    LD_LIBRARY_PATH: { value: "{{home}}/lib/compat", on: [linux] }
+stop:
+  command: ["{{home}}/bin/mysqladmin{{exe}}", "--defaults-file={{etc}}/my.ini", --user=root, shutdown]
+health: { mysql: {} }
+log: mysql-error.log
+config: "{{etc}}/my.ini"
+connection:
+  url: "mysql://root@127.0.0.1:{{port.mysql}}"
+  env:
+    DB_CONNECTION: mysql
+    DB_HOST: 127.0.0.1
+    DB_PORT: "{{port.mysql}}"
+    DB_USERNAME: root
+    DB_PASSWORD: ""
+builtin: [prepare]

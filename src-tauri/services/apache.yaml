@@ -1,0 +1,20 @@
+# The web servers are LampRabit's core: their vhosts, PHP pools, certificates and the hosts
+# file are generated in Rust (sites.rs, configs.rs), so most of their parts are builtin.
+schema: 1
+id: apache
+name: Apache
+category: web
+blurb: Serves your sites
+origin:
+  - { value: Apache Lounge builds, on: [windows] }
+  - { value: LampRabit's builds of Apache httpd }
+homepage: https://httpd.apache.org
+license: Apache-2.0
+source:
+  - { on: [windows], builtin: true }
+  - { lamprabit: true }
+binary: "bin/httpd{{exe}}"
+health: { http: { path: / } }
+log: apache-error.log
+config: "{{etc}}/httpd.conf"
+builtin: [ports, prepare, launch]

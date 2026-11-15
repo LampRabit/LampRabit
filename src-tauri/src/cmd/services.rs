@@ -322,6 +322,24 @@ pub(crate) async fn service_usage(state: State<'_, AppState>) -> Result<Vec<Usag
     Ok(out)
 }
 
+/// The options a service's manifest declares (`settings:`), with their values.
+#[tauri::command]
+pub(crate) async fn service_options(state: State<'_, AppState>, kind: ServiceKind) -> Result<Vec<manifest::OptionInfo>> {
+    Ok(kind.manifest().options(&*state.settings.read().await))
+}
+
+/// Changes one of them. It applies the next time the service starts; the card offers a
+/// restart when it's running.
+#[tauri::command]
+pub(crate) async fn set_service_option(state: State<'_, AppState>, kind: ServiceKind, name: String, value: String) -> Result<Vec<manifest::OptionInfo>> {
+    let mut settings = state.settings.write().await;
+    let mut next = settings.clone();
+    kind.manifest().set_option(&mut next, &name, &value)?;
+    next.save(&state.settings_path)?;
+    *settings = next;
+    Ok(kind.manifest().options(&settings))
+}
+
 #[tauri::command]
 pub(crate) async fn restart_service(app: AppHandle, state: State<'_, AppState>, kind: ServiceKind) -> Result<()> {
     let _op = state.ops.lock().await;

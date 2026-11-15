@@ -1,0 +1,45 @@
+schema: 1
+id: redis
+name: Redis
+category: cache
+blurb: Cache and queues
+origin:
+  - { value: "Real Redis from the community redis-windows build (Redis has no official Windows build), with redis-cli", on: [windows] }
+  - { value: "LampRabit's builds of Redis, with redis-cli" }
+homepage: https://redis.io
+license: AGPL-3.0
+source:
+  # Redis has no official Windows build: the community MSYS2 build, newest patch of the
+  # last four lines. LampRabit's own builds elsewhere.
+  - on: [windows]
+    github: redis-windows/redis-windows
+    versions: per-line
+    keep: 4
+    label: redis-windows (community build)
+    assets:
+      windows-x64: { file: "Redis-{version}-Windows-x64-msys2.zip", archive: zip }
+  - { lamprabit: true }
+binary: "redis-server{{exe}}"
+suggests: [phpredisadmin]
+ports:
+  redis: { default: 6379, setting: redis }
+dirs: ["{{data}}"]
+settings:
+  appendonly:
+    label: Write every change to disk
+    description: Append-only file persistence, so a crash loses nothing. Off, Redis saves a snapshot now and then.
+    type: toggle
+    default: false
+run:
+  program: "{{home}}/redis-server{{exe}}"
+  # In the foreground, data kept in data/redis. The Windows build is compiled with MSYS2,
+  # which reads C:/… paths; forward slashes avoid escaping trouble there.
+  args: [--bind, 127.0.0.1, --port, "{{port.redis}}", --dir, "{{data|slash}}", --daemonize, "no", { values: [--appendonly, "yes"], if: setting.appendonly }]
+health: { line: { send: "PING\r\n", expect: "+PONG" } }
+config: "{{data}}"
+connection:
+  url: "redis://127.0.0.1:{{port.redis}}"
+  env:
+    REDIS_HOST: 127.0.0.1
+    REDIS_PASSWORD: "null"
+    REDIS_PORT: "{{port.redis}}"

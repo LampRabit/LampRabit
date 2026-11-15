@@ -210,7 +210,7 @@ export default function Overview() {
     x: () => stack.stop(chosen.length ? chosen : current?.installed ? [current.kind] : []),
     r: () => current?.state === "running" && api.restartService(current.kind).catch(notifyError),
     o: () => current && openAction(current, sites.data, settings.data, navigate)?.run(),
-    c: () => current?.installed && copy(copyText(connection(current.kind, current.port), connMode), `${current.label} ${connMode === "env" ? ".env" : "URL"}`),
+    c: () => current?.installed && copy(copyText(connection(current), connMode), `${current.label} ${connMode === "env" ? ".env" : "URL"}`),
     e: () => setConnMode(connMode === "url" ? "env" : "url"),
     l: () => {
       if (current) useAppStore.getState().showLogs(current.kind);
@@ -594,7 +594,7 @@ function openAction(
 ): { label: string; icon: typeof ExternalLink; run: () => void; always?: boolean } | null {
   const mailUi = settings?.ports.mailUi;
   if (isServer(service.kind)) {
-    return { label: "Open in browser", icon: ExternalLink, run: () => openUrl(connection(service.kind, service.port).url + "/").catch(notifyError) };
+    return { label: "Open in browser", icon: ExternalLink, run: () => openUrl(connection(service).url + "/").catch(notifyError) };
   }
   if (service.kind === "mariadb" || service.kind === "mysql" || service.kind === "postgres") {
     // The tool picked last for this database (the ⋯ menu lists the others).
@@ -711,7 +711,7 @@ function ServiceRow({
   // lives in the device's preferences).
   const [, setToolPick] = useState<string | null>(null);
   const action = openAction(service, sites, settings, navigate);
-  const conn = connection(service.kind, service.port);
+  const conn = connection(service);
   const connValue = copyText(conn, connMode);
 
   const status = !service.installed
@@ -1089,7 +1089,7 @@ function ConnectPanel({ services, onCopy }: { services: ServiceInfo[]; onCopy: (
     setCopied(key);
     setTimeout(() => setCopied((c) => (c === key ? null : c)), 1500);
   };
-  const allEnv = shown.map((s) => `# ${s.label}\n${envText(connection(s.kind, s.port).env)}`).join("\n\n");
+  const allEnv = shown.map((s) => `# ${s.label}\n${envText(connection(s).env)}`).join("\n\n");
 
   return (
     <FoldCard id="home-connect" defaultOpen={false}
@@ -1108,7 +1108,7 @@ function ConnectPanel({ services, onCopy }: { services: ServiceInfo[]; onCopy: (
       >
       <ul className="space-y-1.5">
         {shown.map((s) => {
-          const c = connection(s.kind, s.port);
+          const c = connection(s);
           const text = copyText(c, mode);
           return (
             <li key={s.kind}>

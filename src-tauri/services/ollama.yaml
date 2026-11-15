@@ -1,0 +1,42 @@
+schema: 1
+id: ollama
+name: Ollama
+category: ai
+blurb: Local AI models
+origin: Ollama's own builds from GitHub (a large download). Models go to LampRabit's data folder; the ollama command uses this server
+homepage: https://ollama.com
+license: MIT
+source:
+  github: ollama/ollama
+  assets:
+    windows-x64: { file: ollama-windows-amd64.zip, archive: zip }
+    windows-arm64: { file: ollama-windows-arm64.zip, archive: zip }
+    linux-x64: { file: ollama-linux-amd64.tar.zst, archive: tarzst }
+    linux-arm64: { file: ollama-linux-arm64.tar.zst, archive: tarzst }
+    macos: { file: ollama-darwin.tgz, archive: targz }
+  label: Large download
+  # Linux archives put it in bin/ (next to lib/ollama); Windows and macOS at the top.
+binary:
+  - { value: bin/ollama, on: [linux] }
+  - { value: "ollama{{exe}}" }
+ports:
+  api: { default: 11434, setting: ollama }
+dirs: ["{{data}}"]
+run:
+  program:
+    - { value: "{{home}}/bin/ollama", on: [linux] }
+    - { value: "{{home}}/ollama{{exe}}" }
+  args: [serve]
+  env:
+    OLLAMA_HOST: "127.0.0.1:{{port.api}}"
+    # Its models in data/ollama, not the user's ~/.ollama (a separate Ollama keeps those).
+    OLLAMA_MODELS: "{{data}}/models"
+health: { http: { path: /api/version } }
+behaviour: { heavy: true }
+config: "{{data}}"
+connection:
+  url: "http://127.0.0.1:{{port.api}}"
+  env:
+    OLLAMA_HOST: "http://127.0.0.1:{{port.api}}"
+# An Ollama installed outside LampRabit is used when LampRabit has none (services::system_ollama).
+builtin: [external]

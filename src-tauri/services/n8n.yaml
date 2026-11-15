@@ -1,0 +1,53 @@
+schema: 1
+id: n8n
+name: n8n
+category: ai
+blurb: Workflow automation
+origin: n8n from npm, installed into its own folder and run on NVM's Node.js (24 or newer). Editor at n8n.test
+homepage: https://n8n.io
+license: Sustainable Use License
+source:
+  # The tarball is only checked here; installing runs npm in its folder (runtimes::setup_n8n).
+  npm: n8n
+  checksum: npm
+  label: "Node {node}"
+binary: installed.txt
+needs:
+  - { runtime: node, min: "24", why: n8n runs on Node.js }
+ports:
+  http: { default: 5678, setting: n8n }
+dirs: ["{{data}}"]
+run:
+  program: "{{needs.node.bin}}/node{{exe}}"
+  args: ["{{home}}/node_modules/n8n/bin/n8n", start]
+  cwd: "{{data}}"
+  path: ["{{needs.node.bin}}"]
+  env:
+    N8N_PORT: "{{port.http}}"
+    N8N_LISTEN_ADDRESS: 127.0.0.1
+    N8N_USER_FOLDER: "{{data}}"
+    # Links and webhooks use its .test address, through the web server.
+    N8N_EDITOR_BASE_URL: "{{ui.url}}"
+    WEBHOOK_URL: "{{ui.url}}"
+    N8N_SECURE_COOKIE: "false"
+    # Requests come through LampRabit's web server: trust its X-Forwarded-* headers, so n8n
+    # sees https://n8n.test (its live editor checks the origin).
+    N8N_PROXY_HOPS: "1"
+    N8N_DIAGNOSTICS_ENABLED: "false"
+    N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+    # Room for larger workflows than Node's default heap allows.
+    NODE_OPTIONS: --max-old-space-size=4096
+    # Task runners need extra processes (and a Python venv for Python code nodes) that
+    # drift out of sync on a local install.
+    N8N_RUNNERS_ENABLED: "false"
+    # Binary data (files in workflows) on disk instead of in memory.
+    N8N_DEFAULT_BINARY_DATA_MODE: filesystem
+    N8N_PAYLOAD_SIZE_MAX: "256"
+health: { http: { path: /healthz } }
+behaviour: { heavy: true, slow: true }
+config: "{{data}}"
+ui: { domain: n8n, port: http }
+connection:
+  url: "http://127.0.0.1:{{port.http}}"
+  env:
+    N8N_URL: "http://127.0.0.1:{{port.http}}"

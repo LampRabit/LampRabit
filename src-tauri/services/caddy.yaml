@@ -1,0 +1,22 @@
+schema: 1
+id: caddy
+name: Caddy
+category: web
+blurb: Serves your sites
+origin: Official Caddy releases from GitHub; uses LampRabit's certificates and PHP, not its own
+homepage: https://caddyserver.com
+license: Apache-2.0
+source:
+  github: caddyserver/caddy
+  assets:
+    windows-x64: { file: "caddy_{version}_windows_amd64.zip", archive: zip }
+    windows-arm64: { file: "caddy_{version}_windows_arm64.zip", archive: zip }
+    linux-x64: { file: "caddy_{version}_linux_amd64.tar.gz", archive: targz }
+    linux-arm64: { file: "caddy_{version}_linux_arm64.tar.gz", archive: targz }
+    macos-x64: { file: "caddy_{version}_mac_amd64.tar.gz", archive: targz }
+    macos-arm64: { file: "caddy_{version}_mac_arm64.tar.gz", archive: targz }
+binary: "caddy{{exe}}"
+health: { http: { path: / } }
+log: caddy-error.log
+config: "{{etc}}/Caddyfile"
+builtin: [ports, prepare, launch]

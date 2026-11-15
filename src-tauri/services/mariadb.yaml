@@ -1,0 +1,36 @@
+# my.ini, the data folder and its version guard are written in Rust (configs::write_mariadb,
+# init_mariadb_data), as are the mysql shims and the default database that depend on it.
+schema: 1
+id: mariadb
+name: MariaDB
+category: databases
+blurb: Stores your data
+origin:
+  - { value: "LampRabit's builds of MariaDB's LTS releases (MariaDB publishes none for macOS)", on: [macos] }
+  - { value: Official MariaDB releases }
+homepage: https://mariadb.org
+license: GPL-2.0
+source: { builtin: true }
+binary: "bin/mariadbd{{exe}}"
+suggests: [phpmyadmin, adminer]
+ports:
+  # `mysql` predates MySQL support: it's MariaDB's.
+  mysql: { default: 3306, setting: mysql }
+run:
+  program: "{{home}}/bin/mariadbd{{exe}}"
+  # --defaults-file must be the first argument.
+  args: ["--defaults-file={{etc}}/my.ini"]
+stop:
+  command: ["{{home}}/bin/mariadb-admin{{exe}}", "--defaults-file={{etc}}/my.ini", --user=root, shutdown]
+health: { mysql: {} }
+log: mariadb-error.log
+config: "{{etc}}/my.ini"
+connection:
+  url: "mariadb://root@127.0.0.1:{{port.mysql}}"
+  env:
+    DB_CONNECTION: mariadb
+    DB_HOST: 127.0.0.1
+    DB_PORT: "{{port.mysql}}"
+    DB_USERNAME: root
+    DB_PASSWORD: ""
+builtin: [prepare]

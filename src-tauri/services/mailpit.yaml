@@ -1,0 +1,47 @@
+schema: 1
+id: mailpit
+name: Mailpit
+category: tools
+blurb: Catches outgoing mail
+origin: Local SMTP server with a web inbox
+homepage: https://mailpit.axllent.org
+license: MIT
+source:
+  github: axllent/mailpit
+  assets:
+    windows-x64: { file: mailpit-windows-amd64.zip, archive: zip }
+    windows-arm64: { file: mailpit-windows-arm64.zip, archive: zip }
+    linux-x64: { file: mailpit-linux-amd64.tar.gz, archive: targz }
+    linux-arm64: { file: mailpit-linux-arm64.tar.gz, archive: targz }
+    macos-x64: { file: mailpit-darwin-amd64.tar.gz, archive: targz }
+    macos-arm64: { file: mailpit-darwin-arm64.tar.gz, archive: targz }
+binary: "mailpit{{exe}}"
+ports:
+  smtp: { default: 1025, setting: mailSmtp, label: SMTP }
+  ui: { default: 8025, setting: mailUi, label: Web inbox }
+dirs: ["{{data}}"]
+settings:
+  max_messages:
+    label: Messages kept
+    description: The oldest messages are deleted beyond this; 0 keeps them all.
+    type: number
+    default: 500
+    min: 0
+    max: 100000
+run:
+  program: "{{home}}/mailpit{{exe}}"
+  # Frameworks often send credentials even locally; accept anything.
+  args: [--smtp, "127.0.0.1:{{port.smtp}}", --listen, "127.0.0.1:{{port.ui}}", --database, "{{data}}/mailpit.db", --smtp-auth-accept-any, --smtp-auth-allow-insecure, --max, "{{setting.max_messages}}"]
+# Its main port is SMTP; the health endpoint is on the web inbox's.
+health: { http: { port: ui, path: /livez } }
+config: "{{data}}"
+ui: { domain: mail, port: ui }
+connection:
+  url: "smtp://127.0.0.1:{{port.smtp}}"
+  env:
+    MAIL_MAILER: smtp
+    MAIL_HOST: 127.0.0.1
+    MAIL_PORT: "{{port.smtp}}"
+    MAIL_USERNAME: "null"
+    MAIL_PASSWORD: "null"
+    MAIL_ENCRYPTION: "null"

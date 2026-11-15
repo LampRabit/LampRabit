@@ -1,0 +1,59 @@
+schema: 1
+id: neo4j
+name: Neo4j
+category: databases
+blurb: Graph database
+origin: Neo4j Community from dist.neo4j.org (checksum checked); runs on Java 21+, Neo4j Browser at neo4j.test
+homepage: https://neo4j.com
+license: GPL-3.0
+source:
+  # Neo4j tags its releases on GitHub; the archives are on dist.neo4j.org with a .sha256.
+  github: neo4j/neo4j
+  versions: newest-tag
+  url: "https://dist.neo4j.org/{file}"
+  checksum: { sha256: "{url}.sha256" }
+  label: Community
+  assets:
+    windows: { file: "neo4j-community-{version}-windows.zip", archive: zip }
+    unix: { file: "neo4j-community-{version}-unix.tar.gz", archive: targz }
+binary: "bin/neo4j{{script}}"
+needs:
+  - { runtime: java, min: "21", why: Neo4j runs on the active Java }
+ports:
+  http: { default: 7474, setting: neo4jHttp, label: Browser }
+  bolt: { default: 7687, setting: neo4jBolt, label: Bolt }
+dirs: ["{{data}}", "{{logs}}", "{{tmp}}"]
+files:
+  # The install's neo4j.conf without the settings LampRabit sets, then LampRabit's: only on
+  # 127.0.0.1, plain HTTP and no login (like the other local databases).
+  - path: neo4j.conf
+    merge:
+      from: "{{home}}/conf/neo4j.conf"
+      set:
+        server.default_listen_address: 127.0.0.1
+        server.bolt.listen_address: ":{{port.bolt}}"
+        server.http.listen_address: ":{{port.http}}"
+        server.https.enabled: "false"
+        dbms.security.auth_enabled: "false"
+        server.directories.data: "{{data|slash}}"
+        server.directories.logs: "{{logs|slash}}"
+        server.directories.run: "{{tmp|slash}}"
+  # Its logging configs are read from the config folder too.
+  - { copy: "{{home}}/conf/server-logs.xml", optional: true }
+  - { copy: "{{home}}/conf/user-logs.xml", optional: true }
+run:
+  # Its own launcher in console mode (in the foreground).
+  program: "{{home}}/bin/neo4j{{script}}"
+  args: [console]
+  env:
+    JAVA_HOME: "{{needs.java.home}}"
+    NEO4J_HOME: "{{home}}"
+    NEO4J_CONF: "{{etc}}"
+health: { http: { path: / } }
+behaviour: { heavy: true, slow: true }
+config: "{{etc}}/neo4j.conf"
+ui: { domain: neo4j, port: http }
+connection:
+  url: "http://127.0.0.1:{{port.http}}"
+  env:
+    NEO4J_HTTP_URL: "http://127.0.0.1:{{port.http}}"

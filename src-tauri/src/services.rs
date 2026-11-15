@@ -14,6 +14,7 @@ use crate::{
     config::Server,
     configs,
     diagnose::{self, Probe, Problem},
+    manifest::{self, Check, Hook, Manifest},
     php::{self, PhpPools, PoolPlan},
     error::{Error, Result},
     logs::{self, Level},
@@ -71,29 +72,6 @@ pub enum ServiceKind {
     Rabbitmq,
 }
 
-/// What every service has; the rest (launch, config, probes) is per service below.
-struct Def {
-    id: &'static str,
-    label: &'static str,
-    /// The service's own log in logs/, next to `<id>-output.log`.
-    log: &'static str,
-    /// How the health checks and the start-up wait ask whether it answers.
-    check: Check,
-    /// Takes a while to come up: it stays Starting until `check` passes, so nothing
-    /// (the UI, Start all, tools) treats it as ready while it's still loading.
-    slow: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Check {
-    /// An HTTP GET of this path; any answer counts (a 404 for / is fine).
-    Http(&'static str),
-    Tcp,
-    Mysql,
-    Postgres,
-    /// Send a line, expect a reply starting with this text.
-    Line(&'static [u8], &'static str),
-}
 
 impl ServiceKind {
     pub fn all() -> Vec<Self> {
@@ -122,46 +100,22 @@ impl ServiceKind {
         }
     }
 
-    fn def(self) -> Def {
-        use Check::*;
-        let (id, label, log, check, slow) = match self {
-            Self::Apache => ("apache", "Apache", "apache-error.log", Http("/"), false),
-            Self::Nginx => ("nginx", "Nginx", "nginx-error.log", Http("/"), false),
-            Self::Caddy => ("caddy", "Caddy", "caddy-error.log", Http("/"), false),
-            Self::Frankenphp => ("frankenphp", "FrankenPHP", "frankenphp-error.log", Http("/"), false),
-            // A 404 for / is fine: only apps under their own Host are deployed.
-            Self::Tomcat => ("tomcat", "Tomcat", "tomcat-output.log", Http("/"), false),
-            Self::Postgres => ("postgres", "PostgreSQL", "postgres-output.log", Postgres, false),
-            Self::Pgadmin => ("pgadmin", "pgAdmin", "pgadmin.log", Http("/misc/ping"), true),
-            Self::Mongodb => ("mongodb", "MongoDB", "mongodb-output.log", Tcp, false),
-            Self::Clickhouse => ("clickhouse", "ClickHouse", "clickhouse-output.log", Http("/ping"), false),
-            Self::Neo4j => ("neo4j", "Neo4j", "neo4j-output.log", Http("/"), true),
-            Self::Meilisearch => ("meilisearch", "Meilisearch", "meilisearch-output.log", Http("/health"), false),
-            Self::Typesense => ("typesense", "Typesense", "typesense-output.log", Http("/health"), false),
-            Self::Rustfs => ("rustfs", "RustFS", "rustfs-output.log", Http("/health"), false),
-            Self::Ollama => ("ollama", "Ollama", "ollama-output.log", Http("/api/version"), false),
-            Self::Minio => ("minio", "MinIO", "minio-output.log", Http("/minio/health/live"), false),
-            Self::Elasticsearch => ("elasticsearch", "Elasticsearch", "elasticsearch-output.log", Http("/"), true),
-            Self::Opensearch => ("opensearch", "OpenSearch", "opensearch-output.log", Http("/"), true),
-            Self::N8n => ("n8n", "n8n", "n8n-output.log", Http("/healthz"), true),
-            Self::Rabbitmq => ("rabbitmq", "RabbitMQ", "rabbitmq-output.log", Tcp, true),
-            Self::Mariadb => ("mariadb", "MariaDB", "mariadb-error.log", Mysql, false),
-            Self::Mysql => ("mysql", "MySQL", "mysql-error.log", Mysql, false),
-            Self::Mailpit => ("mailpit", "Mailpit", "mailpit-output.log", Http("/livez"), false),
-            Self::Redis => ("redis", "Redis", "redis-output.log", Line(b"PING\r\n", "+PONG"), false),
-            Self::Memcached => ("memcached", "Memcached", "memcached-output.log", Line(b"version\r\n", "VERSION"), false),
-        };
-        Def { id, label, log, check, slow }
+    /// Its manifest (src-tauri/services/<id>.yaml): label, ports, health check, launch.
+    pub fn manifest(self) -> &'static Manifest {
+        manifest::get(self.id()).unwrap_or_else(|| panic!("no manifest for {}", self.id()))
+    }
+
+    /// Takes a while to come up: it stays Starting until its health check passes, so
+    /// nothing (the UI, Start all, tools) treats it as ready while it's still loading.
+    fn slow(self) -> bool {
+        self.manifest().behaviour.slow
     }
 
     /// Services that need a lot of memory (a JVM, a model server, Erlang) or several seconds
     /// to start: "Start all", the tray and start-on-launch leave them out; they start from
     /// their own card or a stack profile that lists them.
     pub fn heavy(self) -> bool {
-        matches!(
-            self,
-            ServiceKind::Elasticsearch | ServiceKind::Opensearch | ServiceKind::Clickhouse | ServiceKind::Neo4j | ServiceKind::Ollama | ServiceKind::N8n | ServiceKind::Rabbitmq
-        )
+        self.manifest().behaviour.heavy
     }
 
     /// Web servers only run when Settings → Web server includes them.
@@ -170,85 +124,85 @@ impl ServiceKind {
     }
 
     pub fn id(self) -> &'static str {
-        self.def().id
+        match self {
+            Self::Apache => "apache",
+            Self::Nginx => "nginx",
+            Self::Caddy => "caddy",
+            Self::Frankenphp => "frankenphp",
+            Self::Tomcat => "tomcat",
+            Self::Postgres => "postgres",
+            Self::Pgadmin => "pgadmin",
+            Self::Mongodb => "mongodb",
+            Self::Clickhouse => "clickhouse",
+            Self::Neo4j => "neo4j",
+            Self::Meilisearch => "meilisearch",
+            Self::Typesense => "typesense",
+            Self::Rustfs => "rustfs",
+            Self::Ollama => "ollama",
+            Self::Minio => "minio",
+            Self::Elasticsearch => "elasticsearch",
+            Self::Opensearch => "opensearch",
+            Self::N8n => "n8n",
+            Self::Rabbitmq => "rabbitmq",
+            Self::Mariadb => "mariadb",
+            Self::Mysql => "mysql",
+            Self::Mailpit => "mailpit",
+            Self::Redis => "redis",
+            Self::Memcached => "memcached",
+        }
     }
 
     pub fn label(self) -> &'static str {
-        self.def().label
+        &self.manifest().name
     }
 
     /// Each service runs its own runtime, under the same id.
     fn runtime(self) -> &'static str {
-        self.def().id
+        self.id()
     }
 
     fn version(self, settings: &Settings) -> Option<String> {
         settings.versions.get(self.runtime()).cloned()
     }
 
+    /// What "Open config" opens: the manifest's `config` (its config file, or the data
+    /// folder for services configured on the command line).
     pub fn config_path(self, settings: &Settings, layout: &Layout) -> PathBuf {
-        match self {
-            Self::Apache => layout.etc("apache").join("httpd.conf"),
-            Self::Nginx => layout.etc("nginx").join("nginx.conf"),
-            Self::Caddy => layout.etc("caddy").join("Caddyfile"),
-            Self::Frankenphp => layout.etc("frankenphp").join("Caddyfile"),
-            Self::Tomcat => configs::tomcat_base(layout).join("conf").join("server.xml"),
-            // Configured on the command line; its data folder.
-            Self::Postgres => configs::postgres_data(settings, layout),
-            Self::Pgadmin => layout.data("pgadmin"),
-            Self::Mongodb => configs::mongodb_data(settings, layout),
-            Self::Clickhouse => layout.etc("clickhouse").join("config.xml"),
-            Self::Neo4j => layout.etc("neo4j").join("neo4j.conf"),
-            // Configured on the command line; their data folders.
-            Self::Meilisearch | Self::Typesense => layout.data(self.def().id),
-            Self::Rustfs => settings.storage_dir(layout, "rustfs"),
-            Self::Ollama => layout.data("ollama"),
-            Self::Minio => settings.storage_dir(layout, "minio"),
-            Self::Elasticsearch => layout.etc("elasticsearch").join("elasticsearch.yml"),
-            Self::Opensearch => layout.etc("opensearch").join("opensearch.yml"),
-            Self::N8n => layout.data("n8n"),
-            Self::Rabbitmq => layout.etc("rabbitmq").join("rabbitmq.conf"),
-            Self::Mariadb => layout.etc("mariadb").join("my.ini"),
-            Self::Mysql => layout.etc("mysql").join("my.ini"),
-            // Configured on the command line; their data folders.
-            Self::Mailpit => layout.data("mailpit"),
-            Self::Redis => layout.data("redis"),
-            Self::Memcached => layout.data("memcached"),
+        let m = self.manifest();
+        match m.config.as_ref() {
+            Some(config) => manifest::Ctx::any(m, settings, layout).text(config).ok().flatten().map(PathBuf::from).unwrap_or_else(|| layout.etc(self.id())),
+            None => match self {
+                Self::Tomcat => configs::tomcat_base(layout).join("conf").join("server.xml"),
+                _ => layout.etc(self.id()),
+            },
         }
     }
 
     /// The service's own error log (stdout/stderr go to `<id>-output.log`).
     pub fn log_path(self, layout: &Layout) -> PathBuf {
-        layout.logs().join(self.def().log)
+        layout.logs().join(self.manifest().log_file())
     }
 
+    /// The main port: the web servers' come from Settings → Web server (which one is
+    /// primary), the others' from their manifest.
     fn port(self, settings: &Settings) -> u16 {
-        match self {
-            Self::Apache => settings.server_ports(Server::Apache).0,
-            Self::Nginx => settings.server_ports(Server::Nginx).0,
-            Self::Caddy => settings.server_ports(Server::Caddy).0,
-            Self::Frankenphp => settings.server_ports(Server::Frankenphp).0,
-            Self::Tomcat => settings.ports.tomcat_http,
-            Self::Postgres => settings.ports.postgres,
-            Self::Pgadmin => settings.ports.pgadmin,
-            Self::Mongodb => settings.ports.mongodb,
-            Self::Clickhouse => settings.ports.clickhouse_http,
-            Self::Neo4j => settings.ports.neo4j_http,
-            Self::Meilisearch => settings.ports.meilisearch,
-            Self::Typesense => settings.ports.typesense,
-            Self::Rustfs => settings.ports.rustfs,
-            Self::Ollama => settings.ports.ollama,
-            Self::Minio => settings.ports.minio,
-            Self::Elasticsearch => settings.ports.elasticsearch,
-            Self::Opensearch => settings.ports.opensearch,
-            Self::N8n => settings.ports.n8n,
-            Self::Rabbitmq => settings.ports.rabbitmq,
-            Self::Mariadb => settings.ports.mysql,
-            Self::Mysql => settings.ports.mysql_server,
-            Self::Mailpit => settings.ports.mail_smtp,
-            Self::Redis => settings.ports.redis,
-            Self::Memcached => settings.ports.memcached,
+        match self.web_server() {
+            Some(server) => settings.server_ports(server).0,
+            None => {
+                let m = self.manifest();
+                m.main_port().and_then(|p| m.port(settings, p)).unwrap_or_default()
+            }
         }
+    }
+
+    /// How apps connect to it: a URL and .env lines.
+    pub fn connection(self, settings: &Settings, layout: &Layout) -> Option<manifest::ConnectionInfo> {
+        if self.web_server().is_some() {
+            let port = self.port(settings);
+            let url = format!("http://localhost{}", if port == 80 { String::new() } else { format!(":{port}") });
+            return Some(manifest::ConnectionInfo { env: vec![("APP_URL".into(), url.clone())], url });
+        }
+        manifest::connection(self.id(), settings, layout)
     }
 
     /// The port the service listens on (its main one), for checks outside the supervisor.
@@ -261,16 +215,17 @@ impl ServiceKind {
         matches!(self.probe(settings, client).await, Probe::Ok)
     }
 
-    /// Asks the service whether it answers, the way `def().check` says.
+    /// Asks the service whether it answers, the way its manifest's `health` says (on the
+    /// port it names: Mailpit's main port is SMTP, its health endpoint the web inbox's).
     async fn probe(self, settings: &Settings, client: &reqwest::Client) -> Probe {
-        // Mailpit's main port is SMTP; its health endpoint is on the web UI's.
-        let port = if self == Self::Mailpit { settings.ports.mail_ui } else { self.port(settings) };
-        match self.def().check {
-            Check::Http(path) => diagnose::probe_http(client, &format!("http://127.0.0.1:{port}{path}")).await,
-            Check::Tcp => diagnose::probe_tcp(port).await,
-            Check::Mysql => diagnose::probe_mysql(port).await,
-            Check::Postgres => diagnose::probe_postgres(port).await,
-            Check::Line(send, expect) => diagnose::probe_line(port, send, expect).await,
+        let m = self.manifest();
+        let port = |name: &str| if self.web_server().is_some() || name.is_empty() { self.port(settings) } else { m.port(settings, name).unwrap_or_default() };
+        match m.check_kind() {
+            Check::Http(p, path) => diagnose::probe_http(client, &format!("http://127.0.0.1:{}{path}", port(&p))).await,
+            Check::Tcp(p) => diagnose::probe_tcp(port(&p)).await,
+            Check::Mysql(p) => diagnose::probe_mysql(port(&p)).await,
+            Check::Postgres(p) => diagnose::probe_postgres(port(&p)).await,
+            Check::Line(p, send, expect) => diagnose::probe_line(port(&p), send.as_bytes(), &expect).await,
         }
     }
 }
@@ -307,6 +262,8 @@ pub struct ServiceInfo {
     pub external: bool,
     /// Left out of "Start all" (`ServiceKind::heavy`).
     pub heavy: bool,
+    /// How apps connect: a URL and .env lines (from its manifest).
+    pub connection: Option<manifest::ConnectionInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -340,13 +297,6 @@ struct LaunchSpec {
     /// `nginx -t`, `caddy validate`.
     test: Option<Vec<String>>,
 }
-
-/// Typesense's API key: it requires one, and this only listens on 127.0.0.1.
-pub const TYPESENSE_KEY: &str = "lamprabit";
-/// Object storage's access key and secret (RustFS, MinIO): local only, shown in the
-/// connection details.
-pub const STORAGE_KEY: &str = "lamprabit";
-pub const STORAGE_SECRET: &str = "lamprabit-secret";
 
 /// Caddy keeps state (autosave.json, certificates it would otherwise issue) in the user's
 /// config and data folders; LampRabit's stays under tmp/<id>, removed on uninstall.
@@ -388,10 +338,115 @@ fn answers(port: u16) -> bool {
 }
 
 fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
-    if kind == ServiceKind::Ollama
+    let m = kind.manifest();
+    if m.uses(Hook::External)
+        && kind == ServiceKind::Ollama
         && let Some(spec) = system_ollama(settings) {
             return Ok(spec);
         }
+    if m.uses(Hook::Launch) {
+        return builtin_launch_spec(kind, settings, layout);
+    }
+    // A half-finished install (n8n's npm step, an interrupted download) has no marker yet.
+    if let Some(binary) = manifest::Ctx::new(m, settings, layout)?.binary()
+        && !binary.exists() {
+            return Err(Error::msg(format!("{}'s install isn't complete (it may still be installing). Start it once it has finished, or reinstall it on the Services page.", m.name)));
+        }
+    manifest_spec(kind, settings, layout)
+}
+
+/// The command line of a service from its manifest's `run` and `stop`, with what it
+/// `needs` found and checked first.
+fn manifest_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
+    let m: &'static Manifest = kind.manifest();
+    let mut ctx = manifest::Ctx::new(m, settings, layout)?;
+    for need in m.needs.iter().filter(|n| manifest::matches(&n.on)) {
+        let (home, bin) = need_home(m, need, settings, layout)?;
+        ctx.set(format!("needs.{}.home", need.runtime), home.to_string_lossy());
+        ctx.set(format!("needs.{}.bin", need.runtime), bin.to_string_lossy());
+    }
+    for need in m.system_needs.iter().filter(|n| manifest::matches(&n.on)) {
+        if !std::env::var_os("PATH").is_some_and(|p| crate::apps::on_path(&need.command, &p)) {
+            return Err(Error::msg(need.hint.clone()));
+        }
+    }
+    if m.ui.is_some() {
+        let url = sites::tools(settings, layout).into_iter().find(|t| t.tool == Some(kind.id())).map(|t| t.url).unwrap_or_default();
+        ctx.set("ui.url", url);
+    }
+    let run = m.run.as_ref().ok_or_else(|| Error::msg(format!("{}'s manifest has no run section", m.name)))?;
+    let program = ctx.pick(&run.program).ok_or_else(|| Error::msg(format!("{} has no program for {}", m.name, manifest::platform())))?;
+    let stop_cmd = match &m.stop {
+        Some(stop) => {
+            let other = stop.if_installed.as_ref().map(|id| settings.versions.get(id).map(|v| (id, layout.bin(id, v))));
+            match other {
+                Some(None) => None,
+                found => {
+                    if let Some(Some((id, home))) = found {
+                        ctx.set(format!("runtime.{id}.home"), home.to_string_lossy());
+                    }
+                    let mut command = ctx.args(&stop.command)?.into_iter();
+                    let program = PathBuf::from(command.next().unwrap_or_default());
+                    // A runtime that's set active but whose files are gone can't stop anything.
+                    (stop.if_installed.is_none() || program.exists()).then(|| (program, command.collect()))
+                }
+            }
+        }
+        None => None,
+    };
+    let env = run.env.iter().filter_map(|(k, v)| ctx.pick(v).map(|v| ctx.render(v).map(|v| (k.as_str(), v)))).collect::<Result<_>>()?;
+    Ok(LaunchSpec {
+        program: PathBuf::from(ctx.render(program)?),
+        args: ctx.args(&run.args)?,
+        cwd: match run.cwd.as_ref().and_then(|c| ctx.pick(c)) {
+            Some(cwd) => PathBuf::from(ctx.render(cwd)?),
+            None => ctx.home(),
+        },
+        path_prepend: ctx.args(&run.path)?.into_iter().map(PathBuf::from).collect(),
+        stop_cmd,
+        env,
+        test: None,
+    })
+}
+
+/// The folder of a runtime a service runs on (its home, and where its programs are), when
+/// it's installed in a version that works.
+fn need_home(m: &Manifest, need: &manifest::Need, settings: &Settings, layout: &Layout) -> Result<(PathBuf, PathBuf)> {
+    let label = match need.runtime.as_str() {
+        "java" => "Java",
+        "erlang" => "Erlang",
+        "node" => "Node.js",
+        "python" => "Python",
+        other => other,
+    };
+    let min = need.min.as_deref();
+    let wanted = min.map(|v| format!("{label} {v}")).unwrap_or_else(|| label.to_string());
+    // Node.js is NVM's, not a LampRabit runtime.
+    if need.runtime == "node" {
+        let major = min.and_then(|v| crate::version::numbers(v).first().copied()).unwrap_or(0) as u32;
+        let bin = runtimes::n8n_node(major)?;
+        return Ok((bin.clone(), bin));
+    }
+    let version = settings
+        .versions
+        .get(&need.runtime)
+        .ok_or_else(|| Error::msg(format!("{}. Install {wanted} on the Services page first.", need.why)))?;
+    if let Some(min) = min {
+        let want = crate::version::numbers(min);
+        let have = crate::version::numbers(version);
+        if have.iter().take(want.len()).cloned().collect::<Vec<_>>() < want {
+            return Err(Error::msg(format!("{} needs {label} {min} or newer, and the active {label} is {version}. Install {wanted} on the Services page.", m.name)));
+        }
+    }
+    let home = layout.bin(&need.runtime, version);
+    let bin = if need.runtime == "python" && cfg!(windows) { home.clone() } else { home.join("bin") };
+    Ok((home, bin))
+}
+
+/// The command lines of the services whose manifest says `builtin: [launch]`: the web
+/// servers (their config test and admin API), Tomcat (Java's classpath), PostgreSQL (the
+/// elevated case) and pgAdmin (its package folder is found at start).
+fn builtin_launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
     let version = kind
         .version(settings)
         .ok_or_else(|| Error::msg(format!("{} is not installed", kind.label())))?;
@@ -536,211 +591,6 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 path_prepend: vec![],
             }
         }
-        ServiceKind::Mongodb => {
-            let port = settings.ports.mongodb.to_string();
-            // A clean shutdown through mongosh when it's installed; otherwise the process is
-            // ended and MongoDB recovers from its journal on the next start.
-            let stop_cmd = settings.versions.get("mongosh").map(|v| layout.bin("mongosh", v).join("bin").join(exe("mongosh"))).filter(|p| p.exists()).map(|mongosh| {
-                (mongosh, vec!["--quiet".into(), "--port".into(), port.clone(), "--eval".into(), "try { db.getSiblingDB('admin').shutdownServer() } catch (e) {}".into()])
-            });
-            LaunchSpec {
-                program: home.join("bin").join(exe("mongod")),
-                args: vec!["--dbpath".into(), path(configs::mongodb_data(settings, layout)), "--port".into(), port, "--bind_ip".into(), "127.0.0.1".into()],
-                test: None,
-                stop_cmd,
-                cwd: home,
-                path_prepend: vec![],
-                env: vec![],
-            }
-        }
-        ServiceKind::Clickhouse => LaunchSpec {
-            program: home.join("usr").join("bin").join("clickhouse"),
-            args: vec!["server".into(), format!("--config-file={}", path(layout.etc("clickhouse").join("config.xml")))],
-            test: None,
-            stop_cmd: None,
-            cwd: layout.data("clickhouse"),
-            path_prepend: vec![],
-            env: vec![],
-        },
-        // Neo4j's own launcher in console mode (in the foreground), on the active Java.
-        ServiceKind::Neo4j => {
-            let java_home = configs::neo4j_java(settings, layout)?;
-            LaunchSpec {
-                program: home.join("bin").join(if cfg!(windows) { "neo4j.bat" } else { "neo4j" }),
-                args: vec!["console".into()],
-                test: None,
-                stop_cmd: None,
-                cwd: home.clone(),
-                path_prepend: vec![],
-                env: vec![("JAVA_HOME", path(java_home)), ("NEO4J_HOME", path(home.clone())), ("NEO4J_CONF", path(layout.etc("neo4j")))],
-            }
-        }
-        // Development mode: no master key, and its search preview at the root URL.
-        ServiceKind::Meilisearch => LaunchSpec {
-            program: home.join(exe("meilisearch")),
-            args: vec![
-                "--db-path".into(),
-                path(layout.data("meilisearch").join("data.ms")),
-                "--dump-dir".into(),
-                path(layout.data("meilisearch").join("dumps")),
-                "--http-addr".into(),
-                format!("127.0.0.1:{}", settings.ports.meilisearch),
-                "--env".into(),
-                "development".into(),
-                "--no-analytics".into(),
-            ],
-            test: None,
-            stop_cmd: None,
-            cwd: layout.data("meilisearch"),
-            path_prepend: vec![],
-            env: vec![],
-        },
-        // Typesense insists on an API key; a fixed local one, shown in the connection details.
-        ServiceKind::Typesense => LaunchSpec {
-            program: home.join("typesense-server"),
-            args: vec![
-                format!("--data-dir={}", path(layout.data("typesense"))),
-                format!("--api-key={}", TYPESENSE_KEY),
-                "--listen-address=127.0.0.1".into(),
-                format!("--api-port={}", settings.ports.typesense),
-                "--enable-cors".into(),
-            ],
-            test: None,
-            stop_cmd: None,
-            cwd: layout.data("typesense"),
-            path_prepend: vec![],
-            env: vec![],
-        },
-        ServiceKind::Rustfs => LaunchSpec {
-            program: home.join(exe("rustfs")),
-            args: vec![],
-            test: None,
-            stop_cmd: None,
-            cwd: home.clone(),
-            path_prepend: vec![],
-            env: vec![
-                ("RUSTFS_VOLUMES", path(settings.storage_dir(layout, "rustfs"))),
-                ("RUSTFS_ADDRESS", format!("127.0.0.1:{}", settings.ports.rustfs)),
-                ("RUSTFS_CONSOLE_ENABLE", "true".into()),
-                ("RUSTFS_CONSOLE_ADDRESS", format!("127.0.0.1:{}", settings.ports.rustfs_console)),
-                ("RUSTFS_ACCESS_KEY", STORAGE_KEY.into()),
-                ("RUSTFS_SECRET_KEY", STORAGE_SECRET.into()),
-            ],
-        },
-        // Its models in data/ollama, not the user's ~/.ollama (a separate Ollama keeps those).
-        ServiceKind::Ollama => LaunchSpec {
-            program: home.join(runtimes::Runtime::Ollama.marker()),
-            args: vec!["serve".into()],
-            test: None,
-            stop_cmd: None,
-            cwd: home.clone(),
-            path_prepend: vec![],
-            env: vec![
-                ("OLLAMA_HOST", format!("127.0.0.1:{}", settings.ports.ollama)),
-                ("OLLAMA_MODELS", path(layout.data("ollama").join("models"))),
-            ],
-        },
-        ServiceKind::Minio => LaunchSpec {
-            program: home.join(exe("minio")),
-            args: vec![
-                "server".into(),
-                path(settings.storage_dir(layout, "minio")),
-                "--address".into(),
-                format!("127.0.0.1:{}", settings.ports.minio),
-                "--console-address".into(),
-                format!("127.0.0.1:{}", settings.ports.minio_console),
-            ],
-            test: None,
-            stop_cmd: None,
-            cwd: home.clone(),
-            path_prepend: vec![],
-            env: vec![("MINIO_ROOT_USER", STORAGE_KEY.into()), ("MINIO_ROOT_PASSWORD", STORAGE_SECRET.into()), ("MINIO_UPDATE", "off".into())],
-        },
-        // Their own launchers, on their bundled Java, with LampRabit's config folder.
-        ServiceKind::Elasticsearch | ServiceKind::Opensearch => {
-            let id = kind.id();
-            let conf_var = if kind == ServiceKind::Opensearch { "OPENSEARCH_PATH_CONF" } else { "ES_PATH_CONF" };
-            LaunchSpec {
-                program: home.join(runtimes::Runtime::from_id(id).map(|r| r.marker()).unwrap_or_default()),
-                args: vec![],
-                test: None,
-                stop_cmd: None,
-                cwd: home.clone(),
-                path_prepend: vec![],
-                env: vec![(conf_var, path(layout.etc(id)))],
-            }
-        }
-        ServiceKind::N8n => {
-            if !home.join(runtimes::Runtime::N8n.marker()).exists() {
-                return Err(Error::msg("n8n is still being installed (npm is fetching its packages); start it once that's finished."));
-            }
-            let bin = runtimes::n8n_node(24)?;
-            let url = sites::tools(settings, layout).into_iter().find(|t| t.tool == Some("n8n")).map(|t| t.url).unwrap_or_default();
-            LaunchSpec {
-                program: bin.join(exe("node")),
-                args: vec![path(home.join("node_modules").join("n8n").join("bin").join("n8n")), "start".into()],
-                test: None,
-                stop_cmd: None,
-                cwd: layout.data("n8n"),
-                path_prepend: vec![bin.clone()],
-                env: vec![
-                    ("N8N_PORT", settings.ports.n8n.to_string()),
-                    ("N8N_LISTEN_ADDRESS", "127.0.0.1".into()),
-                    ("N8N_USER_FOLDER", path(layout.data("n8n"))),
-                    // Links and webhooks use its .test address, through the web server.
-                    ("N8N_EDITOR_BASE_URL", url.clone()),
-                    ("WEBHOOK_URL", url),
-                    ("N8N_SECURE_COOKIE", "false".into()),
-                    // Requests come through LampRabit's web server: trust its X-Forwarded-*
-                    // headers, so n8n sees https://n8n.test (its live editor checks the origin).
-                    ("N8N_PROXY_HOPS", "1".into()),
-                    ("N8N_DIAGNOSTICS_ENABLED", "false".into()),
-                    ("N8N_VERSION_NOTIFICATIONS_ENABLED", "false".into()),
-                    // Room for larger workflows than Node's default heap allows.
-                    ("NODE_OPTIONS", "--max-old-space-size=4096".into()),
-                    // Task runners need extra processes (and a Python venv for Python
-                    // code nodes) that drift out of sync on a local install.
-                    ("N8N_RUNNERS_ENABLED", "false".into()),
-                    // Binary data (files in workflows) on disk instead of in memory.
-                    ("N8N_DEFAULT_BINARY_DATA_MODE", "filesystem".into()),
-                    ("N8N_PAYLOAD_SIZE_MAX", "256".into()),
-                ],
-            }
-        }
-        // RabbitMQ's own launcher. On Windows it runs on LampRabit's Erlang (ERLANG_HOME);
-        // elsewhere on the system's.
-        ServiceKind::Rabbitmq => {
-            let mut env = vec![
-                ("RABBITMQ_BASE", path(layout.data("rabbitmq"))),
-                ("RABBITMQ_MNESIA_BASE", path(layout.data("rabbitmq").join("mnesia"))),
-                ("RABBITMQ_LOG_BASE", path(layout.logs().join("rabbitmq"))),
-                ("RABBITMQ_CONFIG_FILE", path(layout.etc("rabbitmq").join("rabbitmq.conf"))),
-                ("RABBITMQ_ENABLED_PLUGINS_FILE", path(layout.etc("rabbitmq").join("enabled_plugins"))),
-                ("RABBITMQ_NODENAME", "lamprabit@localhost".into()),
-                ("ERL_EPMD_ADDRESS", "127.0.0.1".into()),
-            ];
-            if cfg!(windows) {
-                let erlang = settings
-                    .versions
-                    .get("erlang")
-                    .ok_or_else(|| Error::msg("RabbitMQ runs on Erlang: install Erlang on the Services page (Queues → Erlang) first."))?;
-                env.push(("ERLANG_HOME", path(layout.bin("erlang", erlang))));
-            } else if !std::env::var_os("PATH").is_some_and(|p| crate::apps::on_path("erl", &p)) {
-                return Err(Error::msg(
-                    "RabbitMQ runs on Erlang, which isn't installed. Install it with your system's packages (sudo apt install erlang-nox, sudo dnf install erlang, or brew install erlang), then start RabbitMQ again.",
-                ));
-            }
-            let ctl = home.join("sbin").join(if cfg!(windows) { "rabbitmqctl.bat" } else { "rabbitmqctl" });
-            LaunchSpec {
-                program: home.join(runtimes::Runtime::Rabbitmq.marker()),
-                args: vec![],
-                test: None,
-                stop_cmd: Some((ctl, vec!["stop".into(), "-n".into(), "lamprabit@localhost".into()])),
-                cwd: home.clone(),
-                path_prepend: vec![],
-                env,
-            }
-        }
         // pgAdmin's own entry point, on the Python of its virtual environment.
         ServiceKind::Pgadmin => {
             let package = runtimes::pgadmin_package(&home)
@@ -757,87 +607,7 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 env: vec![("PYTHONUNBUFFERED", "1".into()), ("PGADMIN_SERVER_MODE", "OFF".into())],
             }
         }
-        ServiceKind::Mariadb => {
-            let defaults = format!("--defaults-file={}", path(layout.etc("mariadb").join("my.ini")));
-            LaunchSpec {
-                program: home.join("bin").join(exe("mariadbd")),
-                // --defaults-file must be the first argument.
-                args: vec![defaults.clone()],
-                stop_cmd: Some((
-                    home.join("bin").join(exe("mariadb-admin")),
-                    vec![defaults, "--user=root".into(), "shutdown".into()],
-                )),
-                cwd: home,
-                path_prepend: vec![],
-                env: vec![],
-                test: None,
-            }
-        }
-        ServiceKind::Mysql => {
-            let defaults = format!("--defaults-file={}", path(layout.etc("mysql").join("my.ini")));
-            let compat = home.join("lib").join("compat");
-            LaunchSpec {
-                program: home.join("bin").join(exe("mysqld")),
-                // --defaults-file must be the first argument; --console keeps errors on
-                // stderr on Windows, where they'd otherwise only go to the event log.
-                args: if cfg!(windows) { vec![defaults.clone(), "--console".into()] } else { vec![defaults.clone()] },
-                stop_cmd: Some((home.join("bin").join(exe("mysqladmin")), vec![defaults, "--user=root".into(), "shutdown".into()])),
-                cwd: home,
-                path_prepend: vec![],
-                // Where the libaio link goes when needed (see configs::mysql_libraries).
-                env: if cfg!(target_os = "linux") { vec![("LD_LIBRARY_PATH", path(compat))] } else { vec![] },
-                test: None,
-            }
-        }
-        ServiceKind::Mailpit => LaunchSpec {
-            program: home.join(exe("mailpit")),
-            args: vec![
-                "--smtp".into(),
-                format!("127.0.0.1:{}", settings.ports.mail_smtp),
-                "--listen".into(),
-                format!("127.0.0.1:{}", settings.ports.mail_ui),
-                "--database".into(),
-                path(layout.data("mailpit").join("mailpit.db")),
-                // Frameworks often send credentials even locally; accept anything.
-                "--smtp-auth-accept-any".into(),
-                "--smtp-auth-allow-insecure".into(),
-            ],
-            cwd: home,
-            path_prepend: vec![],
-            stop_cmd: None,
-            env: vec![],
-            test: None,
-        },
-        // In the foreground, data kept in data/redis. The Windows build is compiled with
-        // MSYS2, which reads C:/… paths; forward slashes avoid escaping trouble there.
-        ServiceKind::Redis => LaunchSpec {
-            program: home.join(exe("redis-server")),
-            args: vec![
-                "--bind".into(),
-                "127.0.0.1".into(),
-                "--port".into(),
-                settings.ports.redis.to_string(),
-                "--dir".into(),
-                path(layout.data("redis")).replace('\\', "/"),
-                "--daemonize".into(),
-                "no".into(),
-            ],
-            cwd: home,
-            path_prepend: vec![],
-            stop_cmd: None,
-            env: vec![],
-            test: None,
-        },
-        // Memory only: nothing to keep in data/memcached, which exists for consistency.
-        ServiceKind::Memcached => LaunchSpec {
-            program: home.join(exe("memcached")),
-            args: vec!["-l".into(), "127.0.0.1".into(), "-p".into(), settings.ports.memcached.to_string(), "-m".into(), "128".into()],
-            cwd: home,
-            path_prepend: vec![],
-            stop_cmd: None,
-            env: vec![],
-            test: None,
-        },
+        _ => return Err(Error::msg(format!("{} is started from its manifest, not by builtin code", kind.label()))),
     };
     Ok(spec)
 }
@@ -893,40 +663,6 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             configs::init_postgres_data(settings, layout).await?;
             Ok(vec![])
         }
-        ServiceKind::Mongodb => {
-            std::fs::create_dir_all(configs::mongodb_data(settings, layout))?;
-            Ok(vec![])
-        }
-        ServiceKind::Meilisearch | ServiceKind::Typesense | ServiceKind::Ollama => {
-            std::fs::create_dir_all(layout.data(kind.id()))?;
-            Ok(vec![])
-        }
-        ServiceKind::Rustfs | ServiceKind::Minio => {
-            let dir = settings.storage_dir(layout, kind.id());
-            std::fs::create_dir_all(&dir).map_err(|e| Error::msg(format!("Couldn't create {}'s storage folder {}: {e}", kind.label(), dir.display())))?;
-            Ok(vec![])
-        }
-        ServiceKind::Elasticsearch | ServiceKind::Opensearch => {
-            configs::write_search_engine(settings, layout, kind.id())?;
-            Ok(vec![])
-        }
-        ServiceKind::N8n => {
-            std::fs::create_dir_all(layout.data("n8n"))?;
-            Ok(vec![])
-        }
-        ServiceKind::Rabbitmq => {
-            configs::write_rabbitmq(settings, layout)?;
-            Ok(vec![])
-        }
-        ServiceKind::Clickhouse => {
-            configs::write_clickhouse(settings, layout)?;
-            std::fs::create_dir_all(layout.tmp().join("clickhouse"))?;
-            Ok(vec![])
-        }
-        ServiceKind::Neo4j => {
-            configs::write_neo4j(settings, layout)?;
-            Ok(vec![])
-        }
         ServiceKind::Pgadmin => {
             let version = kind.version(settings).unwrap_or_default();
             let package = runtimes::pgadmin_package(&layout.bin("pgadmin", &version)).ok_or_else(|| Error::msg("pgAdmin's install is incomplete"))?;
@@ -937,35 +673,25 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             }
             Ok(vec![])
         }
-        ServiceKind::Mailpit | ServiceKind::Redis | ServiceKind::Memcached => {
-            std::fs::create_dir_all(kind.config_path(settings, layout))?;
+        _ => {
+            // Its manifest's `dirs` and `files`.
+            manifest::Ctx::new(kind.manifest(), settings, layout)?.prepare()?;
             Ok(vec![])
         }
     }
 }
 
-/// Every port a service will listen on.
+/// Every port a service will listen on: its manifest's, or for a web server its HTTP
+/// port, its HTTPS one when a site uses it, and Caddy's admin API.
 pub fn required_ports(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Vec<u16> {
+    let Some(server) = kind.web_server() else {
+        return kind.manifest().port_numbers(settings);
+    };
     let mut ports = vec![kind.port(settings)];
-    match kind {
-        ServiceKind::Apache | ServiceKind::Nginx | ServiceKind::Caddy | ServiceKind::Frankenphp => {
-            let server = kind.web_server().unwrap();
-            if sites::served(settings, layout).iter().any(|s| s.ssl && s.server == server) {
-                ports.push(settings.server_ports(server).1);
-            }
-            ports.extend(admin_port(kind, settings));
-        }
-        ServiceKind::Tomcat => ports.push(settings.ports.tomcat_shutdown),
-        ServiceKind::Clickhouse => ports.push(settings.ports.clickhouse_tcp),
-        ServiceKind::Neo4j => ports.push(settings.ports.neo4j_bolt),
-        ServiceKind::Rustfs => ports.push(settings.ports.rustfs_console),
-        ServiceKind::Minio => ports.push(settings.ports.minio_console),
-        ServiceKind::Elasticsearch => ports.push(settings.ports.elasticsearch_transport),
-        ServiceKind::Opensearch => ports.push(settings.ports.opensearch_transport),
-        ServiceKind::Rabbitmq => ports.push(settings.ports.rabbitmq_management),
-        ServiceKind::Mailpit => ports.push(settings.ports.mail_ui),
-        _ => {}
+    if sites::served(settings, layout).iter().any(|s| s.ssl && s.server == server) {
+        ports.push(settings.server_ports(server).1);
     }
+    ports.extend(admin_port(kind, settings));
     ports
 }
 
@@ -1222,6 +948,7 @@ impl Supervisor {
                     health: handle.filter(|h| h.state == ServiceState::Running).and_then(|_| health.get(&kind).cloned()),
                     problem: problems.get(&kind).cloned(),
                     heavy: kind.heavy(),
+                    connection: kind.connection(settings, layout),
                 }
             })
             .collect()
@@ -1454,7 +1181,7 @@ impl Supervisor {
             Level::Info,
             format!("{} started (PID {}, port {port})", kind.label(), child.id().unwrap_or_default()),
         );
-        let slow = kind.def().slow;
+        let slow = kind.slow();
         let state = if slow { ServiceState::Starting } else { ServiceState::Running };
         self.running.lock().await.insert(
             kind,
@@ -1747,8 +1474,32 @@ mod tests {
     fn slow_services_have_a_real_check() {
         // A bare TCP connect answers before a JVM service is ready; only RabbitMQ (no
         // HTTP on its AMQP port) is allowed that.
-        for kind in ServiceKind::all().into_iter().filter(|k| k.def().slow) {
-            assert!(matches!(kind.def().check, Check::Http(_)) || kind == ServiceKind::Rabbitmq, "{kind:?}");
+        for kind in ServiceKind::all().into_iter().filter(|k| k.slow()) {
+            assert!(matches!(kind.manifest().check_kind(), Check::Http(..)) || kind == ServiceKind::Rabbitmq, "{kind:?}");
+        }
+    }
+
+    /// The ports a manifest lists are the ones the supervisor checked before starting.
+    #[test]
+    fn manifest_ports_match_the_old_port_lists() {
+        let settings = Settings::default();
+        let p = &settings.ports;
+        let expect = |kind: ServiceKind| -> Vec<u16> {
+            match kind {
+                ServiceKind::Tomcat => vec![p.tomcat_http, p.tomcat_shutdown],
+                ServiceKind::Clickhouse => vec![p.clickhouse_http, p.clickhouse_tcp],
+                ServiceKind::Neo4j => vec![p.neo4j_http, p.neo4j_bolt],
+                ServiceKind::Rustfs => vec![p.rustfs, p.rustfs_console],
+                ServiceKind::Minio => vec![p.minio, p.minio_console],
+                ServiceKind::Elasticsearch => vec![p.elasticsearch, p.elasticsearch_transport],
+                ServiceKind::Opensearch => vec![p.opensearch, p.opensearch_transport],
+                ServiceKind::Rabbitmq => vec![p.rabbitmq, p.rabbitmq_management],
+                ServiceKind::Mailpit => vec![p.mail_smtp, p.mail_ui],
+                k => vec![k.port(&settings)],
+            }
+        };
+        for kind in ServiceKind::all().into_iter().filter(|k| k.web_server().is_none()) {
+            assert_eq!(kind.manifest().port_numbers(&settings), expect(kind), "{kind:?}");
         }
     }
 }

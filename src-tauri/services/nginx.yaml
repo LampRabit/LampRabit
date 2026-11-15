@@ -1,0 +1,18 @@
+schema: 1
+id: nginx
+name: Nginx
+category: web
+blurb: Serves your sites
+origin:
+  - { value: "Official nginx.org Windows builds (PGP-signed, no checksum)", on: [windows] }
+  - { value: LampRabit's builds of nginx.org releases }
+homepage: https://nginx.org
+license: BSD-2-Clause
+source:
+  - { on: [windows], builtin: true }
+  - { lamprabit: true }
+binary: "nginx{{exe}}"
+health: { http: { path: / } }
+log: nginx-error.log
+config: "{{etc}}/nginx.conf"
+builtin: [ports, prepare, launch]

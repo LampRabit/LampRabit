@@ -1,0 +1,41 @@
+# initdb and the root role run in Rust (configs::init_postgres_data, postgres_root_role), and
+# on Windows with administrator rights it's started through pg_ctl (`--pg-elevated`).
+schema: 1
+id: postgres
+name: PostgreSQL
+category: databases
+blurb: Stores your data
+origin: PostgreSQL built from source for every OS by theseus-rs (checksum checked); psql and pg_dump work in LampRabit's terminal
+homepage: https://www.postgresql.org
+license: PostgreSQL
+source:
+  # Built from source for every OS by theseus-rs; the newest release of each major from 14.
+  github: theseus-rs/postgresql-binaries
+  versions: per-major
+  min: 14
+  label: "PostgreSQL {major}"
+  assets:
+    windows-x64: { file: "postgresql-{version}-x86_64-pc-windows-msvc.zip", archive: zip }
+    windows-arm64: { file: "postgresql-{version}-aarch64-pc-windows-msvc.zip", archive: zip }
+    linux-x64: { file: "postgresql-{version}-x86_64-unknown-linux-gnu.tar.gz", archive: targz }
+    linux-arm64: { file: "postgresql-{version}-aarch64-unknown-linux-gnu.tar.gz", archive: targz }
+    macos-x64: { file: "postgresql-{version}-x86_64-apple-darwin.tar.gz", archive: targz }
+    macos-arm64: { file: "postgresql-{version}-aarch64-apple-darwin.tar.gz", archive: targz }
+binary: "bin/postgres{{exe}}"
+suggests: [adminer, phppgadmin, pgadmin]
+ports:
+  postgres: { default: 5432, setting: postgres }
+# A data folder only works with the major version that created it.
+data: per-major
+health: { postgres: {} }
+log: postgres-output.log
+config: "{{data}}"
+connection:
+  url: "postgresql://root@127.0.0.1:{{port.postgres}}/postgres"
+  env:
+    DB_CONNECTION: pgsql
+    DB_HOST: 127.0.0.1
+    DB_PORT: "{{port.postgres}}"
+    DB_USERNAME: root
+    DB_PASSWORD: ""
+builtin: [prepare, launch]
