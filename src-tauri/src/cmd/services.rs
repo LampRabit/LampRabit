@@ -398,7 +398,7 @@ pub(crate) async fn add_service_file(app: AppHandle, state: State<'_, AppState>,
 #[tauri::command]
 pub(crate) async fn remove_local_service(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<()> {
     let _op = state.ops.lock().await;
-    let kind = ServiceKind::from_id(&id).filter(|k| matches!(k, ServiceKind::Plugin(_))).ok_or_else(|| Error::msg(format!("{id} isn't a service you added")))?;
+    let kind = ServiceKind::from_id(&id).filter(|k| matches!(k, ServiceKind::Plugin(_)) && !manifest::is_bundled(&id)).ok_or_else(|| Error::msg(format!("{id} isn't a service you added")))?;
     if state.supervisor.is_running(kind).await {
         return Err(Error::msg(format!("Stop {} before removing it.", kind.label())));
     }

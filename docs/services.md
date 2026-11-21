@@ -299,6 +299,27 @@ ui: { domain: n8n, port: http }
 
 `connection` is what Home's **Connect your app** card and the service's card copy: a URL and `.env` lines, in the order written. Use `127.0.0.1` rather than `localhost`, because MySQL clients read `localhost` as "use the Unix socket". `ui` serves a web interface at `https://<domain>.test` through the web server, and `{{ui.url}}` is that address (for software that needs to know its public URL).
 
+### A database client: `connects`
+
+A database client (KarotX is one) can have every local database in its list without the user typing anything. After the client starts and answers its health check, LampRabit adds one connection to it per installed database, through the client's own HTTP API, and updates the ones it added before. It finds its own by name, so connections the user made are never touched.
+
+```yaml
+connects:
+  # The scheme of each database's connection.url, and the client's name for its driver.
+  drivers: { mariadb: mysql, mysql: mysql, postgresql: postgres, mongodb: mongodb, redis: redis }
+  list: "http://127.0.0.1:{{port.http}}/api/connections"           # GET: a JSON list
+  create: "http://127.0.0.1:{{port.http}}/api/connections"         # POST
+  update: "http://127.0.0.1:{{port.http}}/api/connections/{{id}}"  # PUT
+  name: "{{db.title}} (LampRabit)"
+  body:
+    connection: { name: "{{db.name}}", driver: "{{db.driver}}", host: "{{db.host}}", port: "{{db.port}}", user: "{{db.user}}" }
+```
+
+- The databases are the installed services whose `connection.url` uses a scheme in `drivers`.
+- `{{db.name}}` (the `name` above), `{{db.title}}` (the database's service name), `{{db.service}}` (its id), `{{db.driver}}`, `{{db.host}}`, `{{db.port}}`, `{{db.user}}` and `{{db.database}}` fill in the body. A value that is exactly `{{db.port}}` is sent as a number.
+- A listed connection's id and name are read from `id` and `name` (`id_field`, `name_field` to change them).
+- The API must be on this computer (`http://127.0.0.1:` or `http://localhost:`), and bodies are sent as JSON.
+
 ## Placeholders
 
 | Placeholder | Value |

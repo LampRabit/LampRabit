@@ -49,7 +49,7 @@ vars:
     - { value: targeted, on: [linux] }
     - { value: base }
 binary: "bin/mongod{{exe}}"
-suggests: [mongosh, compass, mongotools]
+suggests: [karotx, mongosh, compass, mongotools]
 ports:
   mongodb: { default: 27017, hint: "Document database" }
 # MongoDB upgrades its files one major version at a time and never downgrades them.

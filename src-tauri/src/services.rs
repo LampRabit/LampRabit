@@ -1252,6 +1252,24 @@ impl Supervisor {
                 let _ = app.emit("service-health", kind);
             });
         }
+        // A database client (KarotX): once it answers, every local database is in its list.
+        if kind.manifest().connects.is_some() {
+            let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
+            tauri::async_runtime::spawn(async move {
+                let client = reqwest::Client::new();
+                for _ in 0..120 {
+                    if kind.probe_now(&settings, &client).await {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                match crate::clients::sync(&client, kind.manifest(), &settings, &layout).await {
+                    Ok(0) => {}
+                    Ok(n) => logs::system(&app, Level::Info, format!("{} lists LampRabit's {n} local database{}", kind.label(), if n == 1 { "" } else { "s" })),
+                    Err(e) => logs::system(&app, Level::Warn, format!("Couldn't add LampRabit's databases to {}: {e}", kind.label())),
+                }
+            });
+        }
         if kind == ServiceKind::Postgres {
             let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
             tauri::async_runtime::spawn(async move {

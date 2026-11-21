@@ -26,7 +26,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => {}
 vi.mock("../lib/api", async (importOriginal) => {
   const original = await importOriginal<typeof import("../lib/api")>();
   Object.assign(original.serviceLabels, { apache: "Apache", mariadb: "MariaDB", mailpit: "Mailpit", redis: "Redis", postgres: "PostgreSQL" });
-  const labels: Record<string, string> = { apache: "Apache", php: "PHP", composer: "Composer", mariadb: "MariaDB", mailpit: "Mailpit", phpmyadmin: "phpMyAdmin", git: "Git", python: "Python", postgres: "PostgreSQL", redis: "Redis", meilisearch: "Meilisearch" };
+  const labels: Record<string, string> = { apache: "Apache", php: "PHP", composer: "Composer", mariadb: "MariaDB", mailpit: "Mailpit", phpmyadmin: "phpMyAdmin", karotx: "KarotX", git: "Git", python: "Python", postgres: "PostgreSQL", redis: "Redis", meilisearch: "Meilisearch" };
   const table: Record<string, unknown> = {
     firstRun: record("firstRun", false),
     getSettings: record("getSettings", () => settings),
@@ -38,7 +38,7 @@ vi.mock("../lib/api", async (importOriginal) => {
         { id: "languages", title: "Languages", blurb: "", items: ["php", "python", "node"] },
         { id: "databases", title: "Databases", blurb: "", items: ["mariadb", "postgres", "sqlite"] },
         { id: "search", title: "Search", blurb: "", items: ["meilisearch"] },
-        { id: "tools", title: "Developer tools", blurb: "", items: ["git", "mailpit", "phpmyadmin", "composer", "redis"] },
+        { id: "tools", title: "Developer tools", blurb: "", items: ["karotx", "git", "mailpit", "phpmyadmin", "composer", "redis"] },
       ],
       runtimes: Object.entries(labels).map(([id, label]) => ({ id, label, blurb: "", source: "", unavailable: null, needs: [], suggests: [] })),
     }),
@@ -104,12 +104,12 @@ describe("what you build", () => {
     await userEvent.click(within(more).getByRole("button", { name: /Meilisearch/ }));
     expect(await within(screen.getByRole("region", { name: "Search" })).findByText("Meilisearch")).toBeTruthy();
 
-    await userEvent.click(screen.getByRole("checkbox", { name: "Include phpMyAdmin" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Include KarotX" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Install" })).toHaveProperty("disabled", false));
     await userEvent.click(screen.getByRole("button", { name: "Install" }));
     await waitFor(() => expect(calls.filter((c) => c.cmd === "installRuntime").map((c) => (c.args[0] as { runtime: string }).runtime)).toContain("meilisearch"));
     const installed = calls.filter((c) => c.cmd === "installRuntime").map((c) => (c.args[0] as { runtime: string }).runtime);
-    expect(installed).not.toContain("phpmyadmin");
+    expect(installed).not.toContain("karotx");
     expect(installed).toContain("postgres");
   });
 });

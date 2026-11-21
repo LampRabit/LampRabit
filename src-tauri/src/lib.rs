@@ -2,6 +2,7 @@ mod apps;
 mod cmd;
 mod backups;
 mod catalog;
+mod clients;
 mod comfort;
 mod commands;
 mod deps;

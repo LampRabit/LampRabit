@@ -1,0 +1,48 @@
+schema: 1
+id: karotx
+name: KarotX
+category: tools
+blurb: LampRabit's own database client
+origin: Part of the LampRabit family. A single program from its GitHub releases (checksum checked); it opens with every local database already connected
+description: A database client in the browser for MariaDB, MySQL, PostgreSQL, SQLite, Redis and MongoDB, with a visual query builder, an SQL editor and previewed edits.
+homepage: https://github.com/LampRabit/KarotX
+maintainers: [LampRabit]
+source:
+  github: LampRabit/KarotX
+  assets:
+    windows-x64: { file: "karotx_{version}_windows_amd64.zip", archive: zip }
+    windows-arm64: { file: "karotx_{version}_windows_arm64.zip", archive: zip }
+    linux-x64: { file: "karotx_{version}_linux_amd64.tar.gz", archive: targz }
+    linux-arm64: { file: "karotx_{version}_linux_arm64.tar.gz", archive: targz }
+    macos-x64: { file: "karotx_{version}_darwin_amd64.tar.gz", archive: targz }
+    macos-arm64: { file: "karotx_{version}_darwin_arm64.tar.gz", archive: targz }
+binary: "karotx{{exe}}"
+ports:
+  http: { default: 8732, hint: "Its web interface, behind karotx.test" }
+dirs: ["{{data}}"]
+run:
+  program: "{{home}}/karotx{{exe}}"
+  # Only this computer (it listens everywhere by default), and LampRabit opens it.
+  args: [--host, 127.0.0.1, --port, "{{port.http}}", --state, "{{data}}/workspace.kxs", --no-open]
+health: { http: { path: /api/session } }
+config: "{{data}}"
+ui: { domain: karotx, port: http }
+connection:
+  url: "http://127.0.0.1:{{port.http}}"
+# Every local database LampRabit runs shows up in KarotX's list, named "<database> (LampRabit)".
+connects:
+  drivers: { mariadb: mysql, mysql: mysql, postgresql: postgres, mongodb: mongodb, redis: redis }
+  list: "http://127.0.0.1:{{port.http}}/api/connections"
+  create: "http://127.0.0.1:{{port.http}}/api/connections"
+  update: "http://127.0.0.1:{{port.http}}/api/connections/{{id}}"
+  name: "{{db.title}} (LampRabit)"
+  body:
+    connection:
+      name: "{{db.name}}"
+      driver: "{{db.driver}}"
+      preset: "{{db.service}}"
+      host: "{{db.host}}"
+      port: "{{db.port}}"
+      user: "{{db.user}}"
+      database: "{{db.database}}"
+      tls: { mode: "off" }

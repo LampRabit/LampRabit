@@ -563,17 +563,22 @@ function ProfileTiles({
 function dbTools(service: ServiceInfo, sites: SitesInfo | undefined, settings: Settings | undefined): { tool: Runtime; url: string }[] {
   const mailUi = settings?.ports.services["mailpit.ui"];
   const at = (tool: Runtime, url: string | undefined, query = "") => (url ? [{ tool, url: `${url}${query}` }] : []);
+  // KarotX, LampRabit's own client, comes first: it lists every local database already.
+  const karotx = at("karotx", toolUrl("karotx", sites, mailUi, settings?.ports.services["karotx.http"]));
+  if (service.kind === "mongodb" || service.kind === "redis") return karotx;
   if (service.kind === "mariadb" || service.kind === "mysql") {
     const order = (["mariadb", "mysql"] as const)
       .filter((d) => settings?.versions[d])
       .sort((a, b) => Number(b === settings?.defaultDatabase) - Number(a === settings?.defaultDatabase));
     return [
+      ...karotx,
       ...at("phpmyadmin", toolUrl("phpmyadmin", sites, mailUi), `?server=${Math.max(1, order.findIndex((d) => d === service.kind) + 1)}`),
       ...at("adminer", toolUrl("adminer", sites, mailUi), `?server=127.0.0.1:${service.port}&username=root`),
     ];
   }
   if (service.kind === "postgres") {
     return [
+      ...karotx,
       ...at("adminer", toolUrl("adminer", sites, mailUi), `?pgsql=127.0.0.1:${service.port}&username=root&db=postgres`),
       ...at("phppgadmin", toolUrl("phppgadmin", sites, mailUi)),
       ...at("pgadmin", toolUrl("pgadmin", sites, mailUi, settings?.ports.services["pgadmin.http"])),
@@ -599,16 +604,17 @@ function openAction(
   if (service.kind === "mariadb" || service.kind === "mysql" || service.kind === "postgres") {
     // The tool picked last for this database (the ⋯ menu lists the others).
     const tool = preferredTool(service.kind, dbTools(service, sites, settings));
-    if (!tool) {
-      const suggest = service.kind === "postgres" ? "adminer" : "phpmyadmin";
-      return { label: `Install ${runtimeLabels[suggest]}`, icon: Table2, run: () => navigate("services"), always: true };
-    }
+    if (!tool) return { label: `Install ${runtimeLabels.karotx ?? "KarotX"}`, icon: Table2, run: () => navigate("services"), always: true };
     return { label: `Open ${runtimeLabels[tool.tool]}`, icon: Table2, run: () => openUrl(tool.url).catch(notifyError) };
+  }
+  const karotx = dbTools(service, sites, settings)[0];
+  if ((service.kind === "mongodb" || service.kind === "redis") && karotx) {
+    return { label: `Open ${runtimeLabels.karotx ?? "KarotX"}`, icon: Table2, run: () => openUrl(karotx.url).catch(notifyError) };
   }
   if (service.kind === "mongodb") {
     return settings?.versions.compass
       ? { label: "Open Compass", icon: Table2, run: () => api.openCompass().catch(notifyError) }
-      : { label: "Install Compass", icon: Table2, run: () => navigate("services"), always: true };
+      : { label: `Install ${runtimeLabels.karotx ?? "KarotX"}`, icon: Table2, run: () => navigate("services"), always: true };
   }
   if (service.kind === "meilisearch") {
     return { label: "Open search preview", icon: ExternalLink, run: () => openUrl(`http://localhost:${service.port}/`).catch(notifyError) };
@@ -641,7 +647,7 @@ function openAction(
     const url = toolUrl("phpredisadmin", sites, mailUi);
     return url
       ? { label: "Open phpRedisAdmin", icon: Table2, run: () => openUrl(url).catch(notifyError) }
-      : { label: "Install phpRedisAdmin", icon: Table2, run: () => navigate("services"), always: true };
+      : { label: `Install ${runtimeLabels.karotx ?? "KarotX"}`, icon: Table2, run: () => navigate("services"), always: true };
   }
   if (service.kind === "mailpit") {
     return { label: "Open inbox", icon: ExternalLink, run: () => openUrl(toolUrl("mailpit", sites, mailUi) ?? "http://localhost:8025/").catch(notifyError) };

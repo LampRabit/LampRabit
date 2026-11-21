@@ -32,7 +32,7 @@ vars:
     - { value: "*winx64.zip", on: [windows] }
     - { value: "*linux-systemd-x86_64.tar.gz", on: [linux-x64] }
 binary: "bin/mariadbd{{exe}}"
-suggests: [phpmyadmin, adminer]
+suggests: [karotx, phpmyadmin, adminer]
 ports:
   # `mysql` predates MySQL support: it's MariaDB's.
   mysql: { default: 3306, hint: "Database" }

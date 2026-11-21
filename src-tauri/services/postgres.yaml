@@ -22,7 +22,7 @@ source:
     macos-x64: { file: "postgresql-{version}-x86_64-apple-darwin.tar.gz", archive: targz }
     macos-arm64: { file: "postgresql-{version}-aarch64-apple-darwin.tar.gz", archive: targz }
 binary: "bin/postgres{{exe}}"
-suggests: [adminer, phppgadmin, pgadmin]
+suggests: [karotx, adminer, phppgadmin, pgadmin]
 ports:
   postgres: { default: 5432, hint: "Database" }
 # A data folder only works with the major version that created it.

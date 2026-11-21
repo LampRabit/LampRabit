@@ -148,6 +148,9 @@ pub struct Manifest {
     /// source (MongoDB's build per distribution). The first case that matches wins.
     #[serde(default)]
     pub vars: Ordered<Vec<crate::sources::VarCase>>,
+    /// A database client: LampRabit adds a connection to it for each local database.
+    #[serde(default)]
+    pub connects: Option<crate::clients::Connects>,
 }
 
 fn one() -> u32 {
@@ -928,7 +931,26 @@ pub fn built_ins() -> &'static [Manifest] {
     BUILT_INS.get_or_init(|| BUILT_IN.iter().map(|text| parse(text, true).unwrap_or_else(|e| panic!("built-in service manifest: {e}"))).collect())
 }
 
-/// Manifests that aren't built in (local files, later the registry), with whether they're
+/// LampRabit's own services that need no code at all: shipped with the app, checked by the
+/// same rules as a community manifest and registered like one (no enum variant).
+const BUNDLED: &[&str] = &[include_str!("../services/karotx.yaml")];
+static BUNDLED_ADDED: OnceLock<()> = OnceLock::new();
+
+/// Whether a service is one of the bundled ones (not removable like a local file).
+pub fn is_bundled(id: &str) -> bool {
+    BUNDLED.iter().any(|text| parse(text, false).is_ok_and(|m| m.id == id))
+}
+
+fn add_bundled() {
+    BUNDLED_ADDED.get_or_init(|| {
+        for text in BUNDLED {
+            let m = parse(text, false).unwrap_or_else(|e| panic!("bundled service manifest: {e}"));
+            register(m).unwrap_or_else(|e| panic!("bundled service manifest: {e}"));
+        }
+    });
+}
+
+/// Manifests that aren't built in (bundled, local files, later the registry), with whether they're
 /// shown. Entries are never moved or dropped, so a `ServiceKind::Plugin`/`Runtime::Plugin`
 /// index stays valid: an update replaces its entry, a removal hides it.
 static EXTRAS: RwLock<Vec<(&'static Manifest, bool)>> = RwLock::new(Vec::new());
@@ -939,15 +961,18 @@ pub fn get(id: &str) -> Option<&'static Manifest> {
 
 /// The shown non-built-in manifests.
 pub fn extras() -> Vec<&'static Manifest> {
+    add_bundled();
     EXTRAS.read().map(|e| e.iter().filter(|(_, shown)| *shown).map(|(m, _)| *m).collect()).unwrap_or_default()
 }
 
 /// The indexes of the shown non-built-in manifests.
 pub fn extra_indexes() -> Vec<u16> {
+    add_bundled();
     EXTRAS.read().map(|e| e.iter().enumerate().filter(|(_, (_, shown))| *shown).filter_map(|(i, _)| u16::try_from(i).ok()).collect()).unwrap_or_default()
 }
 
 pub fn extra(index: u16) -> &'static Manifest {
+    add_bundled();
     EXTRAS.read().map(|e| e[usize::from(index)].0).expect("service list is unavailable")
 }
 
@@ -1240,6 +1265,10 @@ impl Manifest {
             if self.settings.get(name).is_none() {
                 return Err(format!("if: \"{when}\" must be setting.<name> (or !setting.<name>) for a setting in settings"));
             }
+        }
+
+        if let Some(c) = &self.connects {
+            crate::clients::check(c, &names.iter().map(|n| n.to_string()).collect::<Vec<_>>())?;
         }
 
         // Placeholders.

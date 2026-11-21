@@ -25,7 +25,7 @@ source:
     macos-x64: { file: macos26-x86_64.tar.gz, archive: targz, fallbacks: [macos15-x86_64.tar.gz, macos14-x86_64.tar.gz] }
   checksum: { md5: "{url}.md5" }
 binary: "bin/mysqld{{exe}}"
-suggests: [phpmyadmin, adminer]
+suggests: [karotx, phpmyadmin, adminer]
 ports:
   mysql: { default: 3307, hint: "Database, next to MariaDB" }
 run:

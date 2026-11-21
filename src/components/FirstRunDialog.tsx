@@ -55,13 +55,13 @@ import { Button } from "./ui";
 type UsageId = "php" | "laravel" | "wordpress" | "javascript" | "python" | "java" | "go" | "ai";
 
 export const usages: { id: UsageId; title: string; blurb: string; icon: typeof Globe; runtimes: string[] }[] = [
-  { id: "php", title: "PHP websites", blurb: "Plain PHP, Symfony, CodeIgniter…", icon: Globe, runtimes: ["apache", "php", "composer", "mariadb", "mailpit", "phpmyadmin", "git"] },
-  { id: "laravel", title: "Laravel", blurb: "With Vite, queues and cache", icon: Layers, runtimes: ["apache", "php", "composer", "mariadb", "redis", "mailpit", "phpmyadmin", "node", "git"] },
-  { id: "wordpress", title: "WordPress", blurb: "Themes, plugins and sites", icon: Newspaper, runtimes: ["apache", "php", "mariadb", "mailpit", "phpmyadmin", "git"] },
+  { id: "php", title: "PHP websites", blurb: "Plain PHP, Symfony, CodeIgniter…", icon: Globe, runtimes: ["apache", "php", "composer", "mariadb", "mailpit", "karotx", "git"] },
+  { id: "laravel", title: "Laravel", blurb: "With Vite, queues and cache", icon: Layers, runtimes: ["apache", "php", "composer", "mariadb", "redis", "mailpit", "karotx", "node", "git"] },
+  { id: "wordpress", title: "WordPress", blurb: "Themes, plugins and sites", icon: Newspaper, runtimes: ["apache", "php", "mariadb", "mailpit", "karotx", "git"] },
   { id: "javascript", title: "JavaScript", blurb: "Node.js, Next.js, Vite, Express…", icon: Braces, runtimes: ["apache", "node", "git"] },
-  { id: "python", title: "Python", blurb: "Django, Flask, FastAPI", icon: FlaskConical, runtimes: ["apache", "python", "postgres", "redis", "git"] },
-  { id: "java", title: "Java", blurb: "Spring Boot, Tomcat web apps", icon: Coffee, runtimes: ["apache", "java", "maven", "tomcat", "postgres", "git"] },
-  { id: "go", title: "Go and Rust", blurb: "APIs and services", icon: Terminal, runtimes: ["apache", "go", "rust", "postgres", "redis", "git"] },
+  { id: "python", title: "Python", blurb: "Django, Flask, FastAPI", icon: FlaskConical, runtimes: ["apache", "python", "postgres", "redis", "karotx", "git"] },
+  { id: "java", title: "Java", blurb: "Spring Boot, Tomcat web apps", icon: Coffee, runtimes: ["apache", "java", "maven", "tomcat", "postgres", "karotx", "git"] },
+  { id: "go", title: "Go and Rust", blurb: "APIs and services", icon: Terminal, runtimes: ["apache", "go", "rust", "postgres", "redis", "karotx", "git"] },
   { id: "ai", title: "AI and automation", blurb: "Local models and workflows", icon: Bot, runtimes: ["ollama", "n8n"] },
 ];
 

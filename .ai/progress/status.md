@@ -19,6 +19,7 @@ Plan: [../plans/active/phase-27-pluggable-services.md](../plans/active/phase-27-
 | B3. Services without an enum variant (`ServiceKind::Plugin`, `Ports.extra`) | done, commit `981d67d` |
 | C. Local services from a file, `lamprabit service check/try` | done, commit `e2700d6` |
 | D. Registry repo, signed index, marketplace | **later** (the user, 2026-11-21) |
+| KarotX bundled as LampRabit's own database client (`connects`) | done 2026-11-21; **its repository must be made public** before anyone can install it |
 | **E. No hard-coded service: E1 ports → E2 needs → E3 downloads → E4 setup → E5 site engine → E6 frontend/leftovers → E7 wider kinds** | **in progress** |
 
 ## Next after phase 27

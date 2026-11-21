@@ -82,10 +82,15 @@ fn groups() -> Vec<Group> {
 
 pub fn catalog() -> Catalog {
     let mut groups = groups();
-    // Services that aren't built in go to the group their manifest names.
+    // Services that aren't built in go to the group their manifest names; LampRabit's own
+    // bundled ones (KarotX) first, others after the built-in ones.
     for m in manifest::extras() {
         if let Some(g) = groups.iter_mut().find(|g| g.id == m.category) {
-            g.items.push(&m.id);
+            if manifest::is_bundled(&m.id) {
+                g.items.insert(0, &m.id);
+            } else {
+                g.items.push(&m.id);
+            }
         }
     }
     // A runtime nobody put in a group still shows, under Other.
@@ -113,7 +118,7 @@ fn info(runtime: Runtime) -> RuntimeInfo {
                 .iter()
                 .map(|(name, d)| PortField { key: format!("{}.{name}", m.id), label: d.label.clone(), hint: d.hint.clone(), default: d.default })
                 .collect(),
-            local: manifest::extras().iter().any(|e| e.id == m.id),
+            local: manifest::extras().iter().any(|e| e.id == m.id) && !manifest::is_bundled(&m.id),
         };
     }
     let win = cfg!(windows);

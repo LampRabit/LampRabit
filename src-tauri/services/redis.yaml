@@ -20,7 +20,7 @@ source:
       windows-x64: { file: "Redis-{version}-Windows-x64-msys2.zip", archive: zip }
   - { lamprabit: true }
 binary: "redis-server{{exe}}"
-suggests: [phpredisadmin]
+suggests: [karotx, phpredisadmin]
 ports:
   redis: { default: 6379, hint: "Cache and queues" }
 dirs: ["{{data}}"]

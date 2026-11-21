@@ -46,7 +46,7 @@ type ServiceSelection = Runtime | "node" | "tunnels";
  * anything already installed. The full catalog (forty-odd entries) hid the basic path from
  * new users.
  */
-const ESSENTIALS: ServiceSelection[] = ["apache", "nginx", "php", "composer", "node", "git", "mariadb", "mysql", "mailpit", "redis", "phpmyadmin"];
+const ESSENTIALS: ServiceSelection[] = ["apache", "nginx", "php", "composer", "node", "git", "mariadb", "mysql", "mailpit", "redis", "karotx", "phpmyadmin"];
 
 export default function Services() {
   const [selected, setSelected] = useState<ServiceSelection>("apache");

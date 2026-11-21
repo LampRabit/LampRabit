@@ -508,9 +508,13 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
   const php = site.php ?? settings.data?.versions.php ?? null;
   const pmaUrl = toolUrl("phpmyadmin", info, settings.data?.ports.services["mailpit.ui"]);
   const adminerUrl = toolUrl("adminer", info, settings.data?.ports.services["mailpit.ui"]);
-  const targetDbUrl = site.database
-    ? (pmaUrl ? `${pmaUrl}?server=1&db=${encodeURIComponent(site.database)}` : adminerUrl ? `${adminerUrl}?db=${encodeURIComponent(site.database)}` : null)
-    : (pmaUrl ?? adminerUrl ?? null);
+  // KarotX, LampRabit's own client, first: it lists every local database already.
+  const karotxUrl = toolUrl("karotx", info, settings.data?.ports.services["mailpit.ui"], settings.data?.ports.services["karotx.http"]);
+  const targetDbUrl =
+    karotxUrl ??
+    (site.database
+      ? (pmaUrl ? `${pmaUrl}?server=1&db=${encodeURIComponent(site.database)}` : adminerUrl ? `${adminerUrl}?db=${encodeURIComponent(site.database)}` : null)
+      : (pmaUrl ?? adminerUrl ?? null));
   // The Commands tab's dot: a crashed process (red) outranks something running.
   const statuses = useAppStatuses();
   const processStates = Object.values(statuses).filter((s) => s.name.startsWith(`${site.name}/`));
@@ -670,7 +674,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
                   openUrl(targetDbUrl).catch(notifyError);
                 } else {
                   useAppStore.getState().navigate("services");
-                  notify("info", "Install phpMyAdmin or Adminer in Services to manage databases");
+                  notify("info", "Install KarotX in Services to manage databases");
                 }
               }}
               title={site.database ? `Open database "${site.database}"` : "Open database manager"}
@@ -1725,8 +1729,10 @@ function RecentRuns({ site, status, onShow }: { site: Site; status?: AppStatus; 
   );
 }
 
-/** phpMyAdmin opened on the project's database, on the default database server. */
+/** KarotX when it's installed, else phpMyAdmin opened on the project's database. */
 function databaseUrl(db: string, info?: SitesInfo, settings?: Settings) {
+  const karotx = toolUrl("karotx", info, settings?.ports.services["mailpit.ui"], settings?.ports.services["karotx.http"]);
+  if (karotx) return karotx;
   const base = toolUrl("phpmyadmin", info, settings?.ports.services["mailpit.ui"]);
   return base ? `${base}?server=1&db=${encodeURIComponent(db)}` : null;
 }
