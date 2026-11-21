@@ -259,6 +259,19 @@ env:
 
 `on` takes `windows`, `linux`, `macos`, `unix` (Linux and macOS), `x64`, `arm64`, or `<os>-<arch>`.
 
+## Adding and testing a service
+
+To use a service that LampRabit doesn't ship, choose **Add a service** on the Services page and pick its `service.yaml`. LampRabit shows what the file downloads, how the download is checked, what it runs and which ports and files it uses; nothing is added until you approve, because nobody has reviewed a local file. The file is copied to `<LampRabit folder>/services/<id>/service.yaml` (with its icon, when `icon` names a file next to it) and loaded on every start. That folder is kept on uninstall and moves with the LampRabit folder. Adding a file with the same `id` again updates the service (stop it first). **Remove service** on its card deletes the file once its installed versions are removed; its data folder stays.
+
+While writing a manifest:
+
+```sh
+lamprabit service check service.yaml   # is it valid, and what does it do
+lamprabit service try service.yaml     # install, start, health check, stop, in a throwaway folder
+```
+
+`try` runs the same checks as LampRabit's own CI smoke test, so a manifest that passes it on Windows, Linux and macOS is ready to share.
+
 ## Built-in services
 
 LampRabit's own manifests may use `builtin:` for the parts its code still handles, because they can't be described as files and commands: `ports` (the web servers' ports come from Settings → Web server), `prepare` (vhosts, PHP pools, database data folders), `launch` (Tomcat's classpath, PostgreSQL started through `pg_ctl` when LampRabit has administrator rights) and `external` (an Ollama installed outside LampRabit). They may also use `source: { builtin: true }` for catalogs that need code (MariaDB's REST API, MySQL's, MongoDB's, Tomcat's mirror listing, pgAdmin's PyPI wheels, and the Windows builds of Apache and Nginx, which are scraped from web pages), `source: { lamprabit: true }` for LampRabit's own CI builds, `checksum: none` (Typesense publishes no checksums), `setting:` on a port to name its field in Settings → Ports, and the `mysql` and `postgres` health checks. Community manifests can't use any of these.

@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FolderOpen, Hexagon, Search, X, Play, Puzzle, RefreshCw, RotateCw, Share2, Square, Trash2 } from "lucide-react";
+import { ExternalLink, FilePlus2, FolderOpen, Hexagon, Search, X, Play, Puzzle, RefreshCw, RotateCw, Share2, Square, Trash2 } from "lucide-react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import AddServiceDialog from "../components/AddServiceDialog";
 import ExtensionsDialog from "../components/ExtensionsDialog";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import clsx from "clsx";
@@ -10,6 +12,7 @@ import {
   type Release,
   type Requirement,
   type Runtime,
+  type ServiceFile,
 } from "../lib/api";
 import { infoFor, labelFor, meet, needsNote, unmet, useCatalog } from "../lib/catalog";
 import RequirementsDialog from "../components/RequirementsDialog";
@@ -54,7 +57,6 @@ export default function Services() {
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const catalog = useCatalog();
   const find = (r: Runtime) => installed.data?.find((i) => i.runtime === r);
-  const backup = (["sqlite", "mariadb", "mysql", "postgres", "mongodb"] as const).find((e) => e === runtime);
   const [scope, setScopeState] = useState<"essentials" | "all">(() => (readPref("services-scope") === "all" ? "all" : "essentials"));
   const setScope = (v: "essentials" | "all") => {
     setScopeState(v);
@@ -78,6 +80,7 @@ export default function Services() {
   const selectedGroup = allGroups.find((g) => g.items.includes(selected));
   const isRuntime = selected !== "node" && selected !== "tunnels";
   const runtime = isRuntime ? selected as Runtime : null;
+  const backup = (["sqlite", "mariadb", "mysql", "postgres", "mongodb"] as const).find((e) => e === runtime);
 
   let openUrl: string | undefined;
   let note: string | undefined;
@@ -119,9 +122,40 @@ export default function Services() {
     item === "node" ? "bg-lime-600/10 text-lime-600" : item === "tunnels" ? "bg-violet-500/10 text-violet-600" : tileFor(item).className;
   const itemLabel = (item: ServiceSelection) => (item === "tunnels" ? "Active tunnels" : labelFor(catalog.data, item));
 
+  const queryClient = useQueryClient();
+  const notify = useAppStore((s) => s.notify);
+  const [adding, setAdding] = useState<{ path: string; file: ServiceFile } | null>(null);
+  const chooseServiceFile = async () => {
+    const path = await openDialog({ title: "Choose a service file", filters: [{ name: "Service file", extensions: ["yaml", "yml"] }] });
+    if (typeof path !== "string") return;
+    try {
+      setAdding({ path, file: await api.inspectServiceFile(path) });
+    } catch (e) {
+      notifyError(e);
+    }
+  };
+  const refreshServices = () => {
+    for (const key of ["runtime-info", "installed", "services", "settings", "sites"]) queryClient.invalidateQueries({ queryKey: [key] });
+  };
+  const removeService = useMutation({
+    mutationFn: (id: string) => api.removeLocalService(id),
+    onSuccess: (_, id) => {
+      notify("info", `${labelFor(catalog.data, id)} removed`);
+      setSelected("apache");
+      refreshServices();
+    },
+    onError: notifyError,
+  });
+  const [confirmRemoveService, setConfirmRemoveService] = useState<string | null>(null);
+
   usePageToolbar("services", {
     title: "Services",
     subtitle: "Choose a service to manage its versions, settings, and tools.",
+    actions: (
+      <Button size="sm" variant="ghost" onClick={chooseServiceFile} title="Add a service from its service.yaml file">
+        <FilePlus2 size={14} /> Add a service
+      </Button>
+    ),
   });
 
   return (
@@ -226,8 +260,40 @@ export default function Services() {
           {/* SQLite databases are project files: they can be backed up without the shell installed. */}
           {backup && (backup === "sqlite" || find(backup)?.active) && <BackupsPanel key={`backups-${backup}`} engine={backup} />}
           {selected === "tunnels" && <p className="mt-3 text-xs text-muted">Share a project from Sites or use this panel to share any local port.</p>}
+          {runtime && infoFor(catalog.data, runtime)?.local && (
+            <Card className="mt-4 flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+              <p className="text-sm text-muted">You added this service from a file. Removing it keeps its data folder.</p>
+              {confirmRemoveService === runtime ? (
+                <span className="flex gap-2">
+                  <Button size="sm" variant="danger" onClick={() => removeService.mutate(runtime, { onSettled: () => setConfirmRemoveService(null) })} disabled={removeService.isPending} autoFocus>
+                    <Trash2 size={13} /> Remove service
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmRemoveService(null)} disabled={removeService.isPending}>
+                    Cancel
+                  </Button>
+                </span>
+              ) : (
+                <Button size="sm" variant="ghost" onClick={() => setConfirmRemoveService(runtime)}>
+                  <Trash2 size={13} /> Remove service
+                </Button>
+              )}
+            </Card>
+          )}
         </section>
       </div>
+      {adding && (
+        <AddServiceDialog
+          path={adding.path}
+          file={adding.file}
+          onClose={() => setAdding(null)}
+          onAdded={(id) => {
+            setAdding(null);
+            notify("info", `${adding.file.review.name} ${adding.file.replaces ? "updated" : "added"}`);
+            refreshServices();
+            setSelected(id);
+          }}
+        />
+      )}
     </>
   );
 }

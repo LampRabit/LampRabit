@@ -37,6 +37,8 @@ Usage: lamprabit <command> [arguments] [--json] [--no-launch] [--yes] [--dry-run
                                  What stands between a project and working; --dry-run
                                  shows what the fixes would do without running them
   git <project>                  Branch, changes and remotes
+  service check <file>           Check a service file (service.yaml) and say what it does
+  service try <file>             Install, start, check and stop it in a throwaway folder
   config [key.path]              Settings, or one value (ports.http)
   mcp                            Run the MCP server on stdin/stdout, for AI assistants
 
@@ -89,6 +91,75 @@ impl Args {
     }
 }
 
+/// `service check <file>`: whether it's a valid manifest, and what it does. `service try
+/// <file>`: the smoke test (install with what it needs, start, health check, stop) with it,
+/// in a throwaway folder with its own settings, so the user's LampRabit is never touched.
+fn service_file(a: &Args) -> i32 {
+    let Some(file) = a.word(2) else {
+        eprintln!("lamprabit: Missing the service file (service.yaml).
+Run `lamprabit help` for the commands.");
+        return 2;
+    };
+    let review = match std::fs::read_to_string(file).map_err(crate::error::Error::from).and_then(|text| crate::manifest::parse(&text, false)) {
+        Ok(m) => m.review(),
+        Err(e) => {
+            eprintln!("lamprabit: {file}: {e}");
+            return 1;
+        }
+    };
+    if a.word(1) == Some("check") {
+        if a.json {
+            println!("{}", serde_json::to_string_pretty(&review).unwrap_or_default());
+        } else {
+            print_review(&review);
+        }
+        return 0;
+    }
+    let file = std::path::absolute(file).unwrap_or_else(|_| file.into());
+    let root = std::env::temp_dir().join(format!("lamprabit-try-{}-{}", review.id, std::process::id()));
+    println!("Trying {} in {}", review.name, root.display());
+    let child = std::env::current_exe().and_then(|exe| {
+        std::process::Command::new(exe).arg("--smoke-test").arg(&root).arg("--service").arg(&file).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn()
+    });
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("lamprabit: couldn't start the test: {e}");
+            return 1;
+        }
+    };
+    // Forwarded line by line: the Windows app has no console of its own to inherit.
+    let errors = child.stderr.take().map(|err| std::thread::spawn(move || std::io::BufRead::lines(std::io::BufReader::new(err)).map_while(Result::ok).for_each(|l| eprintln!("{l}"))));
+    if let Some(out) = child.stdout.take() {
+        std::io::BufRead::lines(std::io::BufReader::new(out)).map_while(Result::ok).for_each(|l| println!("{l}"));
+    }
+    if let Some(t) = errors {
+        let _ = t.join();
+    }
+    let code = child.wait().ok().and_then(|s| s.code()).unwrap_or(1);
+    // A failed run keeps its folder: the report and logs in it say what went wrong.
+    if code == 0 {
+        let _ = std::fs::remove_dir_all(&root);
+    } else {
+        println!("The test folder was kept for its report and logs: {}", root.display());
+    }
+    code
+}
+
+fn print_review(r: &crate::manifest::Review) {
+    println!("{} ({}), revision {}: {}", r.name, r.id, r.revision, r.blurb);
+    if let Some(why) = &r.unavailable {
+        println!("Not available here: {why}");
+    }
+    let line = |label: &str, value: String| if !value.is_empty() { println!("{label:<14}{value}") };
+    line("Downloads:", r.downloads.clone().unwrap_or_default());
+    line("Checked with:", r.checksum.clone().unwrap_or_default());
+    line("Runs:", r.program.iter().cloned().chain(r.args.iter().cloned()).collect::<Vec<_>>().join(" "));
+    line("Ports:", r.ports.iter().map(|(l, p)| format!("{l} {p}")).collect::<Vec<_>>().join(", "));
+    line("Writes:", r.files.join(", "));
+    line("Needs:", r.needs.join(", "));
+}
+
 enum Failure {
     Usage(String),
     Unreachable(String),
@@ -114,6 +185,10 @@ pub fn main(raw: Vec<String>) -> i32 {
             return 1;
         }
     };
+    // Service authors' commands work on a file, whether or not LampRabit is running.
+    if args.word(0) == Some("service") && matches!(args.word(1), Some("check" | "try")) {
+        return service_file(&args);
+    }
     if args.word(0) == Some("mcp") {
         return runtime.block_on(crate::mcp::serve(args.launch));
     }

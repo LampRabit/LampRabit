@@ -573,6 +573,8 @@ pub fn run() {
             if let Err(e) = Layout::new(&settings.root_dir).ensure() {
                 warnings.push(format!("LampRabit can't use its environment folder {}: {e}. Choose another one in Settings → General.", settings.root_dir.display()));
             }
+            // Services the user added from a file, before anything lists services.
+            warnings.extend(manifest::load_local(&Layout::new(&settings.root_dir).services()));
             runtimes::clean_removed(&Layout::new(&settings.root_dir));
             runtimes::migrate_flat_composer(&Layout::new(&settings.root_dir));
             reconcile_versions(&mut settings);
@@ -822,6 +824,9 @@ pub fn run() {
             restart_service,
             service_options,
             set_service_option,
+            inspect_service_file,
+            add_service_file,
+            remove_local_service,
             list_sites,
             apply_sites,
             set_site_ssl,

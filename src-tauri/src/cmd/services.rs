@@ -343,6 +343,80 @@ pub(crate) async fn set_service_option(state: State<'_, AppState>, kind: Service
     Ok(kind.manifest().options(&settings))
 }
 
+/// A service file's summary for the user to approve, and whether it replaces one they added.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ServiceFile {
+    pub(crate) review: manifest::Review,
+    pub(crate) replaces: bool,
+}
+
+/// Reads and checks a service file without adding it.
+#[tauri::command]
+pub(crate) async fn inspect_service_file(path: PathBuf) -> Result<ServiceFile> {
+    let text = std::fs::read_to_string(&path).map_err(|e| Error::msg(format!("Couldn't read {}: {e}", path.display())))?;
+    let m = manifest::parse(&text, false)?;
+    Ok(ServiceFile { replaces: manifest::extras().iter().any(|e| e.id == m.id), review: m.review() })
+}
+
+/// Adds (or updates) a service from a file the user reviewed: it's copied to
+/// `<root>/services/<id>/` and loaded from there on every start. Nobody has checked a local
+/// file, so it needs the user's approval, like a user template's risky steps.
+#[tauri::command]
+pub(crate) async fn add_service_file(app: AppHandle, state: State<'_, AppState>, path: PathBuf, approve: bool) -> Result<String> {
+    if !approve {
+        return Err(Error::msg("Review the service and approve it before adding it."));
+    }
+    let _op = state.ops.lock().await;
+    let text = std::fs::read_to_string(&path).map_err(|e| Error::msg(format!("Couldn't read {}: {e}", path.display())))?;
+    let m = manifest::parse(&text, false)?;
+    if let Some(kind) = ServiceKind::from_id(&m.id)
+        && state.supervisor.is_running(kind).await
+    {
+        return Err(Error::msg(format!("Stop {} before updating it.", kind.label())));
+    }
+    let (_, layout) = state.snapshot().await;
+    let folder = layout.services().join(&m.id);
+    std::fs::create_dir_all(&folder)?;
+    std::fs::write(folder.join("service.yaml"), &text)?;
+    // Its icon, when it names a file next to it (a bare name: nothing outside that folder).
+    if let (Some(icon), Some(from)) = (m.icon.as_deref(), path.parent())
+        && std::path::Path::new(icon).file_name().is_some_and(|n| n == icon)
+        && from.join(icon).is_file()
+    {
+        std::fs::copy(from.join(icon), folder.join(icon))?;
+    }
+    let (id, name) = (m.id.clone(), m.name.clone());
+    manifest::register(m)?;
+    logs::system(&app, logs::Level::Info, format!("Added the service {name} from {}", path.display()));
+    Ok(id)
+}
+
+/// Removes a service the user added. Its installed versions go first (through the normal
+/// remove), so nothing is left running from a folder LampRabit no longer knows; its data
+/// folder stays, like every service's.
+#[tauri::command]
+pub(crate) async fn remove_local_service(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<()> {
+    let _op = state.ops.lock().await;
+    let kind = ServiceKind::from_id(&id).filter(|k| matches!(k, ServiceKind::Plugin(_))).ok_or_else(|| Error::msg(format!("{id} isn't a service you added")))?;
+    if state.supervisor.is_running(kind).await {
+        return Err(Error::msg(format!("Stop {} before removing it.", kind.label())));
+    }
+    let (_, layout) = state.snapshot().await;
+    if std::fs::read_dir(layout.root().join("bin").join(&id)).is_ok_and(|mut d| d.next().is_some()) {
+        return Err(Error::msg(format!("Remove {}'s installed versions first.", kind.label())));
+    }
+    let label = kind.label();
+    let folder = layout.services().join(&id);
+    if folder.exists() {
+        std::fs::remove_dir_all(&folder).map_err(|e| Error::msg(format!("Couldn't delete {}: {e}", folder.display())))?;
+    }
+    manifest::unregister(&id);
+    state.update_settings(|s| s.ports.extra.retain(|k, _| !k.starts_with(&format!("{id}.")))).await?;
+    logs::system(&app, logs::Level::Info, format!("Removed the service {label}"));
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) async fn restart_service(app: AppHandle, state: State<'_, AppState>, kind: ServiceKind) -> Result<()> {
     let _op = state.ops.lock().await;

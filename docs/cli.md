@@ -27,6 +27,8 @@ It talks to the running app, so everything goes through the same code as the but
 | `lamprabit git <project>` | Branch, upstream, changed files |
 | `lamprabit config [key.path]` | The settings, or one value (`lamprabit config ports.http`) |
 | `lamprabit mcp` | The MCP server on stdin/stdout |
+| `lamprabit service check <file>` | Checks a service file (`service.yaml`) and says what it downloads, runs and uses; works without the app |
+| `lamprabit service try <file>` | Installs the service with what it needs, starts it, checks its health, starts it again (nothing new may spawn) and stops it, in a throwaway folder with its own settings; your LampRabit isn't touched. The folder is deleted when the run passes |
 
 Options: `--json` prints the answer as JSON; `--yes` confirms a destructive action; `--dry-run` shows a change without making it; `--no-launch` doesn't start LampRabit.
 

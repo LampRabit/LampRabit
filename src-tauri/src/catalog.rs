@@ -41,6 +41,8 @@ pub struct RuntimeInfo {
     /// Ports of a service that isn't built in, edited on its Settings card (built-in
     /// services' ports have fixed fields in Settings → Ports).
     pub ports: Vec<PortField>,
+    /// Added by the user from a file (`<root>/services/<id>/`), so it can be removed.
+    pub local: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,6 +113,7 @@ fn info(runtime: Runtime) -> RuntimeInfo {
                 .filter(|(_, d)| d.setting.is_none())
                 .map(|(name, d)| PortField { key: format!("{}.{name}", m.id), label: d.label.clone().unwrap_or_else(|| name.clone()), default: d.default })
                 .collect(),
+            local: manifest::extras().iter().any(|e| e.id == m.id),
         };
     }
     let win = cfg!(windows);
@@ -174,6 +177,7 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         needs: needs(runtime, None).into_iter().map(|n| n.runtime).collect(),
         suggests: suggests.to_vec(),
         ports: vec![],
+        local: false,
     }
 }
 
@@ -235,6 +239,8 @@ pub fn needs(runtime: Runtime, version: Option<&str>) -> Vec<Need> {
             let (min, max) = version.map_or(("27.0", "29"), rabbitmq_erlang);
             vec![need("erlang", Some(min), Some(max), "RabbitMQ runs on Erlang")]
         }
+        // A service that isn't built in says what it runs on in its manifest.
+        Runtime::Plugin(i) => manifest::extra(i).needs.iter().filter(|n| manifest::matches(&n.on)).map(|n| need(&n.runtime, n.min.as_deref(), None, &n.why)).collect(),
         _ => vec![],
     }
 }

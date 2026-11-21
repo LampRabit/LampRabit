@@ -41,7 +41,18 @@ pub fn options() -> Option<std::result::Result<Options, String>> {
         return Some(Err("usage: --smoke-test <empty folder> <runtime id>…".into()));
     };
     let mut runtimes = Vec::new();
-    for id in &args[at + 2..] {
+    let mut rest = args[at + 2..].iter();
+    while let Some(id) = rest.next() {
+        // `--service <file>`: a service that isn't built in (`lamprabit service try`).
+        if id == "--service" {
+            let Some(file) = rest.next() else { return Some(Err("--service needs a service file".into())) };
+            let added = std::fs::read_to_string(file).map_err(Error::from).and_then(|text| crate::manifest::parse(&text, false)).and_then(crate::manifest::register);
+            match added {
+                Ok(i) => runtimes.push(Runtime::Plugin(i)),
+                Err(e) => return Some(Err(format!("{file}: {e}"))),
+            }
+            continue;
+        }
         match Runtime::from_id(id) {
             Some(r) => runtimes.push(r),
             None => return Some(Err(format!("unknown runtime \"{id}\""))),

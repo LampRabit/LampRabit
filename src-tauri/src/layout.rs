@@ -39,6 +39,11 @@ impl Layout {
         self.root.join("www")
     }
 
+    /// Services the user added from a file: `services/<id>/service.yaml`.
+    pub fn services(&self) -> PathBuf {
+        self.root.join("services")
+    }
+
     pub fn data(&self, runtime: &str) -> PathBuf {
         self.root.join("data").join(runtime)
     }

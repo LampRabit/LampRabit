@@ -128,6 +128,33 @@ export interface RuntimeInfo {
   suggests: Runtime[];
   /** Ports of a service that isn't built in, edited on its Settings card. */
   ports: PortField[];
+  /** Added by the user from a file, so it can be removed. */
+  local: boolean;
+}
+
+/** What a service file does, for the user to approve before it's added (manifest.rs `Review`). */
+export interface ServiceReview {
+  id: string;
+  name: string;
+  blurb: string;
+  category: string;
+  homepage: string | null;
+  revision: number;
+  unavailable: string | null;
+  downloads: string | null;
+  checksum: string | null;
+  program: string | null;
+  args: string[];
+  files: string[];
+  /** Each port's label and default. */
+  ports: [string, number][];
+  needs: string[];
+}
+
+export interface ServiceFile {
+  review: ServiceReview;
+  /** A service the user added earlier has this id: adding updates it. */
+  replaces: boolean;
 }
 
 export interface PortField {
@@ -1030,6 +1057,10 @@ export const api = {
   restartService: (kind: ServiceKind) => invoke<void>("restart_service", { kind }),
   serviceOptions: (kind: ServiceKind) => invoke<ServiceOption[]>("service_options", { kind }),
   setServiceOption: (kind: ServiceKind, name: string, value: string) => invoke<ServiceOption[]>("set_service_option", { kind, name, value }),
+  inspectServiceFile: (path: string) => invoke<ServiceFile>("inspect_service_file", { path }),
+  /** The backend refuses without `approve`: the user must have seen the review. */
+  addServiceFile: (path: string, approve: boolean) => invoke<string>("add_service_file", { path, approve }),
+  removeLocalService: (id: string) => invoke<void>("remove_local_service", { id }),
   listSites: () => invoke<SitesInfo>("list_sites"),
   applySites: () => invoke<void>("apply_sites"),
   setSiteSsl: (name: string, ssl: boolean) => invoke<void>("set_site_ssl", { name, ssl }),

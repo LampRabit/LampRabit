@@ -188,7 +188,7 @@ impl Runtime {
     /// The built-in runtimes, then those of non-built-in manifests.
     pub fn all() -> Vec<Self> {
         let mut all = Self::BUILT_IN.to_vec();
-        all.extend((0..crate::manifest::extras().len()).filter_map(|i| u16::try_from(i).ok()).map(Self::Plugin));
+        all.extend(crate::manifest::extra_indexes().into_iter().map(Self::Plugin));
         all
     }
 

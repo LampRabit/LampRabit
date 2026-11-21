@@ -32,6 +32,9 @@
 - The user answered: linked projects from any folder/drive are wanted and get every feature ([decisions/projects.md](../context/decisions/projects.md)); service files stay YAML; the proposed order is confirmed.
 - Phase 27 **B3 done** (uncommitted): services and runtimes that exist only as a manifest (`ServiceKind::Plugin`, `Runtime::Plugin`, `Ports.extra`). Details in the phase file.
 
+- Committed: `cdc9952` (.ai/), `981d67d` (B3).
+- Phase 27 **C done** (uncommitted): local service files, Add/Remove a service on the Services page, `lamprabit service check|try`. Also fixed a crash B3 introduced: `Services.tsx` read `runtime` before its `const` declaration (inside a callback, so tsc missed it), which would have broken the Services page.
+
 ## Next step
 
-Phase 27 step C: load local service files from `<root>/services/<id>/service.yaml` at start (calling `manifest::register`), "Add a service from a file", and `lamprabit service check/try`.
+Phase 27 step D: the LampRabit/Services registry repository, the signed `index.json` and the Community section on the Services page. Needs the user: creating the repository and the signing key.

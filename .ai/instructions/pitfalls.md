@@ -16,3 +16,4 @@ Add one line here whenever something costs time and could bite again.
 - Prettier isn't how this code is formatted: `.prettierrc` (width 200) only keeps format-on-save close. Never run it over whole files or the repository.
 - `Site.framework` names are capitalised as shown ("Laravel", "Statamic"); compare them case-insensitively (the doctor's Laravel checks never ran because they compared with "laravel").
 - Component tests that use `serviceLabels` must fill it (the app loads it from the backend before the first render), or every service counts as unknown.
+- A `const` read inside a callback that runs during render (`.find(e => e === runtime)`) before the line that declares it throws at runtime, and `tsc` doesn't flag it. The Services page broke this way (2026-11-21); `npm run screenshots` renders the real pages and catches it.

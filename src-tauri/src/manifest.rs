@@ -882,39 +882,85 @@ pub fn built_ins() -> &'static [Manifest] {
     BUILT_INS.get_or_init(|| BUILT_IN.iter().map(|text| parse(text, true).unwrap_or_else(|e| panic!("built-in service manifest: {e}"))).collect())
 }
 
-/// Manifests that aren't built in (local files, later the registry), in the order they were
-/// added. Append-only, so a `ServiceKind::Plugin`/`Runtime::Plugin` index stays valid.
-static EXTRAS: RwLock<Vec<&'static Manifest>> = RwLock::new(Vec::new());
+/// Manifests that aren't built in (local files, later the registry), with whether they're
+/// shown. Entries are never moved or dropped, so a `ServiceKind::Plugin`/`Runtime::Plugin`
+/// index stays valid: an update replaces its entry, a removal hides it.
+static EXTRAS: RwLock<Vec<(&'static Manifest, bool)>> = RwLock::new(Vec::new());
 
 pub fn get(id: &str) -> Option<&'static Manifest> {
     built_ins().iter().find(|m| m.id == id).or_else(|| extras().into_iter().find(|m| m.id == id))
 }
 
+/// The shown non-built-in manifests.
 pub fn extras() -> Vec<&'static Manifest> {
-    EXTRAS.read().map(|e| e.clone()).unwrap_or_default()
+    EXTRAS.read().map(|e| e.iter().filter(|(_, shown)| *shown).map(|(m, _)| *m).collect()).unwrap_or_default()
+}
+
+/// The indexes of the shown non-built-in manifests.
+pub fn extra_indexes() -> Vec<u16> {
+    EXTRAS.read().map(|e| e.iter().enumerate().filter(|(_, (_, shown))| *shown).filter_map(|(i, _)| u16::try_from(i).ok()).collect()).unwrap_or_default()
 }
 
 pub fn extra(index: u16) -> &'static Manifest {
-    extras()[usize::from(index)]
+    EXTRAS.read().map(|e| e[usize::from(index)].0).expect("service list is unavailable")
 }
 
-/// Adds a non-built-in manifest and returns its index. Its id must not clash with a built-in
-/// or another added manifest, or two services would share folders and settings.
-// Called from tests until local service files (phase 27, step C) load manifests at start.
-#[cfg_attr(not(test), allow(dead_code))]
-// shortcut: each added manifest is leaked to get a 'static reference; fine for a handful
-// loaded at start, revisit if manifests get reloaded often.
+/// Adds a non-built-in manifest, or replaces the one with its id, and returns its index. A
+/// built-in's id is refused: two services would share folders and settings.
+// shortcut: each added manifest is leaked to get a 'static reference; fine for the handful
+// added by hand, revisit if manifests get reloaded often.
 pub fn register(manifest: Manifest) -> Result<u16> {
     if !manifest.builtin.is_empty() {
         return Err(Error::msg(format!("{}: only built-in services may use builtin hooks", manifest.id)));
     }
+    if built_ins().iter().any(|m| m.id == manifest.id) {
+        return Err(Error::msg(format!("LampRabit already has a service with the id \"{}\". Pick another id.", manifest.id)));
+    }
     let mut extras = EXTRAS.write().map_err(|_| Error::msg("service list is unavailable"))?;
-    if built_ins().iter().chain(extras.iter().copied()).any(|m| m.id == manifest.id) {
-        return Err(Error::msg(format!("A service with the id \"{}\" already exists. Pick another id.", manifest.id)));
+    let entry = (&*Box::leak(Box::new(manifest)), true);
+    if let Some(i) = extras.iter().position(|(m, _)| m.id == entry.0.id) {
+        extras[i] = entry;
+        return u16::try_from(i).map_err(|_| Error::msg("too many services"));
     }
     let index = u16::try_from(extras.len()).map_err(|_| Error::msg("too many services"))?;
-    extras.push(Box::leak(Box::new(manifest)));
+    extras.push(entry);
     Ok(index)
+}
+
+/// Loads the services the user added (`<dir>/<id>/service.yaml`). A file that doesn't load
+/// is skipped and described in the returned problems, so one bad file can't stop the rest.
+pub fn load_local(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut problems = Vec::new();
+    for entry in entries.flatten() {
+        let file = entry.path().join("service.yaml");
+        if !file.is_file() {
+            continue;
+        }
+        let folder = entry.file_name().to_string_lossy().into_owned();
+        let loaded = std::fs::read_to_string(&file).map_err(Error::from).and_then(|text| parse(&text, false)).and_then(|m| {
+            // The folder is where its files live; an id that differs would point elsewhere.
+            if m.id != folder {
+                return Err(Error::msg(format!("its id \"{}\" doesn't match its folder \"{folder}\"", m.id)));
+            }
+            register(m)
+        });
+        if let Err(e) = loaded {
+            problems.push(format!("The service in {} wasn't loaded: {e}", file.display()));
+        }
+    }
+    problems
+}
+
+/// Hides a non-built-in service from every list; registering its id again shows it.
+pub fn unregister(id: &str) {
+    if let Ok(mut extras) = EXTRAS.write() {
+        for (m, shown) in extras.iter_mut() {
+            if m.id == id {
+                *shown = false;
+            }
+        }
+    }
 }
 
 /// Parses and checks a manifest. `builtin` allows the hooks only LampRabit's own may use.
@@ -922,6 +968,30 @@ pub fn parse(text: &str, builtin: bool) -> Result<Manifest> {
     let manifest: Manifest = serde_yaml_ng::from_str(text).map_err(|e| Error::msg(format!("Not a valid service manifest: {e}")))?;
     manifest.check(builtin).map_err(|e| Error::msg(format!("{}: {e}", manifest.id)))?;
     Ok(manifest)
+}
+
+/// A manifest's summary for approval (`Manifest::review`). Values keep their placeholders
+/// (`{{port.http}}`, `{{data}}`): they're what the file says, not this machine's paths.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Review {
+    pub id: String,
+    pub name: String,
+    pub blurb: String,
+    pub category: String,
+    pub homepage: Option<String>,
+    pub revision: u32,
+    /// Why it can't run on this platform, when it can't.
+    pub unavailable: Option<String>,
+    pub downloads: Option<String>,
+    pub checksum: Option<String>,
+    pub program: Option<String>,
+    pub args: Vec<String>,
+    /// Files it writes or copies before it starts.
+    pub files: Vec<String>,
+    /// Each port's label and default.
+    pub ports: Vec<(String, u16)>,
+    pub needs: Vec<String>,
 }
 
 /// Placeholders every manifest can use.
@@ -1210,6 +1280,45 @@ impl Manifest {
             out.extend(c.env.iter().map(|(_, v)| v.as_str()));
         }
         out
+    }
+
+    /// What a user approves before adding this service from a file: where it downloads from,
+    /// how that's checked, what it runs and which files and ports it uses, on this platform.
+    pub fn review(&self) -> Review {
+        let source = self.source.here();
+        let downloads = source.map(|s| match (&s.github, &s.npm, &s.url) {
+            (_, _, Some(url)) => url.clone(),
+            (Some(repo), _, None) => format!("GitHub releases of {repo}"),
+            (None, Some(package), None) => format!("The npm package {package}"),
+            _ => "Nowhere".to_string(),
+        });
+        let checksum = source.map(|s| match &s.checksum {
+            Checksum::GithubDigest => "The SHA-256 GitHub reports for each file".to_string(),
+            Checksum::Npm => "npm's SHA-512 for the package".to_string(),
+            Checksum::Sha256(at) => format!("The SHA-256 published at {at}"),
+            Checksum::Sha512(at) => format!("The SHA-512 published at {at}"),
+            Checksum::None => "Not checked".to_string(),
+        });
+        let run = self.run.as_ref();
+        Review {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            blurb: self.blurb.clone(),
+            category: self.category.clone(),
+            homepage: self.homepage.clone(),
+            revision: self.revision,
+            unavailable: self.unavailable_here().map(str::to_string),
+            downloads,
+            checksum,
+            program: run.and_then(|r| r.program.pick()).map(str::to_string),
+            args: run.map(|r| r.args.iter().flat_map(Arg::picked).map(str::to_string).collect()).unwrap_or_default(),
+            files: self.files.iter().filter(|f| matches(&f.on)).filter_map(|f| f.path.clone().or_else(|| f.to.clone()).or_else(|| f.copy.clone())).collect(),
+            ports: self.ports.iter().map(|(name, d)| (d.label.clone().unwrap_or_else(|| name.clone()), d.default)).collect(),
+            needs: self.needs.iter().filter(|n| matches(&n.on)).map(|n| match &n.min {
+                Some(min) => format!("{} {min} or newer", n.runtime),
+                None => n.runtime.clone(),
+            }).collect(),
+        }
     }
 
     /// `binary` relative to the install folder: the runtime's "install is complete" marker.

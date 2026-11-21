@@ -92,7 +92,7 @@ impl<'de> Deserialize<'de> for ServiceKind {
 impl ServiceKind {
     pub fn all() -> Vec<Self> {
         let mut all = vec![Self::Apache, Self::Nginx, Self::Caddy, Self::Frankenphp, Self::Tomcat, Self::Mariadb, Self::Mysql, Self::Postgres, Self::Mongodb, Self::Clickhouse, Self::Neo4j, Self::Meilisearch, Self::Typesense, Self::Rustfs, Self::Minio, Self::Elasticsearch, Self::Opensearch, Self::Rabbitmq, Self::Ollama, Self::N8n, Self::Mailpit, Self::Redis, Self::Memcached, Self::Pgadmin];
-        all.extend((0..manifest::extras().len()).filter_map(|i| u16::try_from(i).ok()).map(Self::Plugin));
+        all.extend(manifest::extra_indexes().into_iter().map(Self::Plugin));
         all
     }
 
@@ -1534,9 +1534,49 @@ health: { http: { path: /health } }
     }
 
     #[test]
+    fn local_service_files_load_update_and_hide() {
+        let dir = std::env::temp_dir().join(format!("lr-local-services-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let put = |folder: &str, text: &str| {
+            std::fs::create_dir_all(dir.join(folder)).unwrap();
+            std::fs::write(dir.join(folder).join("service.yaml"), text).unwrap();
+        };
+        let local = ECHO.replace("id: echo", "id: echo-local");
+        put("echo-local", &local);
+        put("elsewhere", &ECHO.replace("id: echo", "id: echo-elsewhere"));
+        put("broken", "schema: 1\nid: broken\n");
+        let problems = manifest::load_local(&dir);
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("doesn't match its folder")));
+        assert!(ServiceKind::from_id("echo-elsewhere").is_none());
+        let kind = ServiceKind::from_id("echo-local").unwrap();
+
+        // Adding the same id again updates that service in place.
+        let i = manifest::register(manifest::parse(&local.replace("name: Echo", "name: Echo 2"), false).unwrap()).unwrap();
+        assert_eq!(ServiceKind::Plugin(i), kind);
+        assert_eq!(kind.label(), "Echo 2");
+        // Removing hides it everywhere; adding it back reuses its index.
+        manifest::unregister("echo-local");
+        assert!(ServiceKind::from_id("echo-local").is_none() && Runtime::from_id("echo-local").is_none());
+        assert!(!crate::catalog::catalog().runtimes.iter().any(|r| r.id == "echo-local"));
+        assert_eq!(manifest::register(manifest::parse(&local, false).unwrap()).unwrap(), i);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_service_file_review_says_what_it_does() {
+        let r = manifest::parse(ECHO, false).unwrap().review();
+        assert_eq!(r.downloads.as_deref(), Some("GitHub releases of someone/echo"));
+        assert_eq!(r.checksum.as_deref(), Some("The SHA-256 GitHub reports for each file"));
+        assert_eq!(r.program.as_deref(), Some("{{home}}/echo{{exe}}"));
+        assert_eq!(r.args, vec!["--port", "{{port.http}}"]);
+        assert_eq!(r.ports, vec![("Web".to_string(), 7000)]);
+    }
+
+    #[test]
     fn a_manifest_only_service_cant_take_a_built_in_id() {
         let m = manifest::parse(&ECHO.replace("id: echo", "id: redis"), false).unwrap();
-        assert!(manifest::register(m).unwrap_err().to_string().contains("already exists"));
+        assert!(manifest::register(m).unwrap_err().to_string().contains("already has a service"));
     }
 
     #[test]
