@@ -199,10 +199,17 @@ fn need(runtime: &'static str, min: Option<&str>, max: Option<&str>, why: &'stat
     Need { runtime, min: min.map(str::to_string), max: max.map(str::to_string), prefer: None, why }
 }
 
-/// What a runtime needs at `version` (or at any version, for listing). Kept in step with the
-/// checks that refuse to start without it (`configs::tomcat_java`, `configs::neo4j_java`,
-/// `runtimes::n8n_node`), so whatever this installs is accepted there.
+/// What a runtime needs at `version` (or at any version, for listing). A service says so in
+/// its manifest (`needs`), which the start-up checks read too.
 pub fn needs(runtime: Runtime, version: Option<&str>) -> Vec<Need> {
+    if let Some(m) = manifest::get(runtime.id()) {
+        return m
+            .needs
+            .iter()
+            .filter(|n| n.applies(version))
+            .map(|n| Need { runtime: &n.runtime, min: n.min.clone(), max: n.max.clone(), prefer: n.prefer.as_deref(), why: &n.why })
+            .collect();
+    }
     let major = version.and_then(|v| parts(v).first().copied());
     match runtime {
         // Composer 2.2 (its LTS line) still runs on PHP 5.3; 2.3 and later need 7.2.5.
@@ -210,56 +217,17 @@ pub fn needs(runtime: Runtime, version: Option<&str>) -> Vec<Need> {
             let php = if version.is_some_and(|v| cmp(&parts(v), &[2, 3]).is_lt()) { "5.3.2" } else { "7.2.5" };
             vec![need("php", Some(php), None, "Composer runs on PHP")]
         }
-        Runtime::Tomcat => {
-            let java = match major {
-                Some(11..) | None => "17",
-                Some(10) => "11",
-                Some(_) => "8",
-            };
-            vec![need("java", Some(java), None, "Tomcat runs on the active Java")]
-        }
-        Runtime::Neo4j => vec![need("java", Some("21"), None, "Neo4j runs on the active Java")],
         // Maven 4 needs Java 17; Maven 3 runs on 8 and anything newer.
         Runtime::Maven => vec![need("java", Some(if major.is_none_or(|m| m >= 4) { "17" } else { "8" }), None, "Maven runs on the active Java")],
         Runtime::Gradle => {
             let (min, max) = version.map_or(("17", Some("25")), gradle_java);
             vec![need("java", Some(min), max, "Gradle runs on the active Java, and each version only up to a newest Java")]
         }
-        Runtime::N8n => vec![need("node", Some("24"), None, "n8n runs on NVM's default Node.js")],
-        Runtime::Pgadmin => vec![
-            Need { prefer: Some("3.13"), ..need("python", Some("3.10"), Some("3.14"), "pgAdmin runs in a Python environment") },
-            need("postgres", None, None, "pgAdmin manages LampRabit's PostgreSQL"),
-        ],
         Runtime::Phppgadmin => vec![need("postgres", None, None, "phpPgAdmin manages LampRabit's PostgreSQL"), need("php", Some("8.0"), None, "phpPgAdmin runs on PHP")],
         Runtime::Phpredisadmin => vec![need("redis", None, None, "phpRedisAdmin browses LampRabit's Redis"), need("php", Some("7.2"), None, "phpRedisAdmin runs on PHP")],
         Runtime::Phpmyadmin | Runtime::Adminer => vec![need("php", None, None, "It runs on PHP")],
         Runtime::Mongosh | Runtime::Mongotools | Runtime::Compass => vec![need("mongodb", None, None, "It works with LampRabit's MongoDB")],
-        // Elsewhere RabbitMQ runs on the system's Erlang, which LampRabit can't install.
-        Runtime::Rabbitmq if cfg!(windows) => {
-            let (min, max) = version.map_or(("27.0", "29"), rabbitmq_erlang);
-            vec![need("erlang", Some(min), Some(max), "RabbitMQ runs on Erlang")]
-        }
-        // A service that isn't built in says what it runs on in its manifest.
-        Runtime::Plugin(i) => manifest::extra(i).needs.iter().filter(|n| manifest::matches(&n.on)).map(|n| need(&n.runtime, n.min.as_deref(), None, &n.why)).collect(),
         _ => vec![],
-    }
-}
-
-/// The Erlang/OTP versions each RabbitMQ release supports, from rabbitmq.com/docs/which-erlang
-/// (checked 2026-11-04). Newer releases than the table knows get its newest row.
-fn rabbitmq_erlang(version: &str) -> (&'static str, &'static str) {
-    let v = parts(version);
-    let at_least = |m: &[u64]| cmp(&v, m) != std::cmp::Ordering::Less;
-    if at_least(&[4, 4]) || at_least(&[4, 3, 7]) {
-        ("27.0", "29")
-    } else if at_least(&[4, 3, 6]) {
-        ("27.0", "28")
-    } else if at_least(&[4, 3, 3]) || (at_least(&[4, 2, 9]) && !at_least(&[4, 3])) {
-        ("27.0", "27")
-    } else if at_least(&[4, 0, 4]) {
-        ("26.2", "27")
-    } else {
-        ("26.2", "26.2")
     }
 }
 
@@ -503,12 +471,17 @@ mod tests {
 
     #[test]
     fn rabbitmq_follows_its_erlang_table() {
-        assert_eq!(rabbitmq_erlang("4.0.2"), ("26.2", "26.2"));
-        assert_eq!(rabbitmq_erlang("4.1.4"), ("26.2", "27"));
-        assert_eq!(rabbitmq_erlang("4.2.8"), ("26.2", "27"));
-        assert_eq!(rabbitmq_erlang("4.2.10"), ("27.0", "27"));
-        assert_eq!(rabbitmq_erlang("4.3.6"), ("27.0", "28"));
-        assert_eq!(rabbitmq_erlang("4.4.0"), ("27.0", "29"));
+        // Its manifest's rows (they're Windows-only, so read them directly here).
+        let rows = &manifest::get("rabbitmq").unwrap().needs;
+        let erlang = |v: &str| rows.iter().find(|n| n.runtime == "erlang" && (n.since.as_deref().is_none_or(|s| crate::version::numbers(v) >= crate::version::numbers(s))) && n.until.as_deref().is_none_or(|u| crate::version::numbers(v) < crate::version::numbers(u))).map(|n| (n.min.clone().unwrap(), n.max.clone().unwrap()));
+        let pair = |a: &str, b: &str| Some((a.to_string(), b.to_string()));
+        assert_eq!(erlang("4.0.2"), pair("26.2", "26.2"));
+        assert_eq!(erlang("4.1.4"), pair("26.2", "27"));
+        assert_eq!(erlang("4.2.8"), pair("26.2", "27"));
+        assert_eq!(erlang("4.2.10"), pair("27.0", "27"));
+        assert_eq!(erlang("4.3.1"), pair("26.2", "27"));
+        assert_eq!(erlang("4.3.6"), pair("27.0", "28"));
+        assert_eq!(erlang("4.4.0"), pair("27.0", "29"));
         let otp = need("erlang", Some("26.2"), Some("27"), "");
         assert!(otp.fits("27.3.4") && otp.fits("26.2.5") && !otp.fits("28.1") && !otp.fits("26.1"));
     }

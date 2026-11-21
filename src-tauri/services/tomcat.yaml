@@ -11,7 +11,9 @@ license: Apache-2.0
 source: { builtin: true }
 binary: bin/bootstrap.jar
 needs:
-  - { runtime: java, why: Tomcat runs on the active Java }
+  - { runtime: java, min: "17", since: "11", why: Tomcat runs on the active Java }
+  - { runtime: java, min: "11", since: "10", until: "11", why: Tomcat runs on the active Java }
+  - { runtime: java, min: "8", until: "10", why: Tomcat runs on the active Java }
 ports:
   http: { default: 8180, hint: "Java web apps, behind the web server", label: HTTP }
   shutdown: { default: 8105, hint: "Tomcat's stop command, 127.0.0.1 only", label: Shutdown }

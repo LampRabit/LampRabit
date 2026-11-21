@@ -383,7 +383,8 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
 fn manifest_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
     let m: &'static Manifest = kind.manifest();
     let mut ctx = manifest::Ctx::new(m, settings, layout)?;
-    for need in m.needs.iter().filter(|n| manifest::matches(&n.on)) {
+    let version = kind.version(settings);
+    for need in m.needs.iter().filter(|n| n.applies(version.as_deref())) {
         let (home, bin) = need_home(m, need, settings, layout)?;
         ctx.set(format!("needs.{}.home", need.runtime), home.to_string_lossy());
         ctx.set(format!("needs.{}.bin", need.runtime), bin.to_string_lossy());
@@ -440,6 +441,7 @@ fn need_home(m: &Manifest, need: &manifest::Need, settings: &Settings, layout: &
         "erlang" => "Erlang",
         "node" => "Node.js",
         "python" => "Python",
+        "postgres" => "PostgreSQL",
         other => other,
     };
     let min = need.min.as_deref();
@@ -454,11 +456,17 @@ fn need_home(m: &Manifest, need: &manifest::Need, settings: &Settings, layout: &
         .versions
         .get(&need.runtime)
         .ok_or_else(|| Error::msg(format!("{}. Install {wanted} on the Services page first.", need.why)))?;
+    let have = crate::version::numbers(version);
     if let Some(min) = min {
         let want = crate::version::numbers(min);
-        let have = crate::version::numbers(version);
         if have.iter().take(want.len()).cloned().collect::<Vec<_>>() < want {
             return Err(Error::msg(format!("{} needs {label} {min} or newer, and the active {label} is {version}. Install {wanted} on the Services page.", m.name)));
+        }
+    }
+    if let Some(max) = need.max.as_deref() {
+        let top = crate::version::numbers(max);
+        if have.iter().take(top.len()).cloned().collect::<Vec<_>>() > top {
+            return Err(Error::msg(format!("{} works with {label} up to {max}, and the active {label} is {version}. Switch to an older {label} on the Services page.", m.name)));
         }
     }
     let home = layout.bin(&need.runtime, version);

@@ -14,7 +14,15 @@ source:
 binary: "sbin/rabbitmq-server{{script}}"
 # On Windows it runs on LampRabit's Erlang; elsewhere on the system's.
 needs:
-  - { runtime: erlang, on: [windows], why: RabbitMQ runs on Erlang }
+  # rabbitmq.com/docs/which-erlang (checked 2026-11-04). Elsewhere RabbitMQ runs on the
+  # system's Erlang (system_needs below), which LampRabit can't install.
+  - { runtime: erlang, min: "27.0", max: "29", since: "4.3.7", on: [windows], why: RabbitMQ runs on Erlang }
+  - { runtime: erlang, min: "27.0", max: "28", since: "4.3.6", until: "4.3.7", on: [windows], why: RabbitMQ runs on Erlang }
+  - { runtime: erlang, min: "27.0", max: "27", since: "4.3.3", until: "4.3.6", on: [windows], why: RabbitMQ runs on Erlang }
+  - { runtime: erlang, min: "26.2", max: "27", since: "4.3", until: "4.3.3", on: [windows], why: RabbitMQ runs on Erlang }
+  - { runtime: erlang, min: "27.0", max: "27", since: "4.2.9", until: "4.3", on: [windows], why: RabbitMQ runs on Erlang }
+  - { runtime: erlang, min: "26.2", max: "27", since: "4.0.4", until: "4.2.9", on: [windows], why: RabbitMQ runs on Erlang }
+  - { runtime: erlang, min: "26.2", max: "26.2", until: "4.0.4", on: [windows], why: RabbitMQ runs on Erlang }
 system_needs:
   - command: erl
     on: [unix]

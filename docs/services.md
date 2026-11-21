@@ -207,12 +207,15 @@ Services that take a while to start (a JVM, Python, Node) should set `behaviour:
 ```yaml
 needs:
   - { runtime: java, min: "21", why: Neo4j runs on the active Java }
-  - { runtime: erlang, on: [windows], why: RabbitMQ runs on Erlang }
+  - { runtime: python, min: "3.10", max: "3.14", prefer: "3.13", why: pgAdmin runs in a Python environment }
+  # Tomcat 10 runs on Java 11, Tomcat 11 and later on Java 17:
+  - { runtime: java, min: "11", since: "10", until: "11", why: Tomcat runs on the active Java }
+  - { runtime: java, min: "17", since: "11", why: Tomcat runs on the active Java }
 system_needs:
   - { command: erl, on: [unix], hint: "Install Erlang with your system's packages (sudo apt install erlang-nox), then start RabbitMQ again." }
 ```
 
-`needs` names a runtime LampRabit installs: `java`, `erlang`, `python`, or `node` (NVM's). The service won't start until it's installed in a version at least `min`, and the error says what to install. `{{needs.<id>.home}}` and `{{needs.<id>.bin}}` point at it. `system_needs` looks for a command on PATH that LampRabit can't provide and shows `hint` when it's missing.
+`needs` names a runtime LampRabit installs: `java`, `erlang`, `python`, `postgres`, or `node` (NVM's). The install dialog installs it first (picking `prefer` when several versions fit), and the service won't start until it's installed in a version from `min` up to `max` (by prefix: `3.14` takes 3.14.x); the error says what to install. `since` and `until` limit a need to some of the service's own versions (from `since` on, below `until`), for requirements that change between releases; while listing, before a version is chosen, only needs without `until` count. `{{needs.<id>.home}}` and `{{needs.<id>.bin}}` point at it. `system_needs` looks for a command on PATH that LampRabit can't provide and shows `hint` when it's missing.
 
 ### How apps reach it: `connection`, `ui`
 

@@ -654,11 +654,36 @@ impl Source {
 #[serde(deny_unknown_fields)]
 pub struct Need {
     pub runtime: String,
+    /// Oldest version that works ("17" takes 17.x).
     #[serde(default)]
     pub min: Option<String>,
+    /// Newest version that works, by prefix ("3.14" takes 3.14.x).
+    #[serde(default)]
+    pub max: Option<String>,
+    /// The version an install picks when several fit.
+    #[serde(default)]
+    pub prefer: Option<String>,
+    /// Only for this service's versions from `since` on and below `until` (Tomcat 10 needs
+    /// Java 11, Tomcat 11 Java 17). Without a version (listing), only open-ended ones count.
+    #[serde(default)]
+    pub since: Option<String>,
+    #[serde(default)]
+    pub until: Option<String>,
     #[serde(default)]
     pub on: Vec<String>,
     pub why: String,
+}
+
+impl Need {
+    /// Whether it applies to this platform and to the service at `version`.
+    pub fn applies(&self, version: Option<&str>) -> bool {
+        let n = crate::version::numbers;
+        matches(&self.on)
+            && match version {
+                None => self.until.is_none(),
+                Some(v) => self.since.as_deref().is_none_or(|s| n(v) >= n(s)) && self.until.as_deref().is_none_or(|u| n(v) < n(u)),
+            }
+    }
 }
 
 /// Something LampRabit can't install, looked for on PATH.
@@ -1444,7 +1469,7 @@ fn check_source(src: &Source, builtin: bool) -> std::result::Result<(), String> 
 }
 
 /// What `needs:` can name: runtimes whose folder a service can be pointed at.
-const NEEDS: &[&str] = &["java", "erlang", "node", "python"];
+const NEEDS: &[&str] = &["java", "erlang", "node", "python", "postgres"];
 
 /// A path must not climb out of the folder it starts in.
 fn inside(path: &str) -> std::result::Result<(), String> {
