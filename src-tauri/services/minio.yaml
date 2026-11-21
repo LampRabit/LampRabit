@@ -10,8 +10,8 @@ source: { lamprabit: true }
 binary: "minio{{exe}}"
 ports:
   # 9000/9001 are PHP's, 9100/9101 RustFS's.
-  api: { default: 9110, setting: minio, label: S3 API }
-  console: { default: 9111, setting: minioConsole, label: Console }
+  api: { default: 9110, hint: "The S3 API apps connect to", label: S3 API }
+  console: { default: 9111, hint: "Its web console", label: Console }
 data: storage
 dirs: ["{{data}}"]
 run:

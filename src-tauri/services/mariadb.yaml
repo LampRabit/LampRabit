@@ -15,7 +15,7 @@ binary: "bin/mariadbd{{exe}}"
 suggests: [phpmyadmin, adminer]
 ports:
   # `mysql` predates MySQL support: it's MariaDB's.
-  mysql: { default: 3306, setting: mysql }
+  mysql: { default: 3306, hint: "Database" }
 run:
   program: "{{home}}/bin/mariadbd{{exe}}"
   # --defaults-file must be the first argument.

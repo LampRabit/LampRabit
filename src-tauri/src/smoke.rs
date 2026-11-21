@@ -77,6 +77,11 @@ pub fn settings(options: &Options) -> Settings {
     if let Ok(shifted) = serde_json::from_value(ports) {
         settings.ports = shifted;
     }
+    for port in settings.ports.services.values_mut() {
+        if u64::from(*port) + PORT_SHIFT < 65_000 {
+            *port += PORT_SHIFT as u16;
+        }
+    }
     let servers: Vec<_> = options.runtimes.iter().filter_map(|r| ServiceKind::all().into_iter().find(|k| k.id() == r.id())).filter_map(|k| k.web_server()).collect();
     if !servers.is_empty() {
         settings.web_servers = servers;

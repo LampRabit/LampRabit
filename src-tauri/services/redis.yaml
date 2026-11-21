@@ -22,7 +22,7 @@ source:
 binary: "redis-server{{exe}}"
 suggests: [phpredisadmin]
 ports:
-  redis: { default: 6379, setting: redis }
+  redis: { default: 6379, hint: "Cache and queues" }
 dirs: ["{{data}}"]
 settings:
   appendonly:

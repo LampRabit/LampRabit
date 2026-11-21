@@ -17,8 +17,8 @@ source:
 binary: "rustfs{{exe}}"
 ports:
   # Not the usual 9000/9001, which PHP's FastCGI ports use.
-  api: { default: 9100, setting: rustfs, label: S3 API }
-  console: { default: 9101, setting: rustfsConsole, label: Console }
+  api: { default: 9100, hint: "The S3 API apps connect to", label: S3 API }
+  console: { default: 9101, hint: "Its web console", label: Console }
 # Its buckets can live anywhere, even outside the LampRabit folder (Settings → Storage).
 data: storage
 dirs: ["{{data}}"]

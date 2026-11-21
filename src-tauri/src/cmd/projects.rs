@@ -51,10 +51,10 @@ pub(crate) async fn create_project(app: AppHandle, state: State<'_, AppState>, r
             // The process is up before it accepts connections.
             for _ in 0..30 {
                 let probe = match engine {
-                    DbEngine::Postgres => diagnose::probe_postgres(settings.ports.postgres).await,
+                    DbEngine::Postgres => diagnose::probe_postgres(settings.ports.service("postgres.postgres")).await,
                     DbEngine::Mongodb | DbEngine::Sqlite => diagnose::Probe::Ok,
-                    DbEngine::Mysql => diagnose::probe_mysql(settings.ports.mysql_server).await,
-                    DbEngine::Mariadb => diagnose::probe_mysql(settings.ports.mysql).await,
+                    DbEngine::Mysql => diagnose::probe_mysql(settings.ports.service("mysql.mysql")).await,
+                    DbEngine::Mariadb => diagnose::probe_mysql(settings.ports.service("mariadb.mysql")).await,
                 };
                 if matches!(probe, diagnose::Probe::Ok) {
                     break;

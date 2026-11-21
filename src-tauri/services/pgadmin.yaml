@@ -13,7 +13,7 @@ binary: installed.txt
 needs:
   - { runtime: python, min: "3.10", why: pgAdmin runs on Python }
 ports:
-  http: { default: 5050, setting: pgadmin }
+  http: { default: 5050, hint: "Its web server, behind pgadmin.test" }
 health: { http: { path: /misc/ping } }
 behaviour: { slow: true }
 log: pgadmin.log

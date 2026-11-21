@@ -17,9 +17,9 @@ Plan: [../plans/active/phase-27-pluggable-services.md](../plans/active/phase-27-
 | B1. Downloads from YAML (17 of 24 services) | done, committed in `f18e816` |
 | B2. `settings:` options in the Services page | done, committed in `f18e816` |
 | B3. Services without an enum variant (`ServiceKind::Plugin`, `Ports.extra`) | done, commit `981d67d` |
-| C. Local services from a file, `lamprabit service check/try` | done 2026-11-21, uncommitted |
-| **D. Registry repo, signed index, marketplace** | **next** |
-| E. Wider format (`kind: tool`, `kind: cli`, backup hooks) | planned |
+| C. Local services from a file, `lamprabit service check/try` | done, commit `e2700d6` |
+| D. Registry repo, signed index, marketplace | **later** (the user, 2026-11-21) |
+| **E. No hard-coded service: E1 ports → E2 needs → E3 downloads → E4 setup → E5 site engine → E6 frontend/leftovers → E7 wider kinds** | **in progress** |
 
 ## Next after phase 27
 

@@ -561,7 +561,7 @@ function ProfileTiles({
  * PostgreSQL in their own lists.
  */
 function dbTools(service: ServiceInfo, sites: SitesInfo | undefined, settings: Settings | undefined): { tool: Runtime; url: string }[] {
-  const mailUi = settings?.ports.mailUi;
+  const mailUi = settings?.ports.services["mailpit.ui"];
   const at = (tool: Runtime, url: string | undefined, query = "") => (url ? [{ tool, url: `${url}${query}` }] : []);
   if (service.kind === "mariadb" || service.kind === "mysql") {
     const order = (["mariadb", "mysql"] as const)
@@ -576,7 +576,7 @@ function dbTools(service: ServiceInfo, sites: SitesInfo | undefined, settings: S
     return [
       ...at("adminer", toolUrl("adminer", sites, mailUi), `?pgsql=127.0.0.1:${service.port}&username=root&db=postgres`),
       ...at("phppgadmin", toolUrl("phppgadmin", sites, mailUi)),
-      ...at("pgadmin", toolUrl("pgadmin", sites, mailUi, settings?.ports.pgadmin)),
+      ...at("pgadmin", toolUrl("pgadmin", sites, mailUi, settings?.ports.services["pgadmin.http"])),
     ];
   }
   return [];
@@ -592,7 +592,7 @@ function openAction(
   settings: Settings | undefined,
   navigate: (p: "services") => void,
 ): { label: string; icon: typeof ExternalLink; run: () => void; always?: boolean } | null {
-  const mailUi = settings?.ports.mailUi;
+  const mailUi = settings?.ports.services["mailpit.ui"];
   if (isServer(service.kind)) {
     return { label: "Open in browser", icon: ExternalLink, run: () => openUrl(connection(service).url + "/").catch(notifyError) };
   }
@@ -614,17 +614,17 @@ function openAction(
     return { label: "Open search preview", icon: ExternalLink, run: () => openUrl(`http://localhost:${service.port}/`).catch(notifyError) };
   }
   if (service.kind === "minio") {
-    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.minioConsole ?? 9111}/`).catch(notifyError) };
+    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.services["minio.console"] ?? 9111}/`).catch(notifyError) };
   }
   if (service.kind === "rabbitmq") {
-    return { label: "Open management console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.rabbitmqManagement ?? 15672}/`).catch(notifyError) };
+    return { label: "Open management console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.services["rabbitmq.management"] ?? 15672}/`).catch(notifyError) };
   }
   if (service.kind === "n8n") {
     const url = toolUrl("n8n", sites, mailUi, service.port);
     return url ? { label: "Open n8n", icon: ExternalLink, run: () => openUrl(url).catch(notifyError) } : null;
   }
   if (service.kind === "rustfs") {
-    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.rustfsConsole ?? 9101}/`).catch(notifyError) };
+    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.services["rustfs.console"] ?? 9101}/`).catch(notifyError) };
   }
   if (service.kind === "clickhouse") {
     return { label: "Open console", icon: Table2, run: () => openUrl(`http://localhost:${service.port}/play`).catch(notifyError) };
@@ -634,7 +634,7 @@ function openAction(
     return url ? { label: "Open Neo4j Browser", icon: ExternalLink, run: () => openUrl(url).catch(notifyError) } : null;
   }
   if (service.kind === "pgadmin") {
-    const url = toolUrl("pgadmin", sites, mailUi, settings?.ports.pgadmin);
+    const url = toolUrl("pgadmin", sites, mailUi, settings?.ports.services["pgadmin.http"]);
     return url ? { label: "Open pgAdmin", icon: ExternalLink, run: () => openUrl(url).catch(notifyError) } : null;
   }
   if (service.kind === "redis") {
@@ -1027,7 +1027,7 @@ function FoldCard({ id, defaultOpen, title, extra, children }: { id: string; def
 /** One-click tools, each saying what it needs before it can open. */
 function QuickShortcuts({ sites, services, settings }: { sites?: SitesInfo; services: ServiceInfo[]; settings?: Settings }) {
   const navigate = useAppStore((s) => s.navigate);
-  const mailUi = settings?.ports.mailUi;
+  const mailUi = settings?.ports.services["mailpit.ui"];
   const up = (kind: ServiceKind) => services.some((s) => s.kind === kind && s.state === "running");
   const web = primaryServer(settings);
   const db = up("mariadb") || up("mysql");

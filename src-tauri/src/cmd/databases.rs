@@ -63,7 +63,7 @@ pub(crate) async fn open_compass(state: State<'_, AppState>) -> Result<()> {
     let version = settings.versions.get("compass").ok_or_else(|| Error::msg("Install MongoDB Compass first (Services)."))?;
     let home = layout.bin("compass", version);
     let program = runtimes::compass_program(&home).ok_or_else(|| Error::msg("Compass's install looks incomplete. Remove it on the Services page and install it again."))?;
-    let uri = format!("mongodb://127.0.0.1:{}", settings.ports.mongodb);
+    let uri = format!("mongodb://127.0.0.1:{}", settings.ports.service("mongodb.mongodb"));
     let mut cmd = if cfg!(target_os = "macos") {
         let mut c = std::process::Command::new("open");
         c.arg("-a").arg(&program).arg("--args").arg(&uri);

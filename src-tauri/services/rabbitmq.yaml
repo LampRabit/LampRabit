@@ -20,8 +20,8 @@ system_needs:
     on: [unix]
     hint: "RabbitMQ runs on Erlang, which isn't installed. Install it with your system's packages (sudo apt install erlang-nox, sudo dnf install erlang, or brew install erlang), then start RabbitMQ again."
 ports:
-  amqp: { default: 5672, setting: rabbitmq, label: AMQP }
-  management: { default: 15672, setting: rabbitmqManagement, label: Management console }
+  amqp: { default: 5672, hint: "AMQP, what apps connect to", label: AMQP }
+  management: { default: 15672, hint: "Its management console", label: Management console }
 dirs: ["{{data}}", "{{logs}}"]
 files:
   # AMQP and the management console on 127.0.0.1 only.

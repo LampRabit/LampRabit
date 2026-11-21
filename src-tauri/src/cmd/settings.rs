@@ -149,16 +149,18 @@ pub(crate) fn check_values(settings: &mut Settings) -> Result<()> {
         return Err(Error::msg("PHP workers must be between 1 and 32."));
     }
     let p = &settings.ports;
-    for (port, name) in [
+    let core = [
         (p.http, "HTTP"), (p.https, "HTTPS"), (p.nginx_http, "Nginx HTTP"), (p.nginx_https, "Nginx HTTPS"),
         (p.apache_http, "Apache HTTP"), (p.apache_https, "Apache HTTPS"), (p.caddy_http, "Caddy HTTP"), (p.caddy_https, "Caddy HTTPS"),
         (p.caddy_admin, "Caddy admin"), (p.frankenphp_http, "FrankenPHP HTTP"), (p.frankenphp_https, "FrankenPHP HTTPS"),
-        (p.frankenphp_admin, "FrankenPHP admin"), (p.tomcat_http, "Tomcat HTTP"), (p.tomcat_shutdown, "Tomcat shutdown"), (p.mysql, "MariaDB"), (p.mail_smtp, "Mailpit SMTP"), (p.mail_ui, "Mailpit inbox"), (p.redis, "Redis"),
-        (p.memcached, "Memcached"), (p.php_fpm, "PHP FastCGI"), (p.postgres, "PostgreSQL"), (p.pgadmin, "pgAdmin"), (p.mongodb, "MongoDB"), (p.clickhouse_http, "ClickHouse HTTP"), (p.clickhouse_tcp, "ClickHouse native"), (p.neo4j_http, "Neo4j Browser"), (p.neo4j_bolt, "Neo4j Bolt"), (p.meilisearch, "Meilisearch"), (p.typesense, "Typesense"), (p.rustfs, "RustFS"), (p.rustfs_console, "RustFS console"), (p.ollama, "Ollama"), (p.minio, "MinIO"), (p.minio_console, "MinIO console"), (p.elasticsearch, "Elasticsearch"), (p.elasticsearch_transport, "Elasticsearch transport"), (p.opensearch, "OpenSearch"), (p.opensearch_transport, "OpenSearch transport"), (p.n8n, "n8n"), (p.rabbitmq, "RabbitMQ"), (p.rabbitmq_management, "RabbitMQ console"),
-    ] {
-        if port == 0 {
-            return Err(Error::msg(format!("Choose a port for {name} (1–65535).")));
-        }
+        (p.frankenphp_admin, "FrankenPHP admin"), (p.php_fpm, "PHP FastCGI"), (p.dumps, "Dumps"), (p.mcp, "MCP server"),
+    ];
+    if let Some((_, name)) = core.iter().find(|(port, _)| *port == 0) {
+        return Err(Error::msg(format!("Choose a port for {name} (1–65535).")));
+    }
+    if let Some((key, _)) = p.services.iter().find(|(_, port)| **port == 0) {
+        let name = key.split_once('.').and_then(|(id, _)| manifest::get(id)).map_or(key.as_str(), |m| m.name.as_str());
+        return Err(Error::msg(format!("Choose a port for {name} (1–65535).")));
     }
     if p.php_fpm > 65535 - 99 {
         return Err(Error::msg("PHP FastCGI needs 100 ports from its starting port; choose a starting port below 65437."));
@@ -200,34 +202,19 @@ pub(crate) fn check_root(layout: &Layout) -> Result<()> {
 pub(crate) fn check_ports(settings: &Settings) -> Result<()> {
     use config::Server;
     let p = &settings.ports;
-    let mut used: Vec<(u16, String)> = vec![
-        (p.mysql, "MariaDB".into()),
-        (p.mail_smtp, "Mailpit SMTP".into()),
-        (p.mail_ui, "Mailpit inbox".into()),
-        (p.redis, "Redis".into()),
-        (p.postgres, "PostgreSQL".into()),
-        (p.pgadmin, "pgAdmin".into()),
-        (p.mongodb, "MongoDB".into()),
-        (p.clickhouse_http, "ClickHouse HTTP".into()),
-        (p.clickhouse_tcp, "ClickHouse native".into()),
-        (p.neo4j_http, "Neo4j Browser".into()),
-        (p.neo4j_bolt, "Neo4j Bolt".into()),
-        (p.meilisearch, "Meilisearch".into()),
-        (p.typesense, "Typesense".into()),
-        (p.rustfs, "RustFS".into()),
-        (p.rustfs_console, "RustFS console".into()),
-        (p.ollama, "Ollama".into()),
-        (p.minio, "MinIO".into()),
-        (p.minio_console, "MinIO console".into()),
-        (p.elasticsearch, "Elasticsearch".into()),
-        (p.elasticsearch_transport, "Elasticsearch transport".into()),
-        (p.opensearch, "OpenSearch".into()),
-        (p.opensearch_transport, "OpenSearch transport".into()),
-        (p.n8n, "n8n".into()),
-        (p.rabbitmq, "RabbitMQ".into()),
-        (p.rabbitmq_management, "RabbitMQ console".into()),
-        (p.memcached, "Memcached".into()),
-    ];
+    // Every service's ports, named by their manifest ("RustFS Console").
+    let mut used: Vec<(u16, String)> = p
+        .services
+        .iter()
+        .map(|(key, &port)| {
+            let (id, name) = key.split_once('.').unwrap_or((key, ""));
+            let label = manifest::get(id).map(|m| match m.ports.get(name).and_then(|d| d.label.as_deref()) {
+                Some(l) => format!("{} {l}", m.name),
+                None => m.name.clone(),
+            });
+            (port, label.unwrap_or_else(|| key.clone()))
+        })
+        .collect();
     for server in Server::ALL {
         if settings.server_enabled(server) {
             let (http, https) = settings.server_ports(server);
@@ -241,10 +228,6 @@ pub(crate) fn check_ports(settings: &Settings) -> Result<()> {
     }
     if settings.server_enabled(Server::Frankenphp) {
         used.push((p.frankenphp_admin, "FrankenPHP admin".into()));
-    }
-    if settings.versions.get("tomcat").is_some() {
-        used.push((p.tomcat_http, "Tomcat HTTP".into()));
-        used.push((p.tomcat_shutdown, "Tomcat shutdown".into()));
     }
     let php_block = p.php_fpm..p.php_fpm.saturating_add(100);
     for (i, (port, a)) in used.iter().enumerate() {

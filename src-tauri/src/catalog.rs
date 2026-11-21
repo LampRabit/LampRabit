@@ -38,8 +38,7 @@ pub struct RuntimeInfo {
     pub needs: Vec<&'static str>,
     /// Ids of what goes well with it: a UI for its data, its shell.
     pub suggests: Vec<&'static str>,
-    /// Ports of a service that isn't built in, edited on its Settings card (built-in
-    /// services' ports have fixed fields in Settings → Ports).
+    /// Its ports from its manifest, edited on its Settings card and in Settings → Ports.
     pub ports: Vec<PortField>,
     /// Added by the user from a file (`<root>/services/<id>/`), so it can be removed.
     pub local: bool,
@@ -50,7 +49,9 @@ pub struct RuntimeInfo {
 pub struct PortField {
     /// Its key in `Ports.extra`: `<service id>.<port name>`.
     pub key: String,
-    pub label: String,
+    /// What it's for ("HTTP", "Console"); none for a service's only port.
+    pub label: Option<String>,
+    pub hint: Option<String>,
     pub default: u16,
 }
 
@@ -110,8 +111,7 @@ fn info(runtime: Runtime) -> RuntimeInfo {
             ports: m
                 .ports
                 .iter()
-                .filter(|(_, d)| d.setting.is_none())
-                .map(|(name, d)| PortField { key: format!("{}.{name}", m.id), label: d.label.clone().unwrap_or_else(|| name.clone()), default: d.default })
+                .map(|(name, d)| PortField { key: format!("{}.{name}", m.id), label: d.label.clone(), hint: d.hint.clone(), default: d.default })
                 .collect(),
             local: manifest::extras().iter().any(|e| e.id == m.id),
         };

@@ -10,7 +10,7 @@ source: { builtin: true }
 binary: "bin/mysqld{{exe}}"
 suggests: [phpmyadmin, adminer]
 ports:
-  mysql: { default: 3307, setting: mysqlServer }
+  mysql: { default: 3307, hint: "Database, next to MariaDB" }
 run:
   program: "{{home}}/bin/mysqld{{exe}}"
   # --defaults-file must be the first argument; --console keeps errors on stderr on

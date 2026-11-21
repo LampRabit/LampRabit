@@ -669,7 +669,7 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
                 && java_webapp(&path).is_some();
             let proxy = match &route {
                 Some(r) => Some(format!("http://{}:{}/", r.host, r.port)),
-                None if tomcat => Some(format!("http://127.0.0.1:{}/", settings.ports.tomcat_http)),
+                None if tomcat => Some(format!("http://127.0.0.1:{}/", settings.ports.service("tomcat.http"))),
                 None => None,
             };
             // Served as files, a JavaScript project shows its build output, else its own

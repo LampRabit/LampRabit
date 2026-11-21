@@ -20,8 +20,8 @@ source:
     linux-arm64: { file: "opensearch-{version}-linux-arm64.tar.gz", archive: targz }
 binary: "bin/opensearch{{script}}"
 ports:
-  http: { default: 9201, setting: opensearch, label: HTTP }
-  transport: { default: 9301, setting: opensearchTransport, label: Transport }
+  http: { default: 9201, hint: "Its HTTP API", label: HTTP }
+  transport: { default: 9301, hint: "Node-to-node, 127.0.0.1 only", label: Transport }
 settings:
   heap:
     label: Memory (Java heap)

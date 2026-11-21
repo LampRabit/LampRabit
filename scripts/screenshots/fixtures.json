@@ -5,8 +5,6 @@
     "ports": {
       "http": 80,
       "https": 443,
-      "mysql": 3306,
-      "mysqlServer": 3307,
       "phpFpm": 9000,
       "nginxHttp": 8080,
       "nginxHttps": 8443,
@@ -18,35 +16,39 @@
       "frankenphpHttp": 8083,
       "frankenphpHttps": 8446,
       "frankenphpAdmin": 2020,
-      "tomcatHttp": 8180,
-      "tomcatShutdown": 8105,
-      "postgres": 5432,
-      "pgadmin": 5050,
-      "mongodb": 27017,
-      "clickhouseHttp": 8123,
-      "clickhouseTcp": 19000,
-      "neo4jHttp": 7474,
-      "neo4jBolt": 7687,
-      "meilisearch": 7700,
-      "typesense": 8108,
-      "rustfs": 9100,
-      "rustfsConsole": 9101,
-      "ollama": 11434,
-      "minio": 9110,
-      "minioConsole": 9111,
-      "elasticsearch": 9200,
-      "elasticsearchTransport": 9300,
-      "opensearch": 9201,
-      "opensearchTransport": 9301,
-      "n8n": 5678,
-      "rabbitmq": 5672,
-      "rabbitmqManagement": 15672,
-      "mailSmtp": 1025,
-      "redis": 6379,
-      "memcached": 11211,
-      "mailUi": 8025,
       "dumps": 9912,
-      "mcp": 39813
+      "mcp": 39813,
+      "services": {
+        "clickhouse.http": 8123,
+        "clickhouse.tcp": 19000,
+        "elasticsearch.http": 9200,
+        "elasticsearch.transport": 9300,
+        "mailpit.smtp": 1025,
+        "mailpit.ui": 8025,
+        "mariadb.mysql": 3306,
+        "meilisearch.http": 7700,
+        "memcached.memcached": 11211,
+        "minio.api": 9110,
+        "minio.console": 9111,
+        "mongodb.mongodb": 27017,
+        "mysql.mysql": 3307,
+        "n8n.http": 5678,
+        "neo4j.bolt": 7687,
+        "neo4j.http": 7474,
+        "ollama.api": 11434,
+        "opensearch.http": 9201,
+        "opensearch.transport": 9301,
+        "pgadmin.http": 5050,
+        "postgres.postgres": 5432,
+        "rabbitmq.amqp": 5672,
+        "rabbitmq.management": 15672,
+        "redis.redis": 6379,
+        "rustfs.api": 9100,
+        "rustfs.console": 9101,
+        "tomcat.http": 8180,
+        "tomcat.shutdown": 8105,
+        "typesense.api": 8108
+      }
     },
     "versions": {
       "apache": null,
@@ -81,6 +83,7 @@
     "profiles": [],
     "defaultDatabase": "mariadb",
     "storage": {},
+    "serviceOptions": {},
     "autoRestart": [
       "n8n"
     ],
@@ -229,7 +232,9 @@
         "source": "Apache Lounge builds",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "nginx",
@@ -238,7 +243,9 @@
         "source": "Official nginx.org Windows builds (PGP-signed, no checksum)",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "php",
@@ -249,7 +256,9 @@
         "needs": [],
         "suggests": [
           "composer"
-        ]
+        ],
+        "ports": [],
+        "local": false
       },
       {
         "id": "mariadb",
@@ -261,7 +270,16 @@
         "suggests": [
           "phpmyadmin",
           "adminer"
-        ]
+        ],
+        "ports": [
+          {
+            "key": "mariadb.mysql",
+            "label": null,
+            "hint": "Database",
+            "default": 3306
+          }
+        ],
+        "local": false
       },
       {
         "id": "mailpit",
@@ -270,7 +288,22 @@
         "source": "Local SMTP server with a web inbox",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "mailpit.smtp",
+            "label": "SMTP",
+            "hint": "Where apps send mail",
+            "default": 1025
+          },
+          {
+            "key": "mailpit.ui",
+            "label": "Web inbox",
+            "hint": "The web inbox",
+            "default": 8025
+          }
+        ],
+        "local": false
       },
       {
         "id": "adminer",
@@ -281,7 +314,9 @@
         "needs": [
           "php"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "phpmyadmin",
@@ -292,7 +327,9 @@
         "needs": [
           "php"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "ngrok",
@@ -301,7 +338,9 @@
         "source": "Share sites on a public URL (free account needed)",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "cloudflared",
@@ -310,7 +349,9 @@
         "source": "Cloudflare quick tunnels, no account needed",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "redis",
@@ -321,7 +362,16 @@
         "needs": [],
         "suggests": [
           "phpredisadmin"
-        ]
+        ],
+        "ports": [
+          {
+            "key": "redis.redis",
+            "label": null,
+            "hint": "Cache and queues",
+            "default": 6379
+          }
+        ],
+        "local": false
       },
       {
         "id": "composer",
@@ -332,7 +382,9 @@
         "needs": [
           "php"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "mysql",
@@ -344,7 +396,16 @@
         "suggests": [
           "phpmyadmin",
           "adminer"
-        ]
+        ],
+        "ports": [
+          {
+            "key": "mysql.mysql",
+            "label": null,
+            "hint": "Database, next to MariaDB",
+            "default": 3307
+          }
+        ],
+        "local": false
       },
       {
         "id": "phpredisadmin",
@@ -356,7 +417,9 @@
           "redis",
           "php"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "memcached",
@@ -365,7 +428,16 @@
         "source": "nono303's Windows build of Memcached (no official one exists), checked and repackaged by LampRabit",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "memcached.memcached",
+            "label": null,
+            "hint": "Memory cache",
+            "default": 11211
+          }
+        ],
+        "local": false
       },
       {
         "id": "caddy",
@@ -374,7 +446,9 @@
         "source": "Official Caddy releases from GitHub; uses LampRabit's certificates and PHP, not its own",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "java",
@@ -383,7 +457,9 @@
         "source": "Eclipse Temurin JDKs from Adoptium (checksum checked); java, javac and jar work in LampRabit's terminal, with JAVA_HOME set",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "tomcat",
@@ -394,7 +470,22 @@
         "needs": [
           "java"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "tomcat.http",
+            "label": "HTTP",
+            "hint": "Java web apps, behind the web server",
+            "default": 8180
+          },
+          {
+            "key": "tomcat.shutdown",
+            "label": "Shutdown",
+            "hint": "Tomcat's stop command, 127.0.0.1 only",
+            "default": 8105
+          }
+        ],
+        "local": false
       },
       {
         "id": "frankenphp",
@@ -403,7 +494,9 @@
         "source": "Official FrankenPHP releases: Caddy with its own PHP built in, so LampRabit's PHP versions and extensions don't apply to its sites",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "postgres",
@@ -416,7 +509,16 @@
           "adminer",
           "phppgadmin",
           "pgadmin"
-        ]
+        ],
+        "ports": [
+          {
+            "key": "postgres.postgres",
+            "label": null,
+            "hint": "Database",
+            "default": 5432
+          }
+        ],
+        "local": false
       },
       {
         "id": "python",
@@ -425,7 +527,9 @@
         "source": "python-build-standalone (the builds uv uses, checksum checked); python and pip work in LampRabit's terminal",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "phppgadmin",
@@ -437,7 +541,9 @@
           "postgres",
           "php"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "pgadmin",
@@ -449,7 +555,16 @@
           "python",
           "postgres"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "pgadmin.http",
+            "label": null,
+            "hint": "Its web server, behind pgadmin.test",
+            "default": 5050
+          }
+        ],
+        "local": false
       },
       {
         "id": "mongodb",
@@ -462,7 +577,16 @@
           "mongosh",
           "compass",
           "mongotools"
-        ]
+        ],
+        "ports": [
+          {
+            "key": "mongodb.mongodb",
+            "label": null,
+            "hint": "Document database",
+            "default": 27017
+          }
+        ],
+        "local": false
       },
       {
         "id": "mongosh",
@@ -473,7 +597,9 @@
         "needs": [
           "mongodb"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "mongotools",
@@ -484,7 +610,9 @@
         "needs": [
           "mongodb"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "compass",
@@ -495,7 +623,9 @@
         "needs": [
           "mongodb"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "sqlite",
@@ -504,7 +634,9 @@
         "source": "The sqlite3 shell from sqlite.org (SHA3 checked). PHP has SQLite built in, so projects don't need this to use it; backups use it to copy safely",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "clickhouse",
@@ -513,7 +645,22 @@
         "source": "Official ClickHouse builds from GitHub. Its web console is at /play on its HTTP port",
         "unavailable": "ClickHouse has no Windows build. Run it in WSL, or use LampRabit on Linux or macOS.",
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "clickhouse.http",
+            "label": "HTTP",
+            "hint": "Queries over HTTP and the /play console",
+            "default": 8123
+          },
+          {
+            "key": "clickhouse.tcp",
+            "label": "Native",
+            "hint": "clickhouse-client and native drivers",
+            "default": 19000
+          }
+        ],
+        "local": false
       },
       {
         "id": "neo4j",
@@ -524,7 +671,22 @@
         "needs": [
           "java"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "neo4j.http",
+            "label": "Browser",
+            "hint": "Its web interface, behind neo4j.test",
+            "default": 7474
+          },
+          {
+            "key": "neo4j.bolt",
+            "label": "Bolt",
+            "hint": "What drivers connect to",
+            "default": 7687
+          }
+        ],
+        "local": false
       },
       {
         "id": "meilisearch",
@@ -533,7 +695,16 @@
         "source": "Official Meilisearch Community builds from GitHub (checksum checked); runs in development mode, with its search preview at its URL",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "meilisearch.http",
+            "label": null,
+            "hint": "Its API and search preview",
+            "default": 7700
+          }
+        ],
+        "local": false
       },
       {
         "id": "typesense",
@@ -542,7 +713,16 @@
         "source": "Official Typesense builds from dl.typesense.org (no checksums published). API key: lamprabit",
         "unavailable": "Typesense has no Windows build. Run it in WSL, or use Meilisearch.",
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "typesense.api",
+            "label": null,
+            "hint": "Its API",
+            "default": 8108
+          }
+        ],
+        "local": false
       },
       {
         "id": "rustfs",
@@ -551,7 +731,22 @@
         "source": "RustFS from its GitHub releases (checksum checked): S3-compatible, with a web console. Access key lamprabit, secret lamprabit-secret",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "rustfs.api",
+            "label": "S3 API",
+            "hint": "The S3 API apps connect to",
+            "default": 9100
+          },
+          {
+            "key": "rustfs.console",
+            "label": "Console",
+            "hint": "Its web console",
+            "default": 9101
+          }
+        ],
+        "local": false
       },
       {
         "id": "ollama",
@@ -560,7 +755,16 @@
         "source": "Ollama's own builds from GitHub (a large download). Models go to LampRabit's data folder; the ollama command uses this server",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "ollama.api",
+            "label": null,
+            "hint": "Its API",
+            "default": 11434
+          }
+        ],
+        "local": false
       },
       {
         "id": "minio",
@@ -569,25 +773,70 @@
         "source": "MinIO's last release (October 2025), built from its source by LampRabit's CI: the project is archived, so there are no security fixes. Access key lamprabit, secret lamprabit-secret",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "minio.api",
+            "label": "S3 API",
+            "hint": "The S3 API apps connect to",
+            "default": 9110
+          },
+          {
+            "key": "minio.console",
+            "label": "Console",
+            "hint": "Its web console",
+            "default": 9111
+          }
+        ],
+        "local": false
       },
       {
         "id": "elasticsearch",
         "label": "Elasticsearch",
         "blurb": "Search engine",
-        "source": "Official Elasticsearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory",
+        "source": "Official Elasticsearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory unless you give it more",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "elasticsearch.http",
+            "label": "HTTP",
+            "hint": "Its HTTP API",
+            "default": 9200
+          },
+          {
+            "key": "elasticsearch.transport",
+            "label": "Transport",
+            "hint": "Node-to-node, 127.0.0.1 only",
+            "default": 9300
+          }
+        ],
+        "local": false
       },
       {
         "id": "opensearch",
         "label": "OpenSearch",
         "blurb": "Search engine",
-        "source": "Official OpenSearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory",
+        "source": "Official OpenSearch archives (SHA-512 checked) with their own Java; one node, security off, 512 MB of memory unless you give it more",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "opensearch.http",
+            "label": "HTTP",
+            "hint": "Its HTTP API",
+            "default": 9201
+          },
+          {
+            "key": "opensearch.transport",
+            "label": "Transport",
+            "hint": "Node-to-node, 127.0.0.1 only",
+            "default": 9301
+          }
+        ],
+        "local": false
       },
       {
         "id": "n8n",
@@ -598,7 +847,16 @@
         "needs": [
           "node"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "n8n.http",
+            "label": null,
+            "hint": "Its editor, behind n8n.test",
+            "default": 5678
+          }
+        ],
+        "local": false
       },
       {
         "id": "rabbitmq",
@@ -609,7 +867,22 @@
         "needs": [
           "erlang"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [
+          {
+            "key": "rabbitmq.amqp",
+            "label": "AMQP",
+            "hint": "AMQP, what apps connect to",
+            "default": 5672
+          },
+          {
+            "key": "rabbitmq.management",
+            "label": "Management console",
+            "hint": "Its management console",
+            "default": 15672
+          }
+        ],
+        "local": false
       },
       {
         "id": "erlang",
@@ -618,7 +891,9 @@
         "source": "Official Erlang/OTP builds for Windows (checksum checked)",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "go",
@@ -627,7 +902,9 @@
         "source": "Official Go releases from go.dev (checksum checked); go and gofmt work in LampRabit's terminal",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "rust",
@@ -636,7 +913,9 @@
         "source": "Rust stable through rustup, kept inside LampRabit's folder (not your ~/.cargo), with the GNU toolchain, which needs no Visual Studio",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "maven",
@@ -647,7 +926,9 @@
         "needs": [
           "java"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "gradle",
@@ -658,7 +939,9 @@
         "needs": [
           "java"
         ],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "git",
@@ -667,7 +950,9 @@
         "source": "MinGit, Git for Windows' official portable build (SHA-256 checked), for the Git tab, Clone and LampRabit's terminal. A Git already installed on the computer works too",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "bun",
@@ -676,7 +961,9 @@
         "source": "Bun's official builds from GitHub (checksum checked); bun and bunx work in LampRabit's terminal, and projects with a bun.lock use it",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "deno",
@@ -685,7 +972,9 @@
         "source": "Deno's official builds from GitHub (checksum checked); deno works in LampRabit's terminal",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "uv",
@@ -694,7 +983,9 @@
         "source": "Astral's uv from GitHub (checksum checked); uv and uvx work in LampRabit's terminal, and the Pythons uv downloads stay inside LampRabit's folder",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       },
       {
         "id": "conda",
@@ -703,7 +994,9 @@
         "source": "Miniforge, conda-forge's installer (checksum checked), installed into LampRabit's folder without changing PATH or your shell; conda and mamba work in LampRabit's terminal",
         "unavailable": null,
         "needs": [],
-        "suggests": []
+        "suggests": [],
+        "ports": [],
+        "local": false
       }
     ]
   }

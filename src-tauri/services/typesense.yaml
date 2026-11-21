@@ -20,7 +20,7 @@ source:
     macos-arm64: { file: "typesense-server-{version}-darwin-arm64.tar.gz", archive: targz }
 binary: typesense-server
 ports:
-  api: { default: 8108, setting: typesense }
+  api: { default: 8108, hint: "Its API" }
 dirs: ["{{data}}"]
 run:
   program: "{{home}}/typesense-server"

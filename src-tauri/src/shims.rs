@@ -122,7 +122,7 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
     if let Some(home) = settings.versions.get("mongosh").map(|v| layout.bin("mongosh", v)) {
         let target = home.join("bin").join(exe("mongosh"));
         if target.exists() {
-            let args = if settings.ports.mongodb == 27017 { Vec::new() } else { vec!["--port".to_string(), settings.ports.mongodb.to_string()] };
+            let args = if settings.ports.service("mongodb.mongodb") == 27017 { Vec::new() } else { vec!["--port".to_string(), settings.ports.service("mongodb.mongodb").to_string()] };
             shim(&dir, "mongosh", &[Case { folder: None, target, args, env: Vec::new() }])?;
         }
     }
@@ -152,7 +152,7 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
     if let Some(v) = settings.versions.get("clickhouse") {
         let target = layout.bin("clickhouse", v).join("usr").join("bin").join("clickhouse");
         if target.exists() {
-            let args = vec!["client".to_string(), "--port".to_string(), settings.ports.clickhouse_tcp.to_string()];
+            let args = vec!["client".to_string(), "--port".to_string(), settings.ports.service("clickhouse.tcp").to_string()];
             shim(&dir, "clickhouse-client", &[Case { folder: None, target, args, env: Vec::new() }])?;
         }
     }
@@ -164,7 +164,7 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
     };
     if let Some(target) = ollama
         && target.exists() {
-            let env = vec![("OLLAMA_HOST".to_string(), format!("127.0.0.1:{}", settings.ports.ollama))];
+            let env = vec![("OLLAMA_HOST".to_string(), format!("127.0.0.1:{}", settings.ports.service("ollama.api")))];
             shim(&dir, "ollama", &[Case { folder: None, target, args: Vec::new(), env }])?;
         }
     // Go's tools (Go finds its own root from where it runs); each project gets the
@@ -202,7 +202,7 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
     if let Some(home) = settings.versions.get("postgres").map(|v| layout.bin("postgres", v)) {
         let env = vec![
             ("PGHOST".to_string(), "127.0.0.1".to_string()),
-            ("PGPORT".to_string(), settings.ports.postgres.to_string()),
+            ("PGPORT".to_string(), settings.ports.service("postgres.postgres").to_string()),
             ("PGUSER".to_string(), "postgres".to_string()),
         ];
         for name in ["psql", "pg_dump", "pg_dumpall", "pg_restore", "createdb", "dropdb"] {
@@ -237,7 +237,7 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
     // redis-cli from the active Redis, pointed at LampRabit's port.
     let cli = settings.versions.redis.as_ref().map(|v| layout.bin("redis", v).join(exe("redis-cli")));
     if let Some(target) = cli.filter(|t| t.exists()) {
-        let args = vec!["-p".to_string(), settings.ports.redis.to_string()];
+        let args = vec!["-p".to_string(), settings.ports.service("redis.redis").to_string()];
         shim(&dir, "redis-cli", &[Case { folder: None, target, args, env: Vec::new() }])?;
     }
     Ok(dir)

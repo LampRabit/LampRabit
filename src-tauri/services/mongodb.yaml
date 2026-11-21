@@ -10,7 +10,7 @@ source: { builtin: true }
 binary: "bin/mongod{{exe}}"
 suggests: [mongosh, compass, mongotools]
 ports:
-  mongodb: { default: 27017, setting: mongodb }
+  mongodb: { default: 27017, hint: "Document database" }
 # MongoDB upgrades its files one major version at a time and never downgrades them.
 data: per-major
 dirs: ["{{data}}"]

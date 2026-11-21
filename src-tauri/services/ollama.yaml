@@ -20,7 +20,7 @@ binary:
   - { value: bin/ollama, on: [linux] }
   - { value: "ollama{{exe}}" }
 ports:
-  api: { default: 11434, setting: ollama }
+  api: { default: 11434, hint: "Its API" }
 dirs: ["{{data}}"]
 run:
   program:

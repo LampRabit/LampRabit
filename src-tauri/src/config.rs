@@ -345,8 +345,8 @@ impl Settings {
 
     pub fn database_port(&self, db: Database) -> u16 {
         match db {
-            Database::Mariadb => self.ports.mysql,
-            Database::Mysql => self.ports.mysql_server,
+            Database::Mariadb => self.ports.service("mariadb.mysql"),
+            Database::Mysql => self.ports.service("mysql.mysql"),
         }
     }
 
@@ -387,18 +387,26 @@ impl Settings {
         if self.web_servers.is_empty() {
             self.web_servers.push(Server::Apache);
         }
+        // Ports saved as their own fields before 1.0, and any built-in service's port a
+        // file doesn't list yet (a service added in a newer release) at its default.
+        let legacy = std::mem::take(&mut self.ports.legacy);
+        for (old, new) in LEGACY_PORTS {
+            if let Some(&port) = legacy.get(*old) {
+                self.ports.services.insert(new.to_string(), port);
+            }
+        }
+        for (key, port) in Ports::default().services {
+            self.ports.services.entry(key).or_insert(port);
+        }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Ports {
+    /// The primary web server's.
     pub http: u16,
     pub https: u16,
-    /// MariaDB (the name predates MySQL support).
-    pub mysql: u16,
-    /// Oracle MySQL, next to MariaDB.
-    pub mysql_server: u16,
     /// First port for PHP FastCGI workers; each PHP version in use takes a block of 10.
     pub php_fpm: u16,
     /// Each web server's own ports, used while another server is the primary one.
@@ -414,55 +422,51 @@ pub struct Ports {
     pub frankenphp_https: u16,
     /// FrankenPHP's admin API (it is Caddy underneath).
     pub frankenphp_admin: u16,
-    /// Tomcat's HTTP connector; the web servers proxy Java sites' domains to it.
-    pub tomcat_http: u16,
-    /// The port Tomcat listens on for its shutdown command (127.0.0.1 only).
-    pub tomcat_shutdown: u16,
-    pub postgres: u16,
-    /// pgAdmin's web server (127.0.0.1 only), proxied at pgadmin.test.
-    pub pgadmin: u16,
-    pub mongodb: u16,
-    /// ClickHouse's HTTP interface (and its /play page) and native protocol; the native
-    /// one isn't ClickHouse's usual 9000, which PHP's FastCGI ports use.
-    pub clickhouse_http: u16,
-    pub clickhouse_tcp: u16,
-    /// Neo4j Browser (HTTP) and the Bolt protocol drivers use.
-    pub neo4j_http: u16,
-    pub neo4j_bolt: u16,
-    pub meilisearch: u16,
-    /// Typesense's API.
-    pub typesense: u16,
-    /// RustFS's S3 API and its web console; not the usual 9000/9001, which PHP's FastCGI
-    /// ports use.
-    pub rustfs: u16,
-    pub rustfs_console: u16,
-    pub ollama: u16,
-    /// MinIO's S3 API and console (9000/9001 are PHP's; 9100/9101 RustFS's).
-    pub minio: u16,
-    pub minio_console: u16,
-    /// Elasticsearch and OpenSearch: HTTP and transport, each its own so both can run.
-    pub elasticsearch: u16,
-    pub elasticsearch_transport: u16,
-    pub opensearch: u16,
-    pub opensearch_transport: u16,
-    pub n8n: u16,
-    /// RabbitMQ's AMQP port and its management console.
-    pub rabbitmq: u16,
-    pub rabbitmq_management: u16,
-    /// Mailpit's SMTP server, where PHP and frameworks send mail.
-    pub mail_smtp: u16,
-    pub redis: u16,
-    pub memcached: u16,
-    /// Mailpit's web inbox.
-    pub mail_ui: u16,
     /// Where PHP's dump() sends dumps for Logs (Symfony's dump server uses 9912 too).
     pub dumps: u16,
     /// LampRabit's own MCP server over HTTP, when it's switched on.
     pub mcp: u16,
-    /// Ports of services that aren't built in, as `<service id>.<port name>`; picked free
-    /// when the service is installed, since their manifest's default may already be taken.
-    pub extra: BTreeMap<String, u16>,
+    /// Every service's ports, as `<service id>.<port name>` (`mariadb.mysql`): the defaults
+    /// come from their manifests; a service added later gets free ones when it's installed.
+    pub services: BTreeMap<String, u16>,
+    /// Service ports saved by releases before 1.0 as fields of their own (`mysql`,
+    /// `mailUi`…); moved into `services` when the settings load.
+    #[serde(flatten, skip_serializing)]
+    legacy: BTreeMap<String, u16>,
 }
+
+/// Where each pre-1.0 port field went in `Ports.services`.
+const LEGACY_PORTS: &[(&str, &str)] = &[
+    ("mysql", "mariadb.mysql"),
+    ("mysqlServer", "mysql.mysql"),
+    ("tomcatHttp", "tomcat.http"),
+    ("tomcatShutdown", "tomcat.shutdown"),
+    ("postgres", "postgres.postgres"),
+    ("pgadmin", "pgadmin.http"),
+    ("mongodb", "mongodb.mongodb"),
+    ("clickhouseHttp", "clickhouse.http"),
+    ("clickhouseTcp", "clickhouse.tcp"),
+    ("neo4jHttp", "neo4j.http"),
+    ("neo4jBolt", "neo4j.bolt"),
+    ("meilisearch", "meilisearch.http"),
+    ("typesense", "typesense.api"),
+    ("rustfs", "rustfs.api"),
+    ("rustfsConsole", "rustfs.console"),
+    ("ollama", "ollama.api"),
+    ("minio", "minio.api"),
+    ("minioConsole", "minio.console"),
+    ("elasticsearch", "elasticsearch.http"),
+    ("elasticsearchTransport", "elasticsearch.transport"),
+    ("opensearch", "opensearch.http"),
+    ("opensearchTransport", "opensearch.transport"),
+    ("n8n", "n8n.http"),
+    ("rabbitmq", "rabbitmq.amqp"),
+    ("rabbitmqManagement", "rabbitmq.management"),
+    ("mailSmtp", "mailpit.smtp"),
+    ("mailUi", "mailpit.ui"),
+    ("redis", "redis.redis"),
+    ("memcached", "memcached.memcached"),
+];
 
 /// Active version per runtime; `None` means not installed yet.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -575,10 +579,14 @@ impl Default for Settings {
 }
 
 impl Ports {
-    /// A port by its name in settings.toml (`mailSmtp`), which service manifests use.
-    pub fn get(&self, key: &str) -> Option<u16> {
-        serde_json::to_value(self).ok()?.get(key)?.as_u64().and_then(|p| u16::try_from(p).ok())
+    /// A service's port by `<service id>.<port name>`, else its manifest's default.
+    pub fn service(&self, key: &str) -> u16 {
+        self.services.get(key).copied().unwrap_or_else(|| {
+            let (id, name) = key.split_once('.').unwrap_or((key, ""));
+            crate::manifest::get(id).and_then(|m| m.ports.get(name)).map_or(0, |d| d.default)
+        })
     }
+
 }
 
 impl Default for Ports {
@@ -586,8 +594,6 @@ impl Default for Ports {
         Self {
             http: 80,
             https: 443,
-            mysql: 3306,
-            mysql_server: 3307,
             php_fpm: 9000,
             nginx_http: 8080,
             nginx_https: 8443,
@@ -599,36 +605,10 @@ impl Default for Ports {
             frankenphp_http: 8083,
             frankenphp_https: 8446,
             frankenphp_admin: 2020,
-            tomcat_http: 8180,
-            tomcat_shutdown: 8105,
-            postgres: 5432,
-            pgadmin: 5050,
-            mongodb: 27017,
-            clickhouse_http: 8123,
-            clickhouse_tcp: 19000,
-            neo4j_http: 7474,
-            neo4j_bolt: 7687,
-            meilisearch: 7700,
-            typesense: 8108,
-            rustfs: 9100,
-            rustfs_console: 9101,
-            ollama: 11434,
-            minio: 9110,
-            minio_console: 9111,
-            elasticsearch: 9200,
-            elasticsearch_transport: 9300,
-            opensearch: 9201,
-            opensearch_transport: 9301,
-            n8n: 5678,
-            rabbitmq: 5672,
-            rabbitmq_management: 15672,
-            mail_smtp: 1025,
-            redis: 6379,
-            memcached: 11211,
-            mail_ui: 8025,
             dumps: 9912,
             mcp: 39813,
-            extra: BTreeMap::new(),
+            services: crate::manifest::built_ins().iter().flat_map(|m| m.ports.iter().map(|(name, d)| (format!("{}.{name}", m.id), d.default))).collect(),
+            legacy: BTreeMap::new(),
         }
     }
 }
@@ -677,5 +657,25 @@ impl Settings {
         std::fs::write(&tmp, toml::to_string_pretty(self)?)?;
         std::fs::rename(&tmp, path)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Settings saved before 1.0 had a field per service port; they load into
+    /// `ports.services`, and saving writes only the new form.
+    #[test]
+    fn old_port_fields_move_into_services() {
+        let mut s: Settings = toml::from_str("[ports]\nhttp = 8000\nmysql = 3316\nmailUi = 8026\n").unwrap();
+        s.normalize();
+        assert_eq!(s.ports.http, 8000);
+        assert_eq!(s.ports.service("mariadb.mysql"), 3316);
+        assert_eq!(s.ports.service("mailpit.ui"), 8026);
+        // One the file didn't have gets its manifest's default.
+        assert_eq!(s.ports.service("redis.redis"), 6379);
+        let saved = toml::to_string_pretty(&s).unwrap();
+        assert!(!saved.contains("mailUi") && saved.contains("\"mailpit.ui\" = 8026"), "{saved}");
     }
 }

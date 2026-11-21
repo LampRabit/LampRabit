@@ -20,8 +20,8 @@ binary: "bin/neo4j{{script}}"
 needs:
   - { runtime: java, min: "21", why: Neo4j runs on the active Java }
 ports:
-  http: { default: 7474, setting: neo4jHttp, label: Browser }
-  bolt: { default: 7687, setting: neo4jBolt, label: Bolt }
+  http: { default: 7474, hint: "Its web interface, behind neo4j.test", label: Browser }
+  bolt: { default: 7687, hint: "What drivers connect to", label: Bolt }
 dirs: ["{{data}}", "{{logs}}", "{{tmp}}"]
 files:
   # The install's neo4j.conf without the settings LampRabit sets, then LampRabit's: only on

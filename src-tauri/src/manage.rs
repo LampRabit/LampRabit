@@ -108,8 +108,8 @@ fn port_in(address: &str) -> Option<u16> {
 /// MariaDB or MySQL, by the port the project connects to; the default one otherwise.
 fn mysql_family(settings: &Settings, port: Option<u16>, hint: Option<Engine>) -> Option<Engine> {
     let by_port = match port {
-        Some(p) if p == settings.ports.mysql_server => Some(Engine::Mysql),
-        Some(p) if p == settings.ports.mysql => Some(Engine::Mariadb),
+        Some(p) if p == settings.ports.service("mysql.mysql") => Some(Engine::Mysql),
+        Some(p) if p == settings.ports.service("mariadb.mysql") => Some(Engine::Mariadb),
         _ => None,
     };
     by_port.or(hint).or_else(|| {
@@ -176,7 +176,7 @@ fn sqlite_file(dir: &Path, database: &str) -> PathBuf {
 fn psql(settings: &Settings, layout: &Layout) -> Result<(PathBuf, PathBuf, Vec<String>)> {
     let version = settings.versions.get("postgres").ok_or_else(|| Error::msg("Install PostgreSQL first (Services)."))?;
     let home = layout.bin("postgres", version);
-    let args = ["-h", "127.0.0.1", "-p", &settings.ports.postgres.to_string(), "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-tAc"].map(str::to_string).to_vec();
+    let args = ["-h", "127.0.0.1", "-p", &settings.ports.service("postgres.postgres").to_string(), "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-tAc"].map(str::to_string).to_vec();
     Ok((home.join("bin").join(exe("psql")), home, args))
 }
 
@@ -220,8 +220,8 @@ pub async fn status(settings: &Settings, layout: &Layout, dir: &Path, database: 
     let env = env_text(dir);
     let port = env_value(&env, "DB_PORT").and_then(|p| p.parse().ok()).or_else(|| env_value(&env, "DATABASE_URL").and_then(|u| port_in(&u)));
     let reason = match (engine, port) {
-        (Engine::Mariadb, Some(p)) if p == settings.ports.mysql => Some(format!("The project connects to port {p}, which is MariaDB's in LampRabit (MySQL uses {}).", settings.ports.mysql_server)),
-        (Engine::Mysql, Some(p)) if p == settings.ports.mysql_server => Some(format!("The project connects to port {p}, which is MySQL's in LampRabit (MariaDB uses {}).", settings.ports.mysql)),
+        (Engine::Mariadb, Some(p)) if p == settings.ports.service("mariadb.mysql") => Some(format!("The project connects to port {p}, which is MariaDB's in LampRabit (MySQL uses {}).", settings.ports.service("mysql.mysql"))),
+        (Engine::Mysql, Some(p)) if p == settings.ports.service("mysql.mysql") => Some(format!("The project connects to port {p}, which is MySQL's in LampRabit (MariaDB uses {}).", settings.ports.service("mariadb.mysql"))),
         (Engine::Mariadb | Engine::Mysql, None) => Some(format!("The project names no port, so it uses the default database server, {}.", engine.label())),
         _ => None,
     };
@@ -229,8 +229,8 @@ pub async fn status(settings: &Settings, layout: &Layout, dir: &Path, database: 
         None
     } else {
         match engine {
-            Engine::Mariadb if Engine::Mysql.installed(settings) => Some(Alternative { engine: Engine::Mysql, label: "MySQL", port: settings.ports.mysql_server }),
-            Engine::Mysql if Engine::Mariadb.installed(settings) => Some(Alternative { engine: Engine::Mariadb, label: "MariaDB", port: settings.ports.mysql }),
+            Engine::Mariadb if Engine::Mysql.installed(settings) => Some(Alternative { engine: Engine::Mysql, label: "MySQL", port: settings.ports.service("mysql.mysql") }),
+            Engine::Mysql if Engine::Mariadb.installed(settings) => Some(Alternative { engine: Engine::Mariadb, label: "MariaDB", port: settings.ports.service("mariadb.mysql") }),
             _ => None,
         }
     };
@@ -287,8 +287,8 @@ fn with_port(url: &str, port: u16) -> Option<String> {
 /// doesn't answer to), Symfony's DATABASE_URL port, or WordPress's DB_HOST.
 pub fn switch_database(settings: &Settings, dir: &Path, to: Engine) -> Result<()> {
     let port = match to {
-        Engine::Mysql => settings.ports.mysql_server,
-        Engine::Mariadb => settings.ports.mysql,
+        Engine::Mysql => settings.ports.service("mysql.mysql"),
+        Engine::Mariadb => settings.ports.service("mariadb.mysql"),
         _ => return Err(Error::msg("Only MariaDB and MySQL can be switched between here.")),
     };
     let env = env_text(dir);
@@ -422,11 +422,11 @@ mod tests {
         let settings = Settings::default();
         assert!(switchable(&dir));
         switch_database(&settings, &dir, Engine::Mysql).unwrap();
-        assert!(std::fs::read_to_string(dir.join("wp-config.php")).unwrap().contains(&format!("'DB_HOST', '127.0.0.1:{}'", settings.ports.mysql_server)));
+        assert!(std::fs::read_to_string(dir.join("wp-config.php")).unwrap().contains(&format!("'DB_HOST', '127.0.0.1:{}'", settings.ports.service("mysql.mysql"))));
         std::fs::remove_file(dir.join("wp-config.php")).unwrap();
         std::fs::write(dir.join(".env"), "APP_ENV=dev\nDATABASE_URL=\"mysql://app:pw@127.0.0.1:3306/app\"\n").unwrap();
         switch_database(&settings, &dir, Engine::Mysql).unwrap();
-        assert!(std::fs::read_to_string(dir.join(".env")).unwrap().contains(&format!("127.0.0.1:{}/app", settings.ports.mysql_server)));
+        assert!(std::fs::read_to_string(dir.join(".env")).unwrap().contains(&format!("127.0.0.1:{}/app", settings.ports.service("mysql.mysql"))));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -412,7 +412,7 @@ pub(crate) async fn remove_local_service(app: AppHandle, state: State<'_, AppSta
         std::fs::remove_dir_all(&folder).map_err(|e| Error::msg(format!("Couldn't delete {}: {e}", folder.display())))?;
     }
     manifest::unregister(&id);
-    state.update_settings(|s| s.ports.extra.retain(|k, _| !k.starts_with(&format!("{id}.")))).await?;
+    state.update_settings(|s| s.ports.services.retain(|k, _| !k.starts_with(&format!("{id}.")))).await?;
     logs::system(&app, logs::Level::Info, format!("Removed the service {label}"));
     Ok(())
 }
@@ -430,8 +430,8 @@ pub(crate) async fn restart_service(app: AppHandle, state: State<'_, AppState>, 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PortStatus {
-    /// Settings key, e.g. "http" or "mailSmtp".
-    pub(crate) key: &'static str,
+    /// Settings key: a core port ("http") or a service's ("mailpit.smtp").
+    pub(crate) key: String,
     pub(crate) port: u16,
     pub(crate) free: bool,
     /// Set when one of LampRabit's own services holds the port.
@@ -444,28 +444,28 @@ pub(crate) struct PortStatus {
 pub(crate) async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortStatus>> {
     let (settings, layout) = state.snapshot().await;
     let p = &settings.ports;
-    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mysqlServer", p.mysql_server), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm), ("redis", p.redis), ("memcached", p.memcached), ("postgres", p.postgres), ("pgadmin", p.pgadmin), ("mongodb", p.mongodb), ("clickhouseHttp", p.clickhouse_http), ("clickhouseTcp", p.clickhouse_tcp), ("neo4jHttp", p.neo4j_http), ("neo4jBolt", p.neo4j_bolt), ("meilisearch", p.meilisearch), ("typesense", p.typesense), ("rustfs", p.rustfs), ("rustfsConsole", p.rustfs_console), ("ollama", p.ollama), ("minio", p.minio), ("minioConsole", p.minio_console), ("elasticsearch", p.elasticsearch), ("elasticsearchTransport", p.elasticsearch_transport), ("opensearch", p.opensearch), ("opensearchTransport", p.opensearch_transport), ("n8n", p.n8n), ("rabbitmq", p.rabbitmq), ("rabbitmqManagement", p.rabbitmq_management)];
+    let mut ports: Vec<(String, u16)> = vec![("http".into(), p.http), ("https".into(), p.https), ("phpFpm".into(), p.php_fpm)];
+    // Every service's ports, as `<service id>.<port name>`.
+    ports.extend(p.services.iter().map(|(k, v)| (k.clone(), *v)));
     // Servers that aren't the primary one have their own pair of ports.
     for &server in settings.web_servers.iter().skip(1) {
         let (http, https) = settings.server_ports(server);
-        ports.extend(match server {
-            config::Server::Apache => [("apacheHttp", http), ("apacheHttps", https)],
-            config::Server::Nginx => [("nginxHttp", http), ("nginxHttps", https)],
-            config::Server::Caddy => [("caddyHttp", http), ("caddyHttps", https)],
-            config::Server::Frankenphp => [("frankenphpHttp", http), ("frankenphpHttps", https)],
-        });
+        let (h, s) = match server {
+            config::Server::Apache => ("apacheHttp", "apacheHttps"),
+            config::Server::Nginx => ("nginxHttp", "nginxHttps"),
+            config::Server::Caddy => ("caddyHttp", "caddyHttps"),
+            config::Server::Frankenphp => ("frankenphpHttp", "frankenphpHttps"),
+        };
+        ports.extend([(h.into(), http), (s.into(), https)]);
     }
     if settings.server_enabled(config::Server::Caddy) {
-        ports.push(("caddyAdmin", p.caddy_admin));
+        ports.push(("caddyAdmin".into(), p.caddy_admin));
     }
     if settings.server_enabled(config::Server::Frankenphp) {
-        ports.push(("frankenphpAdmin", p.frankenphp_admin));
-    }
-    if settings.versions.get("tomcat").is_some() {
-        ports.extend([("tomcatHttp", p.tomcat_http), ("tomcatShutdown", p.tomcat_shutdown)]);
+        ports.push(("frankenphpAdmin".into(), p.frankenphp_admin));
     }
     if settings.catch_dumps {
-        ports.push(("dumps", p.dumps));
+        ports.push(("dumps".into(), p.dumps));
     }
     let mut out = Vec::new();
     for (key, port) in ports {

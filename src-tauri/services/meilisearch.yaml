@@ -18,7 +18,7 @@ source:
     macos-arm64: { file: meilisearch-macos-apple-silicon, archive: file }
 binary: "meilisearch{{exe}}"
 ports:
-  http: { default: 7700, setting: meilisearch }
+  http: { default: 7700, hint: "Its API and search preview" }
 dirs: ["{{data}}"]
 run:
   program: "{{home}}/meilisearch{{exe}}"

@@ -22,8 +22,8 @@ source:
 binary: "bin/elasticsearch{{script}}"
 ports:
   # Each its own, so Elasticsearch and OpenSearch can run side by side.
-  http: { default: 9200, setting: elasticsearch, label: HTTP }
-  transport: { default: 9300, setting: elasticsearchTransport, label: Transport }
+  http: { default: 9200, hint: "Its HTTP API", label: HTTP }
+  transport: { default: 9300, hint: "Node-to-node, 127.0.0.1 only", label: Transport }
 settings:
   heap:
     label: Memory (Java heap)

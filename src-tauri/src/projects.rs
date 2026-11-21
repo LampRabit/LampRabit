@@ -287,7 +287,7 @@ pub fn engine(settings: &crate::config::Settings, req: &NewProject) -> Option<cr
 fn psql(ctx: &Ctx<'_>) -> Result<(PathBuf, PathBuf, Vec<String>)> {
     let version = ctx.settings.versions.get("postgres").ok_or_else(|| Error::msg("Install PostgreSQL first (Services)."))?;
     let home = ctx.layout.bin("postgres", version);
-    let args = vec!["-h".into(), "127.0.0.1".into(), "-p".into(), ctx.settings.ports.postgres.to_string(), "-U".into(), "postgres".into(), "-d".into(), "postgres".into()];
+    let args = vec!["-h".into(), "127.0.0.1".into(), "-p".into(), ctx.settings.ports.service("postgres.postgres").to_string(), "-U".into(), "postgres".into(), "-d".into(), "postgres".into()];
     Ok((home.join("bin").join(crate::layout::exe("psql")), home, args))
 }
 
@@ -429,7 +429,7 @@ fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: 
     let postgres_major = ctx.settings.versions.get("postgres").and_then(|v| v.split('.').next().map(str::to_string)).unwrap_or_else(|| "18".into());
     // Laravel's connection names; Doctrine's URL schemes and charsets.
     let (connection, port, server_version, scheme, charset, user) = match engine {
-        DbEngine::Postgres => ("pgsql".to_string(), ctx.settings.ports.postgres, postgres_major, "postgresql", "utf8", "root"),
+        DbEngine::Postgres => ("pgsql".to_string(), ctx.settings.ports.service("postgres.postgres"), postgres_major, "postgresql", "utf8", "root"),
         DbEngine::Sqlite => ("sqlite".to_string(), 0, String::new(), "sqlite", "utf8", ""),
         _ => (server.id().to_string(), ctx.settings.database_port(server), server_version, "mysql", "utf8mb4", "root"),
     };
@@ -471,7 +471,7 @@ fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: 
         ("mvnw".into(), if cfg!(windows) { "mvnw.cmd".into() } else { "sh mvnw".into() }),
         ("java_major".into(), ctx.settings.versions.get("java").and_then(|v| v.split('.').next().map(str::to_string)).unwrap_or_else(|| "21".into())),
         ("mail.host".into(), "127.0.0.1".into()),
-        ("mail.port".into(), ctx.settings.ports.mail_smtp.to_string()),
+        ("mail.port".into(), ctx.settings.ports.service("mailpit.smtp").to_string()),
     ]);
     if let Some((version, pm)) = node {
         map.extend([

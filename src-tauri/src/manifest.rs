@@ -679,9 +679,9 @@ pub struct PortDef {
     pub default: u16,
     #[serde(default)]
     pub label: Option<String>,
-    /// The field of Settings → Ports that holds it (built-in manifests).
+    /// A few words on what uses it, under its field in Settings.
     #[serde(default)]
-    pub setting: Option<String>,
+    pub hint: Option<String>,
 }
 
 /// One file operation before start; exactly one of `content`, `copy` or `merge`.
@@ -1076,13 +1076,8 @@ impl Manifest {
                 return Err(format!("port \"{name}\" is listed twice"));
             }
             names.push(name);
-            if !builtin {
-                if port.setting.is_some() {
-                    return Err(format!("port \"{name}\": setting is only for LampRabit's own services"));
-                }
-                if port.default < 1024 {
-                    return Err(format!("port \"{name}\": {} needs administrator rights on Linux and macOS; pick one above 1023", port.default));
-                }
+            if !builtin && port.default < 1024 {
+                return Err(format!("port \"{name}\": {} needs administrator rights on Linux and macOS; pick one above 1023", port.default));
             }
         }
         if names.is_empty() && !self.uses(Hook::Ports) {
@@ -1362,14 +1357,10 @@ impl Manifest {
     /// A port's number from the settings.
     pub fn port(&self, settings: &Settings, name: &str) -> Option<u16> {
         let def = self.ports.get(name)?;
-        let chosen = match def.setting.as_deref() {
-            Some(key) => settings.ports.get(key),
-            None => settings.ports.extra.get(&format!("{}.{name}", self.id)).copied(),
-        };
-        Some(chosen.unwrap_or(def.default))
+        Some(settings.ports.services.get(&format!("{}.{name}", self.id)).copied().unwrap_or(def.default))
     }
 
-    /// Gives each port of a non-built-in service that has none yet its default, or the next
+    /// Gives each port of a service that has none yet its default, or the next
     /// port no other service is set to use and `free` says is free right now.
     pub fn assign_ports(&self, settings: &mut Settings, free: impl Fn(u16) -> bool) {
         let mut taken: Vec<u16> = serde_json::to_value(&settings.ports)
@@ -1382,18 +1373,18 @@ impl Manifest {
         // shortcut: PHP workers take blocks of 10 from php_fpm, one per PHP version in use;
         // 100 covers ten versions, widen it if more ever run at once.
         taken.extend(settings.ports.php_fpm..settings.ports.php_fpm.saturating_add(100));
-        taken.extend(settings.ports.extra.iter().filter(|(k, _)| !k.starts_with(&format!("{}.", self.id))).map(|(_, p)| *p));
+        taken.extend(settings.ports.services.iter().filter(|(k, _)| !k.starts_with(&format!("{}.", self.id))).map(|(_, p)| *p));
         for m in built_ins().iter().chain(extras()).filter(|m| m.id != self.id) {
             taken.extend(m.port_numbers(settings));
         }
-        for (name, def) in self.ports.iter().filter(|(_, d)| d.setting.is_none()) {
+        for (name, def) in self.ports.iter() {
             let key = format!("{}.{name}", self.id);
-            if settings.ports.extra.contains_key(&key) {
+            if settings.ports.services.contains_key(&key) {
                 continue;
             }
             let Some(port) = (def.default..=u16::MAX).find(|p| !taken.contains(p) && free(*p)) else { continue };
             taken.push(port);
-            settings.ports.extra.insert(key, port);
+            settings.ports.services.insert(key, port);
         }
     }
 
@@ -1928,17 +1919,6 @@ mod tests {
     }
 
     #[test]
-    fn built_in_ports_name_real_settings() {
-        let settings = Settings::default();
-        for m in built_ins() {
-            for (name, def) in m.ports.iter() {
-                let key = def.setting.as_deref().unwrap_or_else(|| panic!("{}: port {name} has no setting", m.id));
-                assert_eq!(settings.ports.get(key), Some(def.default), "{}: port {name} ({key}) differs from Settings' default", m.id);
-            }
-        }
-    }
-
-    #[test]
     fn platform_words() {
         assert!(platform_matches("unix", "linux", "x64"));
         assert!(!platform_matches("unix", "windows", "x64"));
@@ -2019,11 +1999,9 @@ connection:
     }
 
     #[test]
-    fn low_ports_and_settings_are_refused_for_community_manifests() {
+    fn low_ports_are_refused_for_community_manifests() {
         let text = SMALL.replace("default: 7000", "default: 80");
         assert!(parse(&text, false).unwrap_err().to_string().contains("above 1023"));
-        let text = SMALL.replace("default: 7000", "default: 7000, setting: http");
-        assert!(parse(&text, false).unwrap_err().to_string().contains("setting is only"));
     }
 
     #[test]

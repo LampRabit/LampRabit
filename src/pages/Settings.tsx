@@ -45,6 +45,7 @@ import McpSettings from "../components/McpSettings";
 import MoveEnvironmentDialog from "../components/MoveEnvironmentDialog";
 import ApplyBar from "../components/ApplyBar";
 import { portFields, portShown, serverNotes, type PortKey } from "../lib/settingsFields";
+import { useCatalog } from "../lib/catalog";
 import { Button, Card, Segmented, Switch, inputClass } from "../components/ui";
 import { usePageToolbar } from "../components/PageToolbar";
 
@@ -98,6 +99,7 @@ export default function Settings() {
   const [uninstalling, setUninstalling] = useState(false);
   const [moving, setMoving] = useState(false);
   const [draft, setDraft] = useState<SettingsT | null>(null);
+  const catalog = useCatalog();
   const [versions, setVersions] = useState<Versions | null>(null);
   const [current, setCurrent] = useState<string>("general");
   // "Find a setting": sections whose text doesn't match are hidden. Read from the rendered
@@ -185,6 +187,11 @@ export default function Settings() {
   if (!draft || !versions) return null;
   const set = (patch: Partial<SettingsT>) => setDraft({ ...draft, ...patch });
   const setPort = (key: PortKey, value: number) => setDraft({ ...draft, ports: { ...draft.ports, [key]: value } });
+  const setServicePort = (key: string, value: number) => setDraft({ ...draft, ports: { ...draft.ports, services: { ...draft.ports.services, [key]: value } } });
+  // Services' ports from their manifests (Mailpit's are under Email).
+  const servicePorts = (catalog.data?.runtimes ?? [])
+    .filter((r) => r.id !== "mailpit")
+    .flatMap((r) => (r.ports ?? []).map((p) => ({ key: p.key, label: p.label ? `${r.label} ${p.label}` : r.label, hint: p.hint ?? "" })));
   const installedServices = (services.data ?? []).filter((s) => s.installed && !s.external);
   const dbInstalled = { mariadb: !!activeVersions?.mariadb, mysql: !!activeVersions?.mysql };
 
@@ -498,6 +505,25 @@ export default function Settings() {
                     />
                   </div>
                 ))}
+              {servicePorts.map(({ key, label, hint }) => (
+                <div key={key} className="flex items-center gap-4 border-b border-line px-5 py-3 sm:odd:border-r">
+                  <div className="min-w-0 flex-1">
+                    <label htmlFor={`port-${key}`} className="block text-sm font-semibold">
+                      {label}
+                    </label>
+                    <PortState port={draft.ports.services[key]} saved={settings.data?.ports.services[key]} status={ports.data?.find((p) => p.key === key)} hint={hint} />
+                  </div>
+                  <input
+                    id={`port-${key}`}
+                    type="number"
+                    min={1}
+                    max={65535}
+                    className={numberInput}
+                    value={draft.ports.services[key] ?? ""}
+                    onChange={(e) => setServicePort(key, Number(e.target.value))}
+                  />
+                </div>
+              ))}
             </div>
           </Section>
 
@@ -526,8 +552,8 @@ export default function Settings() {
                 min={1}
                 max={65535}
                 className={numberInput}
-                value={draft.ports.mailSmtp}
-                onChange={(e) => setPort("mailSmtp", Number(e.target.value))}
+                value={draft.ports.services["mailpit.smtp"]}
+                onChange={(e) => setServicePort("mailpit.smtp", Number(e.target.value))}
                 aria-label="Mailpit SMTP port"
               />
             </Row>
@@ -537,8 +563,8 @@ export default function Settings() {
                 min={1}
                 max={65535}
                 className={numberInput}
-                value={draft.ports.mailUi}
-                onChange={(e) => setPort("mailUi", Number(e.target.value))}
+                value={draft.ports.services["mailpit.ui"]}
+                onChange={(e) => setServicePort("mailpit.ui", Number(e.target.value))}
                 aria-label="Mailpit inbox port"
               />
             </Row>

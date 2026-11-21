@@ -19,9 +19,9 @@ source:
     macos-arm64: { file: clickhouse-macos-aarch64, archive: file }
 binary: usr/bin/clickhouse
 ports:
-  http: { default: 8123, setting: clickhouseHttp, label: HTTP }
+  http: { default: 8123, hint: "Queries over HTTP and the /play console", label: HTTP }
   # Not ClickHouse's usual 9000, which PHP's FastCGI ports use.
-  tcp: { default: 19000, setting: clickhouseTcp, label: Native }
+  tcp: { default: 19000, hint: "clickhouse-client and native drivers", label: Native }
 dirs: ["{{data}}", "{{tmp}}"]
 files:
   # Only on 127.0.0.1, logs to the console (LampRabit's log), `default` without a password.

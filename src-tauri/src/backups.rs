@@ -50,7 +50,7 @@ fn mongo_tool(settings: &Settings, layout: &Layout, name: &str) -> Result<(PathB
         .get("mongotools")
         .ok_or_else(|| Error::msg("MongoDB backups use the MongoDB Database Tools: install them on the Services page (Databases → MongoDB Database Tools)."))?;
     let program = layout.bin("mongotools", version).join("bin").join(exe(name));
-    Ok((program, vec![format!("--uri=mongodb://127.0.0.1:{}", settings.ports.mongodb)]))
+    Ok((program, vec![format!("--uri=mongodb://127.0.0.1:{}", settings.ports.service("mongodb.mongodb"))]))
 }
 
 /// MongoDB's system databases, never listed for backup.
@@ -148,7 +148,7 @@ fn remove_sqlite_journal(file: &Path) -> Result<()> {
 fn postgres_tool(settings: &Settings, layout: &Layout, name: &str) -> Result<(PathBuf, Vec<String>)> {
     let version = settings.versions.get("postgres").ok_or_else(|| Error::msg("PostgreSQL is not installed"))?;
     let program = layout.bin("postgres", version).join("bin").join(exe(name));
-    let args = vec!["-h".into(), "127.0.0.1".into(), "-p".into(), settings.ports.postgres.to_string(), "-U".into(), "postgres".into()];
+    let args = vec!["-h".into(), "127.0.0.1".into(), "-p".into(), settings.ports.service("postgres.postgres").to_string(), "-U".into(), "postgres".into()];
     Ok((program, args))
 }
 
@@ -189,7 +189,7 @@ pub async fn databases(settings: &Settings, layout: &Layout, engine: DbEngine) -
         let args = vec![
             "--quiet".into(),
             "--port".into(),
-            settings.ports.mongodb.to_string(),
+            settings.ports.service("mongodb.mongodb").to_string(),
             "--eval".into(),
             "db.adminCommand({ listDatabases: 1, nameOnly: true }).databases.forEach(d => print(d.name))".into(),
         ];

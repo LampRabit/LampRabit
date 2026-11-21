@@ -15,7 +15,7 @@ binary: installed.txt
 needs:
   - { runtime: node, min: "24", why: n8n runs on Node.js }
 ports:
-  http: { default: 5678, setting: n8n }
+  http: { default: 5678, hint: "Its editor, behind n8n.test" }
 dirs: ["{{data}}"]
 run:
   program: "{{needs.node.bin}}/node{{exe}}"

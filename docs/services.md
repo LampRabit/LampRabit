@@ -110,7 +110,7 @@ ports:
 
 Each port has a name (lowercase letters and underscores) and a default. The **first** port is the main one: it's shown on the service's card and is what `health` checks unless told otherwise. Every port is checked before the service starts, and a port that's taken stops the start with a message naming who holds it. Community services must use ports above 1023, since lower ones need administrator rights on Linux and macOS. Avoid 9000–9099, which PHP's FastCGI workers use.
 
-When a community service is installed, LampRabit gives each of its ports the default, or the next port that no other service is set to use and nothing is listening on, so two services never share one. The user can change them on the service's Settings card; they are saved in `settings.toml` under `[ports.extra]` as `"<id>.<port name>"`.
+A port can have a `label` ("HTTP", "Console"; leave it out for a service's only port) and a `hint`, a few words on what uses it, shown under its field. When a service is installed, LampRabit gives each of its ports the default, or the next port that no other service is set to use and nothing is listening on, so two services never share one. The user can change them on the service's Settings card and in Settings → Ports; they are saved in `settings.toml` under `[ports.services]` as `"<id>.<port name>"`.
 
 ### Before it starts: `data`, `dirs`, `files`
 
@@ -274,7 +274,7 @@ lamprabit service try service.yaml     # install, start, health check, stop, in 
 
 ## Built-in services
 
-LampRabit's own manifests may use `builtin:` for the parts its code still handles, because they can't be described as files and commands: `ports` (the web servers' ports come from Settings → Web server), `prepare` (vhosts, PHP pools, database data folders), `launch` (Tomcat's classpath, PostgreSQL started through `pg_ctl` when LampRabit has administrator rights) and `external` (an Ollama installed outside LampRabit). They may also use `source: { builtin: true }` for catalogs that need code (MariaDB's REST API, MySQL's, MongoDB's, Tomcat's mirror listing, pgAdmin's PyPI wheels, and the Windows builds of Apache and Nginx, which are scraped from web pages), `source: { lamprabit: true }` for LampRabit's own CI builds, `checksum: none` (Typesense publishes no checksums), `setting:` on a port to name its field in Settings → Ports, and the `mysql` and `postgres` health checks. Community manifests can't use any of these.
+LampRabit's own manifests may use `builtin:` for the parts its code still handles, because they can't be described as files and commands: `ports` (the web servers' ports come from Settings → Web server), `prepare` (vhosts, PHP pools, database data folders), `launch` (Tomcat's classpath, PostgreSQL started through `pg_ctl` when LampRabit has administrator rights) and `external` (an Ollama installed outside LampRabit). They may also use `source: { builtin: true }` for catalogs that need code (MariaDB's REST API, MySQL's, MongoDB's, Tomcat's mirror listing, pgAdmin's PyPI wheels, and the Windows builds of Apache and Nginx, which are scraped from web pages), `source: { lamprabit: true }` for LampRabit's own CI builds, `checksum: none` (Typesense publishes no checksums), and the `mysql` and `postgres` health checks. Community manifests can't use any of these.
 
 ## Checks
 

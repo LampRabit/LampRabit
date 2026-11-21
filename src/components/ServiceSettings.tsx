@@ -51,7 +51,7 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
   }, [settings.data]);
   // Only services have manifest options; other runtimes (PHP, Java…) have none.
   const service = useQuery({ queryKey: ["services"], queryFn: api.listServices }).data?.find((s) => s.kind === runtime);
-  const extraPorts = infoFor(useCatalog().data, runtime)?.ports ?? [];
+  const servicePorts = infoFor(useCatalog().data, runtime)?.ports ?? [];
   const options = useQuery({
     queryKey: ["service-options", runtime],
     queryFn: () => api.serviceOptions(runtime as ServiceKind),
@@ -88,7 +88,7 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
   const database = runtime === "mariadb" || runtime === "mysql";
   const storage = runtime === "rustfs" || runtime === "minio";
   const declared = options.data ?? [];
-  if (!server && fields.length === 0 && !workers && runtime !== "mailpit" && !database && !storage && declared.length === 0 && extraPorts.length === 0) return null;
+  if (!server && fields.length === 0 && !workers && runtime !== "mailpit" && !database && !storage && declared.length === 0 && servicePorts.length === 0) return null;
 
   const set = (patch: Partial<Settings>) => setDraft({ ...draft, ...patch });
   const dirty = JSON.stringify(pick(draft)) !== JSON.stringify(pick(settings.data)) || changedOptions.length > 0;
@@ -143,16 +143,16 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
             />
           </Row>
         ))}
-      {extraPorts.map(({ key, label, default: fallback }) => (
-        <Row key={key} label={`${label} port`}>
+      {servicePorts.map(({ key, label, hint, default: fallback }) => (
+        <Row key={key} label={label ? `${label} port` : "Port"} hint={hint ?? undefined}>
           <input
             type="number"
-            min={1024}
+            min={1}
             max={65535}
             className={numberInput}
-            value={draft.ports.extra?.[key] ?? fallback}
-            onChange={(e) => set({ ports: { ...draft.ports, extra: { ...draft.ports.extra, [key]: Number(e.target.value) } } })}
-            aria-label={`${label} port`}
+            value={draft.ports.services?.[key] ?? fallback}
+            onChange={(e) => set({ ports: { ...draft.ports, services: { ...draft.ports.services, [key]: Number(e.target.value) } } })}
+            aria-label={label ? `${label} port` : `${runtimeLabels[runtime] ?? runtime} port`}
           />
         </Row>
       ))}

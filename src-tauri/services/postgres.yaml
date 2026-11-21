@@ -24,7 +24,7 @@ source:
 binary: "bin/postgres{{exe}}"
 suggests: [adminer, phppgadmin, pgadmin]
 ports:
-  postgres: { default: 5432, setting: postgres }
+  postgres: { default: 5432, hint: "Database" }
 # A data folder only works with the major version that created it.
 data: per-major
 health: { postgres: {} }

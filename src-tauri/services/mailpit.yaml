@@ -17,8 +17,8 @@ source:
     macos-arm64: { file: mailpit-darwin-arm64.tar.gz, archive: targz }
 binary: "mailpit{{exe}}"
 ports:
-  smtp: { default: 1025, setting: mailSmtp, label: SMTP }
-  ui: { default: 8025, setting: mailUi, label: Web inbox }
+  smtp: { default: 1025, hint: "Where apps send mail", label: SMTP }
+  ui: { default: 8025, hint: "The web inbox", label: Web inbox }
 dirs: ["{{data}}"]
 settings:
   max_messages:

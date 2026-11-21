@@ -351,7 +351,7 @@ fn system_ollama(settings: &Settings) -> Option<LaunchSpec> {
         test: None,
         stop_cmd: None,
         path_prepend: vec![],
-        env: vec![("OLLAMA_HOST", format!("127.0.0.1:{}", settings.ports.ollama))],
+        env: vec![("OLLAMA_HOST", format!("127.0.0.1:{}", settings.ports.service("ollama.api")))],
     })
 }
 
@@ -580,7 +580,7 @@ fn builtin_launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) 
                     "--pg-elevated".into(),
                     path(bin.join(exe("pg_ctl"))),
                     data.clone(),
-                    settings.ports.postgres.to_string(),
+                    settings.ports.service("postgres.postgres").to_string(),
                     path(layout.tmp().join("postgres-pgctl.log")),
                 ],
                 test: None,
@@ -600,7 +600,7 @@ fn builtin_launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) 
                     "-D".into(),
                     data.clone(),
                     "-p".into(),
-                    settings.ports.postgres.to_string(),
+                    settings.ports.service("postgres.postgres").to_string(),
                     "-c".into(),
                     "listen_addresses=127.0.0.1".into(),
                     "-c".into(),
@@ -1254,7 +1254,7 @@ impl Supervisor {
         }
         if let Some(previous) = upgrade_from {
             let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
-            let port = settings.ports.mysql;
+            let port = settings.ports.service("mariadb.mysql");
             tauri::async_runtime::spawn(async move {
                 for _ in 0..60 {
                     if matches!(diagnose::probe_mysql(port).await, Probe::Ok) {
@@ -1510,9 +1510,9 @@ health: { http: { path: /health } }
 
         // Its default port is another service's and 7001 is busy: it gets 7002, kept on reinstall.
         let mut settings = Settings::default();
-        settings.ports.extra.insert("other.http".into(), 7000);
+        settings.ports.services.insert("other.http".into(), 7000);
         kind.manifest().assign_ports(&mut settings, |p| p != 7001);
-        assert_eq!(settings.ports.extra.get("echo.http"), Some(&7002));
+        assert_eq!(settings.ports.services.get("echo.http"), Some(&7002));
         kind.manifest().assign_ports(&mut settings, |_| true);
         assert_eq!(kind.port_of(&settings), 7002);
 
@@ -1530,7 +1530,7 @@ health: { http: { path: /health } }
         let catalog = crate::catalog::catalog();
         assert!(catalog.groups.iter().any(|g| g.id == "tools" && g.items.contains(&"echo")));
         let info = catalog.runtimes.iter().find(|r| r.id == "echo").unwrap();
-        assert_eq!((info.ports[0].key.as_str(), info.ports[0].label.as_str(), info.ports[0].default), ("echo.http", "Web", 7000));
+        assert_eq!((info.ports[0].key.as_str(), info.ports[0].label.as_deref(), info.ports[0].default), ("echo.http", Some("Web"), 7000));
     }
 
     #[test]
@@ -1614,30 +1614,6 @@ health: { http: { path: /health } }
         // HTTP on its AMQP port) is allowed that.
         for kind in ServiceKind::all().into_iter().filter(|k| k.slow()) {
             assert!(matches!(kind.manifest().check_kind(), Check::Http(..)) || kind == ServiceKind::Rabbitmq, "{kind:?}");
-        }
-    }
-
-    /// The ports a manifest lists are the ones the supervisor checked before starting.
-    #[test]
-    fn manifest_ports_match_the_old_port_lists() {
-        let settings = Settings::default();
-        let p = &settings.ports;
-        let expect = |kind: ServiceKind| -> Vec<u16> {
-            match kind {
-                ServiceKind::Tomcat => vec![p.tomcat_http, p.tomcat_shutdown],
-                ServiceKind::Clickhouse => vec![p.clickhouse_http, p.clickhouse_tcp],
-                ServiceKind::Neo4j => vec![p.neo4j_http, p.neo4j_bolt],
-                ServiceKind::Rustfs => vec![p.rustfs, p.rustfs_console],
-                ServiceKind::Minio => vec![p.minio, p.minio_console],
-                ServiceKind::Elasticsearch => vec![p.elasticsearch, p.elasticsearch_transport],
-                ServiceKind::Opensearch => vec![p.opensearch, p.opensearch_transport],
-                ServiceKind::Rabbitmq => vec![p.rabbitmq, p.rabbitmq_management],
-                ServiceKind::Mailpit => vec![p.mail_smtp, p.mail_ui],
-                k => vec![k.port(&settings)],
-            }
-        };
-        for kind in ServiceKind::all().into_iter().filter(|k| k.web_server().is_none()) {
-            assert_eq!(kind.manifest().port_numbers(&settings), expect(kind), "{kind:?}");
         }
     }
 }

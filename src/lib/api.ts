@@ -158,9 +158,11 @@ export interface ServiceFile {
 }
 
 export interface PortField {
-  /** Its key in `ports.extra`. */
+  /** Its key in `ports.services`. */
   key: string;
-  label: string;
+  /** What it's for ("HTTP", "Console"); null for a service's only port. */
+  label: string | null;
+  hint: string | null;
   default: number;
 }
 
@@ -860,12 +862,9 @@ export interface Settings {
   rootDir: string;
   tld: string;
   ports: {
+    /** The primary web server's. */
     http: number;
     https: number;
-    /** MariaDB's port (the name predates MySQL support). */
-    mysql: number;
-    /** Oracle MySQL, next to MariaDB. */
-    mysqlServer: number;
     phpFpm: number;
     /** Each web server's own ports, used while another server is the primary one. */
     nginxHttp: number;
@@ -879,40 +878,12 @@ export interface Settings {
     frankenphpHttp: number;
     frankenphpHttps: number;
     frankenphpAdmin: number;
-    /** Tomcat's HTTP connector, behind the web servers. */
-    tomcatHttp: number;
-    tomcatShutdown: number;
-    postgres: number;
-    pgadmin: number;
-    mongodb: number;
-    clickhouseHttp: number;
-    clickhouseTcp: number;
-    neo4jHttp: number;
-    neo4jBolt: number;
-    meilisearch: number;
-    typesense: number;
-    rustfs: number;
-    rustfsConsole: number;
-    ollama: number;
-    minio: number;
-    minioConsole: number;
-    elasticsearch: number;
-    elasticsearchTransport: number;
-    opensearch: number;
-    opensearchTransport: number;
-    n8n: number;
-    rabbitmq: number;
-    rabbitmqManagement: number;
-    mailSmtp: number;
-    mailUi: number;
-    redis: number;
-    memcached: number;
     /** Where PHP's dump() sends dumps for Logs. */
     dumps: number;
     /** LampRabit's own MCP server over HTTP. */
     mcp: number;
-    /** Ports of services that aren't built in, as "<service id>.<port name>". */
-    extra: Record<string, number>;
+    /** Every service's ports, as "<service id>.<port name>" ("mailpit.ui"); the catalog has their labels and defaults. */
+    services: Record<string, number>;
   };
   versions: Partial<Record<Runtime, string | null>>;
   /** The web servers that run; the first is the primary one (main ports, localhost, tools). */

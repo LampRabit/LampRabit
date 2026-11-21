@@ -506,8 +506,8 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
   // PHP projects with a package.json have an asset dev server (Vite) next to the site.
   const devServer = !dynamic && site.nodeProject && !!app.data && !!appCommand(app.data.config);
   const php = site.php ?? settings.data?.versions.php ?? null;
-  const pmaUrl = toolUrl("phpmyadmin", info, settings.data?.ports.mailUi);
-  const adminerUrl = toolUrl("adminer", info, settings.data?.ports.mailUi);
+  const pmaUrl = toolUrl("phpmyadmin", info, settings.data?.ports.services["mailpit.ui"]);
+  const adminerUrl = toolUrl("adminer", info, settings.data?.ports.services["mailpit.ui"]);
   const targetDbUrl = site.database
     ? (pmaUrl ? `${pmaUrl}?server=1&db=${encodeURIComponent(site.database)}` : adminerUrl ? `${adminerUrl}?db=${encodeURIComponent(site.database)}` : null)
     : (pmaUrl ?? adminerUrl ?? null);
@@ -1727,6 +1727,6 @@ function RecentRuns({ site, status, onShow }: { site: Site; status?: AppStatus; 
 
 /** phpMyAdmin opened on the project's database, on the default database server. */
 function databaseUrl(db: string, info?: SitesInfo, settings?: Settings) {
-  const base = toolUrl("phpmyadmin", info, settings?.ports.mailUi);
+  const base = toolUrl("phpmyadmin", info, settings?.ports.services["mailpit.ui"]);
   return base ? `${base}?server=1&db=${encodeURIComponent(db)}` : null;
 }

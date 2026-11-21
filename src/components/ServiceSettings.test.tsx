@@ -96,7 +96,7 @@ describe("manifest options in a service's settings", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Apply changes/ }));
     await vi.waitFor(() => expect(calls.some((c) => c.cmd === "saveSettings")).toBe(true));
     const saved = calls.find((c) => c.cmd === "saveSettings")?.args[0] as Settings;
-    expect(saved.ports.extra).toEqual({ "echo.http": 7100 });
+    expect(saved.ports.services).toEqual({ "echo.http": 7100 });
   });
 
   it("asks nothing for runtimes that aren't services", async () => {
