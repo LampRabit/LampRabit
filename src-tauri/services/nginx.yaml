@@ -9,7 +9,17 @@ origin:
 homepage: https://nginx.org
 license: BSD-2-Clause
 source:
-  - { on: [windows], builtin: true }
+  # nginx.org's Windows builds. It publishes PGP signatures rather than checksums, so these
+  # rely on HTTPS alone.
+  - on: [windows]
+    page:
+      url: https://nginx.org/en/download.html
+      link: '^/download/nginx-(?P<version>[\d.]+)\.zip$'
+      labels: [Mainline, Stable]
+    versions: per-line
+    keep: 4
+    archive: zip
+    checksum: none
   - { lamprabit: true }
 binary: "nginx{{exe}}"
 health: { http: { path: / } }

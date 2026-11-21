@@ -11,7 +11,13 @@ origin:
 homepage: https://httpd.apache.org
 license: Apache-2.0
 source:
-  - { on: [windows], builtin: true }
+  # Apache Lounge only hosts its latest build; its checksum is in "<file>.txt".
+  - on: [windows]
+    page:
+      url: https://www.apachelounge.com/download/
+      link: '/httpd-(?P<version>2\.4\.\d+)-\d+-Win64-(?P<label>VS\d+)\.zip$'
+    archive: zip
+    checksum: { sha256: "{url}.txt" }
   - { lamprabit: true }
 binary: "bin/httpd{{exe}}"
 health: { http: { path: / } }

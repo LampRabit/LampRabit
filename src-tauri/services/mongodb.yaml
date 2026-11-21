@@ -6,7 +6,48 @@ blurb: Stores your documents
 origin: Official MongoDB Community Server releases (checksum checked); each major version keeps its own data folder
 homepage: https://www.mongodb.com
 license: SSPL-1.0
-source: { builtin: true }
+# MongoDB's own list of downloads (with SHA-256s): the newest of each major from 7 on,
+# Community editions ("base", on Linux "targeted", built per distribution).
+source:
+  json:
+    url: https://downloads.mongodb.org/full.json
+    items: versions
+    where: { production_release: "true" }
+    version: version
+    files: downloads
+    file: { target: "{var.target}", arch: "{var.arch}", edition: "{var.edition}" }
+    download: "{file.archive.url}"
+    sha256: "{file.archive.sha256}"
+    label: { from: lts_release, map: { "true": LTS }, else: "MongoDB {major}" }
+  versions: per-major
+  min: 7
+vars:
+  # A distribution between two supported releases uses the older build.
+  target:
+    - { value: windows, on: [windows-x64] }
+    - { value: macos, on: [macos] }
+    - { value: ubuntu2604, on: [linux], distro: [ubuntu], from: "26.04" }
+    - { value: ubuntu2404, on: [linux], distro: [ubuntu], from: "24.04" }
+    - { value: ubuntu2204, on: [linux], distro: [ubuntu], from: "22.04" }
+    - { value: debian13, on: [linux], distro: [debian], from: "13" }
+    - { value: debian12, on: [linux], distro: [debian], from: "12" }
+    - { value: rhel10, on: [linux], distro: [rhel, centos, rocky, almalinux, ol], from: "10" }
+    - { value: rhel93, on: [linux], distro: [rhel, centos, rocky, almalinux, ol], from: "9" }
+    - { value: rhel8, on: [linux], distro: [rhel, centos, rocky, almalinux, ol], from: "8" }
+    - { value: amazon2023, on: [linux], distro: [amzn], from: "2023" }
+    - { value: suse16, on: [linux], distro: [sles, opensuse-leap], from: "16" }
+    - { value: suse15, on: [linux], distro: [sles, opensuse-leap], from: "15" }
+    # Ubuntu-based (Mint, Pop!_OS…): the Ubuntu release they're built on.
+    - { value: ubuntu2204, on: [linux], like: ubuntu, codename: jammy }
+    - { value: ubuntu2404, on: [linux], like: ubuntu }
+    - { on: [linux], unavailable: "MongoDB publishes Linux builds for Ubuntu, Debian, RHEL and its rebuilds, Amazon Linux and SUSE; {distro} isn't one of them." }
+  arch:
+    - { value: x86_64, on: [x64] }
+    - { value: arm64, on: [macos-arm64] }
+    - { value: aarch64, on: [linux-arm64] }
+  edition:
+    - { value: targeted, on: [linux] }
+    - { value: base }
 binary: "bin/mongod{{exe}}"
 suggests: [mongosh, compass, mongotools]
 ports:

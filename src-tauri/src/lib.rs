@@ -36,6 +36,7 @@ mod runtimes;
 mod services;
 mod shims;
 mod sites;
+mod sources;
 mod smoke;
 mod ssl;
 mod templategen;

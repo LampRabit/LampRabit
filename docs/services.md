@@ -68,7 +68,7 @@ connection:
 
 `origin` is only the sentence shown on the Services page. **`source` is what LampRabit downloads from**, and manifests find new versions on their own: when the software publishes a release, LampRabit offers it with no change to the manifest. A new manifest revision is only needed when the way the service is installed or run changes.
 
-A source is either GitHub or npm:
+A source is GitHub, npm, a vendor's JSON API (`json`) or a web page (`page`):
 
 | Field | What it is |
 |---|---|
@@ -95,6 +95,75 @@ source:
       windows-x64: { file: "Redis-{version}-Windows-x64-msys2.zip", archive: zip }
   - { lamprabit: true }
 ```
+
+#### A vendor's API: `json`
+
+For software whose releases are listed by a JSON API rather than GitHub or npm (MariaDB, MongoDB, PyPI, docker-library's MySQL list):
+
+```yaml
+source:
+  json:
+    url: https://downloads.mongodb.org/full.json
+    items: versions                         # path to the releases; `*` steps into an object's values
+    where: { production_release: "true" }   # keep items whose fields match (`*` is a wildcard)
+    version: version                        # path to a release's version
+    files: downloads                        # path to its files…
+    file: { target: "{var.target}", arch: "{var.arch}" }   # …and the values the right one has
+    download: "{file.archive.url}"
+    sha256: "{file.archive.sha256}"         # a hash the answer gives (or sha512)
+    label: { from: lts_release, map: { "true": LTS }, else: "MongoDB {major}" }
+  versions: per-major
+  min: 7
+```
+
+- `then: { url: ".../{item.release_id}/latest/", items: "releases.*" }` makes one more request per item (MariaDB lists its series first, then each one's latest release); the first request's item is then `parent` (`parent.release_support_type`).
+- Without `items`, the answer is one release (PyPI's `info.version`).
+- Templates (`download`, hashes, labels, filter values) can use `{version}`, `{major}`, `{line}` (`8.4` of 8.4.7), `{key}` (an item's key when the list was an object; `@key` in a path), `{asset}` (the platform's file from `assets`), `{item.<path>}`, `{parent.<path>}`, `{file.<path>}` and `{var.<name>}`. Paths are dotted (`archive.url`, `urls.0.digests.sha256`).
+- `label` is a template, or `{ from: <path>, map: { value: label }, else: <label> }`; without `else` the value itself is shown.
+
+#### A web page: `page`
+
+For a download page or a mirror's folder listing (Apache Lounge, nginx.org, Apache's mirror):
+
+```yaml
+source:
+  page:
+    url: "https://dlcdn.apache.org/tomcat/tomcat-{variant}/"
+    link: '^v(?P<version>\d+\.\d+\.\d+)/$'      # a regular expression for the links that are releases
+    variants:                                    # one lookup per value, keeping the newest of each
+      - { value: "11", label: "Jakarta EE 11 · Java 17+" }
+      - { value: "10", label: "Jakarta EE 10 · Java 11+" }
+    download: "https://dlcdn.apache.org/tomcat/tomcat-{variant}/v{version}/bin/{asset}"
+  assets:
+    windows: { file: "apache-tomcat-{version}.zip", archive: zip }
+    unix: { file: "apache-tomcat-{version}.tar.gz", archive: targz }
+  checksum: { sha512: "{url}.sha512" }
+```
+
+`link` needs a `version` group and may have a `label` group. Without `download`, the link itself is the download. `labels: [Mainline, Stable]` names the versions found, newest first. Without `variants`, `versions` picks among the versions found (`latest`, `per-line`…).
+
+#### Shared by `json` and `page`
+
+- `versions: all` keeps every release the list gives.
+- **Checksums:** a hash from the answer, or a checksum file: `{ sha256 | sha512 | md5: "{url}.sha256" }`. LampRabit finds the hash in the file whatever its layout. MD5 is accepted only because some vendors (MySQL) publish nothing stronger.
+- `archive` gives the archive type when no `assets` entry does; otherwise it comes from the address (`.zip`, `.tar.gz`, `.tgz`, `.tar.xz`, `.tar.zst`).
+- `fallbacks` on an asset lists more file names to try, in order, when the first has no published checksum (MySQL's macOS archives are named after the macOS they're built for).
+- Addresses from an answer that start with `http://` are fetched over HTTPS.
+
+#### Values per platform or distribution: `vars`
+
+At the top level, `vars` gives values that differ by platform or Linux distribution, used as `{var.<name>}`. The first case that matches wins:
+
+```yaml
+vars:
+  target:
+    - { value: windows, on: [windows-x64] }
+    - { value: ubuntu2404, on: [linux], distro: [ubuntu], from: "24.04" }
+    - { value: ubuntu2404, on: [linux], like: ubuntu }                    # Mint, Pop!_OS…
+    - { on: [linux], unavailable: "There's no build for {distro}." }
+```
+
+`distro` is the `ID` from /etc/os-release, `like` one of its `ID_LIKE` words, `codename` its `UBUNTU_CODENAME` (or `VERSION_CODENAME`), `from` the oldest `VERSION_ID`. A case with `unavailable` stops the download list with that message (`{distro}` is the distribution's name).
 
 A platform with no file in `assets` can't install the service; give it an `unavailable` message that says what to use instead.
 
@@ -277,7 +346,7 @@ lamprabit service try service.yaml     # install, start, health check, stop, in 
 
 ## Built-in services
 
-LampRabit's own manifests may use `builtin:` for the parts its code still handles, because they can't be described as files and commands: `ports` (the web servers' ports come from Settings → Web server), `prepare` (vhosts, PHP pools, database data folders), `launch` (Tomcat's classpath, PostgreSQL started through `pg_ctl` when LampRabit has administrator rights) and `external` (an Ollama installed outside LampRabit). They may also use `source: { builtin: true }` for catalogs that need code (MariaDB's REST API, MySQL's, MongoDB's, Tomcat's mirror listing, pgAdmin's PyPI wheels, and the Windows builds of Apache and Nginx, which are scraped from web pages), `source: { lamprabit: true }` for LampRabit's own CI builds, `checksum: none` (Typesense publishes no checksums), and the `mysql` and `postgres` health checks. Community manifests can't use any of these.
+LampRabit's own manifests may use `builtin:` for the parts its code still handles, because they can't be described as files and commands: `ports` (the web servers' ports come from Settings → Web server), `prepare` (vhosts, PHP pools, database data folders), `launch` (Tomcat's classpath, PostgreSQL started through `pg_ctl` when LampRabit has administrator rights) and `external` (an Ollama installed outside LampRabit). They may also use `source: { lamprabit: true }` for LampRabit's own CI builds, `checksum: none` (Typesense publishes no checksums), and the `mysql` and `postgres` health checks. Community manifests can't use any of these.
 
 ## Checks
 

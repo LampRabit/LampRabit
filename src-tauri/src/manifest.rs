@@ -144,6 +144,10 @@ pub struct Manifest {
     /// Parts handled by LampRabit's own code (built-in manifests only).
     #[serde(default)]
     pub builtin: Vec<Hook>,
+    /// Values that differ by platform or Linux distribution, as `{var.<name>}` in a
+    /// source (MongoDB's build per distribution). The first case that matches wins.
+    #[serde(default)]
+    pub vars: Ordered<Vec<crate::sources::VarCase>>,
 }
 
 fn one() -> u32 {
@@ -528,9 +532,6 @@ impl Sources {
 pub struct Source {
     #[serde(default)]
     pub on: Vec<String>,
-    /// The app's own catalog code for this runtime (built-in manifests only).
-    #[serde(default)]
-    pub builtin: bool,
     /// LampRabit's own CI builds, from the `binaries` release's manifest (built-in only).
     #[serde(default)]
     pub lamprabit: bool,
@@ -541,6 +542,15 @@ pub struct Source {
     /// A package on npm's registry: its latest version's tarball.
     #[serde(default)]
     pub npm: Option<String>,
+    /// A vendor's JSON API that lists the releases (MariaDB, MongoDB, PyPI…).
+    #[serde(default)]
+    pub json: Option<crate::sources::JsonSource>,
+    /// A web page or folder listing whose links are the downloads (Apache Lounge, nginx.org).
+    #[serde(default)]
+    pub page: Option<crate::sources::PageSource>,
+    /// The download's archive type when no `assets` entry gives it; else from its address.
+    #[serde(default)]
+    pub archive: Option<Archive>,
     #[serde(default)]
     pub versions: Versions,
     /// The oldest major version offered (`per-major`).
@@ -583,6 +593,8 @@ pub enum Versions {
     PerLine,
     /// The newest `x.y.z` tag (projects that tag releases without publishing them).
     NewestTag,
+    /// Every release the list gives (a JSON API's stable lines, each its own entry).
+    All,
 }
 
 /// How a download is checked. Nothing is installed unchecked: a missing checksum stops
@@ -598,6 +610,8 @@ pub enum Checksum {
     Sha256(String),
     /// A published SHA-512 file.
     Sha512(String),
+    /// A published MD5 file (MySQL publishes nothing stronger; HTTPS covers the rest).
+    Md5(String),
     /// None published (built-in manifests only; HTTPS covers the download).
     None,
 }
@@ -615,6 +629,8 @@ impl<'de> Deserialize<'de> for Checksum {
                 sha256: Option<String>,
                 #[serde(default)]
                 sha512: Option<String>,
+                #[serde(default)]
+                md5: Option<String>,
             },
         }
         use serde::de::Error as _;
@@ -625,9 +641,10 @@ impl<'de> Deserialize<'de> for Checksum {
                 "none" => Ok(Checksum::None),
                 other => Err(D::Error::custom(format!("checksum \"{other}\" isn't one of github-digest, npm, none, {{ sha256: … }}, {{ sha512: … }}"))),
             },
-            Raw::File { sha256: Some(t), sha512: None } => Ok(Checksum::Sha256(t)),
-            Raw::File { sha256: None, sha512: Some(t) } => Ok(Checksum::Sha512(t)),
-            Raw::File { .. } => Err(D::Error::custom("checksum needs one of sha256 or sha512")),
+            Raw::File { sha256: Some(t), sha512: None, md5: None } => Ok(Checksum::Sha256(t)),
+            Raw::File { sha256: None, sha512: Some(t), md5: None } => Ok(Checksum::Sha512(t)),
+            Raw::File { sha256: None, sha512: None, md5: Some(t) } => Ok(Checksum::Md5(t)),
+            Raw::File { .. } => Err(D::Error::custom("checksum needs one of sha256, sha512 or md5")),
         }
     }
 }
@@ -637,6 +654,10 @@ impl<'de> Deserialize<'de> for Checksum {
 pub struct Asset {
     pub file: String,
     pub archive: Archive,
+    /// Files tried in order when `file` has no published checksum (MySQL's macOS builds
+    /// carry the macOS version they're for, which moves on).
+    #[serde(default)]
+    pub fallbacks: Vec<String>,
 }
 
 impl Source {
@@ -1317,6 +1338,7 @@ impl Manifest {
             Checksum::Npm => "npm's SHA-512 for the package".to_string(),
             Checksum::Sha256(at) => format!("The SHA-256 published at {at}"),
             Checksum::Sha512(at) => format!("The SHA-512 published at {at}"),
+            Checksum::Md5(at) => format!("The MD5 published at {at}"),
             Checksum::None => "Not checked".to_string(),
         });
         let run = self.run.as_ref();
@@ -1420,13 +1442,19 @@ impl Manifest {
 }
 
 fn check_source(src: &Source, builtin: bool) -> std::result::Result<(), String> {
-    let kinds = [src.builtin, src.lamprabit, src.github.is_some(), src.npm.is_some()];
+    let kinds = [src.lamprabit, src.github.is_some(), src.npm.is_some(), src.json.is_some(), src.page.is_some()];
     if kinds.iter().filter(|k| **k).count() != 1 {
-        return Err("each source needs exactly one of github or npm (builtin and lamprabit are LampRabit's own)".into());
+        return Err("each source needs exactly one of github, npm, json or page (lamprabit is LampRabit's own)".into());
+    }
+    crate::sources::check(src)?;
+    let vendor = src.json.is_some() || src.page.is_some();
+    let inline = src.json.as_ref().is_some_and(|j| j.sha256.is_some() || j.sha512.is_some());
+    if vendor && !inline && matches!(src.checksum, Checksum::GithubDigest | Checksum::Npm) {
+        return Err("source: a json or page download needs its checksum: json.sha256/sha512 from the answer, or checksum: { sha256 | sha512 | md5: <file> }".into());
     }
     if !builtin {
-        if src.builtin || src.lamprabit {
-            return Err("source: builtin and lamprabit are only for LampRabit's own services".into());
+        if src.lamprabit {
+            return Err("source: lamprabit is only for LampRabit's own services".into());
         }
         if src.checksum == Checksum::None {
             return Err("source: every download needs a checksum (checksum: none is only for LampRabit's own services)".into());
@@ -1439,7 +1467,7 @@ fn check_source(src: &Source, builtin: bool) -> std::result::Result<(), String> 
         https("url", url)?;
     }
     match &src.checksum {
-        Checksum::Sha256(t) | Checksum::Sha512(t) => https("checksum", t)?,
+        Checksum::Sha256(t) | Checksum::Sha512(t) | Checksum::Md5(t) => https("checksum", t)?,
         Checksum::GithubDigest if src.github.is_some() && src.url.is_some() => {
             return Err("source: a download from url needs checksum: { sha256: … } or { sha512: … } (GitHub's digests only cover its own files)".into());
         }
@@ -1462,8 +1490,11 @@ fn check_source(src: &Source, builtin: bool) -> std::result::Result<(), String> 
         && (name.is_empty() || !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-_.@/".contains(c))) {
             return Err(format!("source.npm \"{name}\" isn't a package name"));
         }
-    if src.github.is_none() && (src.versions != Versions::Latest || !src.tags.0.is_empty() || !src.assets.0.is_empty() || src.url.is_some()) {
-        return Err("source: versions, tags, assets and url are for github sources".into());
+    if src.github.is_none() && (!src.tags.0.is_empty() || src.url.is_some()) {
+        return Err("source: tags and url are for github sources".into());
+    }
+    if !vendor && src.github.is_none() && (src.versions != Versions::Latest || !src.assets.0.is_empty()) {
+        return Err("source: versions and assets are for github, json and page sources".into());
     }
     Ok(())
 }
@@ -1763,9 +1794,29 @@ pub struct Found {
     pub archive: Archive,
     pub sha256: Option<String>,
     pub sha512: Option<String>,
-    /// A published checksum file still to fetch: (is it SHA-512, its address).
-    pub checksum_file: Option<(bool, String)>,
+    pub md5: Option<String>,
+    /// A published checksum file still to fetch: (which hash, its address).
+    pub checksum_file: Option<(Hash, String)>,
     pub label: Option<String>,
+}
+
+/// Which hash a checksum file holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hash {
+    Sha256,
+    Sha512,
+    Md5,
+}
+
+impl Hash {
+    /// Its length in hex digits, to find it in a checksum file of any layout.
+    pub fn hex_len(self) -> usize {
+        match self {
+            Hash::Sha256 => 64,
+            Hash::Sha512 => 128,
+            Hash::Md5 => 32,
+        }
+    }
 }
 
 /// The address a GitHub or npm source's versions are read from.
@@ -1844,8 +1895,9 @@ pub fn select(m: &Manifest, src: &Source, json: &serde_json::Value) -> Result<Ve
                 unchecked = Some(format!("GitHub reports no checksum for {file} ({} {version}), so LampRabit won't install it.", m.name));
                 continue;
             }
-            Checksum::Sha256(t) => Some((false, fill(t))),
-            Checksum::Sha512(t) => Some((true, fill(t))),
+            Checksum::Sha256(t) => Some((Hash::Sha256, fill(t))),
+            Checksum::Sha512(t) => Some((Hash::Sha512, fill(t))),
+            Checksum::Md5(t) => Some((Hash::Md5, fill(t))),
             _ => None,
         };
         let major = crate::version::numbers(&version).first().copied().unwrap_or_default();
@@ -1853,11 +1905,13 @@ pub fn select(m: &Manifest, src: &Source, json: &serde_json::Value) -> Result<Ve
             continue;
         }
         let label = tag_label.or_else(|| src.label.as_ref().map(|l| l.replace("{major}", &major.to_string()).replace("{version}", &version)));
-        let candidate = Found { version, url, archive: asset.archive, sha256, sha512: None, checksum_file, label };
+        let candidate = Found { version, url, archive: asset.archive, sha256, sha512: None, md5: None, checksum_file, label };
         match src.versions {
-            Versions::Latest | Versions::Newest | Versions::NewestTag => {
+            Versions::Latest | Versions::Newest | Versions::NewestTag | Versions::All => {
                 found.push(candidate);
-                break;
+                if src.versions != Versions::All {
+                    break;
+                }
             }
             Versions::PerMajor | Versions::PerLine => {
                 let parts = if src.versions == Versions::PerMajor { 1 } else { 2 };
@@ -1901,6 +1955,7 @@ fn select_npm(m: &Manifest, src: &Source, json: &serde_json::Value) -> Result<Ve
         archive: Archive::File,
         sha256: None,
         sha512,
+        md5: None,
         checksum_file: None,
         label,
     }])
@@ -1918,16 +1973,6 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), all.len(), "two built-in manifests share an id");
-    }
-
-    #[test]
-    fn only_services_that_need_code_keep_a_builtin_catalog() {
-        // Scraped pages and vendor APIs: Apache Lounge and nginx.org (Windows), MariaDB's
-        // REST API, MySQL's docker-library list, MongoDB's full.json, Tomcat's mirror
-        // listing, PyPI wheels for pgAdmin.
-        let mut ids: Vec<&str> = built_ins().iter().filter(|m| m.source.all().iter().any(|s| s.builtin)).map(|m| m.id.as_str()).collect();
-        ids.sort();
-        assert_eq!(ids, ["apache", "mariadb", "mongodb", "mysql", "nginx", "pgadmin", "tomcat"]);
     }
 
     #[test]
@@ -2105,7 +2150,7 @@ connection:
         let (m, src) = source(|s| {
             s.versions = Versions::Newest;
             s.tags = Ordered(vec![("-lts".into(), "LTS".into()), ("-stable".into(), "Stable".into())]);
-            s.assets = Ordered(vec![(platform(), Asset { file: "echo-{version}.tgz".into(), archive: Archive::TarGz })]);
+            s.assets = Ordered(vec![(platform(), Asset { file: "echo-{version}.tgz".into(), archive: Archive::TarGz, fallbacks: vec![] })]);
         });
         let r = |tag: &str| serde_json::json!({ "tag_name": tag, "prerelease": true, "assets": [{ "name": format!("echo-{}.tgz", &tag[1..tag.rfind('-').unwrap()]), "browser_download_url": "u", "digest": "sha256:ab" }] });
         let found = select(&m, &src, &serde_json::json!([r("v25.9.1-testing"), r("v25.8.2-lts")])).unwrap();
@@ -2124,7 +2169,7 @@ connection:
         assert_eq!(found[0].version, "5.26.10");
         let file = src.asset().unwrap().file.replace("{version}", "5.26.10");
         assert_eq!(found[0].url, format!("https://dist.example.org/{file}"));
-        assert_eq!(found[0].checksum_file, Some((true, format!("https://dist.example.org/{file}.sha512"))));
+        assert_eq!(found[0].checksum_file, Some((Hash::Sha512, format!("https://dist.example.org/{file}.sha512"))));
         // GitHub's digest can't vouch for another host's file.
         let text = SMALL.replace("  assets:\n", "  url: \"https://dist.example.org/{file}\"\n  assets:\n");
         assert!(parse(&text, false).unwrap_err().to_string().contains("needs checksum"));

@@ -415,24 +415,17 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime, fresh: bool) 
 async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec<Release>> {
     let mut releases = match runtime {
         // Services whose manifest says where their releases are (src-tauri/services/).
-        _ if crate::manifest::get(runtime.id()).and_then(|m| m.source.here()).is_some_and(|s| !s.builtin) => manifest_releases(client, runtime).await?,
+        _ if crate::manifest::get(runtime.id()).is_some() => manifest_releases(client, runtime).await?,
         Runtime::Php => php_releases(client).await?,
-        Runtime::Apache => apache_releases(client).await?,
-        Runtime::Nginx => nginx_releases(client).await?,
-        Runtime::Mariadb => mariadb_releases(client).await?,
         Runtime::Adminer => adminer_releases(client).await?,
         Runtime::Phpmyadmin => phpmyadmin_releases(client).await?,
         Runtime::Ngrok => ngrok_releases(),
         Runtime::Cloudflared => cloudflared_releases(client).await?,
         Runtime::Composer => composer_releases(client).await?,
-        Runtime::Mysql => mysql_releases(client).await?,
         Runtime::Phpredisadmin => phpredisadmin_releases(client).await?,
         Runtime::Java => java_releases(client).await?,
-        Runtime::Tomcat => tomcat_releases(client).await?,
         Runtime::Python => python_releases(client).await?,
         Runtime::Phppgadmin => phppgadmin_releases(client).await?,
-        Runtime::Pgadmin => pgadmin_releases(client).await?,
-        Runtime::Mongodb => mongodb_releases(client).await?,
         Runtime::Mongosh => mongosh_releases(client).await?,
         Runtime::Mongotools => mongotools_releases(client).await?,
         Runtime::Compass => compass_releases(client).await?,
@@ -559,158 +552,6 @@ async fn php_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     Ok(out)
 }
 
-/// Apache Lounge only hosts its latest build, so the download page is scraped for it.
-async fn apache_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    const SITE: &str = "https://www.apachelounge.com";
-    let page = client
-        .get(format!("{SITE}/download/"))
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(http)?
-        .text()
-        .await
-        .map_err(http)?;
-
-    let href = page
-        .split("href=\"")
-        .skip(1)
-        .filter_map(|s| s.split('"').next())
-        .find(|h| h.contains("/httpd-2.4.") && h.contains("Win64") && h.ends_with(".zip"))
-        .ok_or_else(|| Error::msg("could not find an Apache build on apachelounge.com"))?;
-    let url = if href.starts_with("http") { href.to_string() } else { format!("{SITE}{href}") };
-    let file = url.rsplit('/').next().unwrap_or_default();
-    // httpd-2.4.69-261002-Win64-VS18.zip -> 2.4.69
-    let version = file
-        .strip_prefix("httpd-")
-        .and_then(|s| s.split('-').next())
-        .ok_or_else(|| Error::msg(format!("unexpected Apache file name {file}")))?
-        .to_string();
-
-    // Checksums live next to the archive as "<file>.txt".
-    let sha256 = match client.get(format!("{url}.txt")).send().await {
-        Ok(r) if r.status().is_success() => r.text().await.ok().and_then(|t| {
-            let mut lines = t.lines();
-            lines.find(|l| l.starts_with("SHA256"))?;
-            lines.next().map(|l| l.trim().to_ascii_lowercase())
-        }),
-        _ => None,
-    };
-
-    let label = file.split('-').find(|p| p.starts_with("VS")).map(|vs| vs.trim_end_matches(".zip").to_string());
-    Ok(vec![Release { runtime: Runtime::Apache, version, url, sha256, sha512: None, md5: None, sha3_256: None, archive: Archive::Zip, label }])
-}
-
-/// The MariaDB REST API lists stable series and the files of their latest release.
-async fn mariadb_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    // MariaDB publishes no macOS builds; LampRabit's CI builds the LTS lines from source.
-    if cfg!(target_os = "macos") {
-        return own_builds(client, Runtime::Mariadb).await;
-    }
-    let (suffix, archive) = if cfg!(windows) {
-        ("winx64.zip", Archive::Zip)
-    } else if cfg!(target_os = "linux") {
-        ("linux-systemd-x86_64.tar.gz", Archive::TarGz)
-    } else {
-        return Err(unsupported("MariaDB"));
-    };
-    const API: &str = "https://downloads.mariadb.org/rest-api/mariadb";
-
-    let index: Value = client
-        .get(format!("{API}/"))
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(http)?
-        .json()
-        .await
-        .map_err(http)?;
-    let series: Vec<(String, Option<String>)> = index["major_releases"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|r| r["release_status"] == "Stable")
-        .filter_map(|r| {
-            let id = r["release_id"].as_str()?.to_string();
-            let label = match r["release_support_type"].as_str() {
-                Some("Long Term Support") => Some("LTS".to_string()),
-                Some(other) => Some(other.to_string()),
-                None => None,
-            };
-            Some((id, label))
-        })
-        .collect();
-
-    let fetches = series.into_iter().map(|(id, label)| async move {
-        let latest: Value = client.get(format!("{API}/{id}/latest/")).send().await.ok()?.json().await.ok()?;
-        let release = latest["releases"].as_object()?.values().next()?;
-        let file = release["files"]
-            .as_array()?
-            .iter()
-            .find(|f| f["file_name"].as_str().is_some_and(|n| n.ends_with(suffix) && !n.contains("debug")))?;
-        Some(Release {
-            runtime: Runtime::Mariadb,
-            version: release["release_id"].as_str()?.to_string(),
-            url: file["file_download_url"].as_str()?.replacen("http://", "https://", 1),
-            sha256: file["checksum"]["sha256sum"].as_str().map(str::to_string),
-            sha512: None,
-            md5: None,
-            sha3_256: None,
-            archive,
-            label,
-        })
-    });
-    Ok(futures_util::future::join_all(fetches).await.into_iter().flatten().collect())
-}
-
-/// nginx.org lists the mainline and stable Windows builds on its download page. It
-/// publishes PGP signatures rather than checksums, so these downloads rely on HTTPS alone.
-async fn nginx_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    const SITE: &str = "https://nginx.org";
-    let page = client
-        .get(format!("{SITE}/en/download.html"))
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(http)?
-        .text()
-        .await
-        .map_err(http)?;
-    // In page order: mainline first, then stable, then legacy.
-    let mut releases: Vec<Release> = Vec::new();
-    for href in page.split("href=\"").skip(1).filter_map(|s| s.split('"').next()) {
-        let Some(version) = href.strip_prefix("/download/nginx-").and_then(|v| v.strip_suffix(".zip")) else {
-            continue;
-        };
-        if releases.iter().any(|r| r.version == version) {
-            continue;
-        }
-        let label = match releases.len() {
-            0 => Some("Mainline".to_string()),
-            1 => Some("Stable".to_string()),
-            _ => None,
-        };
-        releases.push(Release {
-            runtime: Runtime::Nginx,
-            version: version.to_string(),
-            url: format!("{SITE}{href}"),
-            sha256: None,
-            sha512: None,
-            md5: None,
-            sha3_256: None,
-            archive: Archive::Zip,
-            label,
-        });
-        if releases.len() == 4 {
-            break;
-        }
-    }
-    if releases.is_empty() {
-        return Err(Error::msg("could not find Nginx builds on nginx.org"));
-    }
-    Ok(releases)
-}
-
 async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value> {
     let mut request = client.get(url);
     // GitHub's API wants its own media type (other hosts, npm's registry for one, refuse
@@ -806,33 +647,6 @@ async fn java_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     Ok(releases)
 }
 
-/// The newest release of each supported Tomcat line, from the Apache mirror's folder
-/// listing, checked against the SHA-512 file published next to each archive.
-async fn tomcat_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    const MIRROR: &str = "https://dlcdn.apache.org/tomcat";
-    let (ext, archive) = if cfg!(windows) { ("zip", Archive::Zip) } else { ("tar.gz", Archive::TarGz) };
-    let lookups = [(11, "Jakarta EE 11 · Java 17+"), (10, "Jakarta EE 10 · Java 11+"), (9, "Java EE 8 (javax) · Java 8+")].map(|(line, label)| async move {
-        let listing = client.get(format!("{MIRROR}/tomcat-{line}/")).send().await.ok()?.error_for_status().ok()?.text().await.ok()?;
-        let version = listing
-            .split("href=\"v")
-            .skip(1)
-            .filter_map(|s| s.split('/').next())
-            .filter(|v| v.split('.').all(|p| p.parse::<u32>().is_ok()))
-            .max_by_key(|v| version_key(v))?
-            .to_string();
-        let url = format!("{MIRROR}/tomcat-{line}/v{version}/bin/apache-tomcat-{version}.{ext}");
-        // "<hash> *apache-tomcat-x.y.z.zip"
-        let sha512 = client.get(format!("{url}.sha512")).send().await.ok()?.error_for_status().ok()?.text().await.ok()?;
-        let sha512 = sha512.split_whitespace().next()?.to_ascii_lowercase();
-        Some(Release { runtime: Runtime::Tomcat, version, url, sha256: None, sha512: Some(sha512), md5: None, sha3_256: None, archive, label: Some(label.into()) })
-    });
-    let releases: Vec<Release> = futures_util::future::join_all(lookups).await.into_iter().flatten().collect();
-    if releases.is_empty() {
-        return Err(Error::msg("Couldn't load the Tomcat versions from dlcdn.apache.org. Check your connection and try again."));
-    }
-    Ok(releases)
-}
-
 /// The newest patch of every stable Python line from the latest python-build-standalone
 /// release (its "install_only" archives: a plain Python folder, no debug files).
 async fn python_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
@@ -899,30 +713,6 @@ async fn phppgadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     }])
 }
 
-/// pgAdmin 4 releases from PyPI: one wheel for every platform, with PyPI's SHA-256. The
-/// wheel is saved as is; `setup_pgadmin` installs it with its dependencies.
-async fn pgadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let info = get_json(client, "https://pypi.org/pypi/pgadmin4/json").await?;
-    let version = info["info"]["version"].as_str().ok_or_else(|| Error::msg("Couldn't read pgAdmin's latest release from PyPI"))?.to_string();
-    let wheel = info["urls"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|u| u["filename"].as_str().is_some_and(|f| f.ends_with(".whl")))
-        .ok_or_else(|| Error::msg("PyPI has no pgAdmin wheel for the latest release"))?;
-    Ok(vec![Release {
-        runtime: Runtime::Pgadmin,
-        version,
-        url: wheel["url"].as_str().unwrap_or_default().to_string(),
-        sha256: wheel["digests"]["sha256"].as_str().map(str::to_string),
-        sha512: None,
-        md5: None,
-        sha3_256: None,
-        archive: Archive::File,
-        label: None,
-    }])
-}
-
 /// The Python a pgAdmin install runs on: the newest installed 3.10–3.14 (its
 /// dependencies ship binary wheels for those), preferring the active version.
 pub fn pgadmin_python(settings: &crate::config::Settings, layout: &Layout) -> Result<PathBuf> {
@@ -982,87 +772,6 @@ pub async fn setup_pgadmin(app: &AppHandle, settings: &crate::config::Settings, 
         return Err(Error::msg(format!("Installing pgAdmin's Python packages failed: {e}")));
     }
     result
-}
-
-/// MongoDB's Linux builds are per distribution; the one for this machine, from
-/// /etc/os-release. Releases of a distro between two supported ones use the older build.
-fn mongodb_linux_target() -> Result<String> {
-    mongodb_target_for(&std::fs::read_to_string("/etc/os-release").unwrap_or_default())
-}
-
-fn mongodb_target_for(text: &str) -> Result<String> {
-    let field = |key: &str| {
-        text.lines()
-            .find_map(|l| l.strip_prefix(&format!("{key}=")))
-            .map(|v| v.trim_matches('"').to_string())
-            .unwrap_or_default()
-    };
-    let (id, like, version) = (field("ID"), field("ID_LIKE"), field("VERSION_ID"));
-    let major: u32 = version.split('.').next().and_then(|m| m.parse().ok()).unwrap_or(0);
-    let pick = |supported: &[(u32, &str)], have: u32| supported.iter().rev().find(|(v, _)| *v <= have).map(|(_, t)| t.to_string());
-    let ubuntu = [(2204, "ubuntu2204"), (2404, "ubuntu2404"), (2604, "ubuntu2604")];
-    let found = match id.as_str() {
-        "ubuntu" => pick(&ubuntu, version.replace('.', "").parse().unwrap_or(0)),
-        "debian" => pick(&[(12, "debian12"), (13, "debian13")], major),
-        "rhel" | "centos" | "rocky" | "almalinux" | "ol" => pick(&[(8, "rhel8"), (9, "rhel93"), (10, "rhel10")], major),
-        "amzn" if major >= 2023 => Some("amazon2023".into()),
-        "sles" | "opensuse-leap" => pick(&[(15, "suse15"), (16, "suse16")], major),
-        // Ubuntu-based (Mint, Pop!_OS…): the Ubuntu release they're built on.
-        _ if like.contains("ubuntu") => match field("UBUNTU_CODENAME").as_str() {
-            "jammy" => Some("ubuntu2204".into()),
-            _ => Some("ubuntu2404".into()),
-        },
-        _ => None,
-    };
-    found.ok_or_else(|| {
-        let name = field("PRETTY_NAME");
-        Error::msg(format!(
-            "MongoDB publishes Linux builds for Ubuntu, Debian, RHEL and its rebuilds, Amazon Linux and SUSE; {} isn't one of them.",
-            if name.is_empty() { "this distribution".to_string() } else { name }
-        ))
-    })
-}
-
-/// The newest release of each MongoDB major version from 7 on, from MongoDB's own list of
-/// downloads (with SHA-256s): the Community ("base", on Linux "targeted") editions.
-async fn mongodb_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let arm = cfg!(target_arch = "aarch64");
-    let (target, arch, edition) = match std::env::consts::OS {
-        "windows" if !arm => ("windows".to_string(), "x86_64", "base"),
-        "macos" => ("macos".to_string(), if arm { "arm64" } else { "x86_64" }, "base"),
-        "linux" => (mongodb_linux_target()?, if arm { "aarch64" } else { "x86_64" }, "targeted"),
-        _ => return Err(unsupported("MongoDB")),
-    };
-    let full = get_json(client, "https://downloads.mongodb.org/full.json").await?;
-    let mut newest: std::collections::BTreeMap<u32, Release> = Default::default();
-    for v in full["versions"].as_array().into_iter().flatten().filter(|v| v["production_release"].as_bool() == Some(true)) {
-        let version = v["version"].as_str().unwrap_or_default();
-        let Some(major) = version.split('.').next().and_then(|m| m.parse::<u32>().ok()).filter(|&m| m >= 7) else { continue };
-        if newest.get(&major).is_some_and(|r| version_key(&r.version) >= version_key(version)) {
-            continue;
-        }
-        let Some(download) = v["downloads"].as_array().into_iter().flatten().find(|d| {
-            d["target"].as_str() == Some(target.as_str()) && d["arch"].as_str() == Some(arch) && d["edition"].as_str() == Some(edition)
-        }) else {
-            continue;
-        };
-        let url = download["archive"]["url"].as_str().unwrap_or_default().to_string();
-        newest.insert(major, Release {
-            runtime: Runtime::Mongodb,
-            version: version.to_string(),
-            archive: if url.ends_with(".zip") { Archive::Zip } else { Archive::TarGz },
-            sha256: download["archive"]["sha256"].as_str().map(str::to_string),
-            sha512: None,
-            md5: None,
-            sha3_256: None,
-            url,
-            label: Some(if v["lts_release"].as_bool() == Some(true) { "LTS".into() } else { format!("MongoDB {major}") }),
-        });
-    }
-    if newest.is_empty() {
-        return Err(Error::msg("MongoDB has no build for this platform. Check your connection and try again."));
-    }
-    Ok(newest.into_values().collect())
 }
 
 async fn mongosh_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
@@ -1192,19 +901,32 @@ async fn manifest_releases(client: &reqwest::Client, runtime: Runtime) -> Result
     if src.lamprabit {
         return own_builds(client, runtime).await;
     }
-    let url = manifest::catalog_url(src).ok_or_else(|| manifest::no_download(m))?;
-    let mut out = Vec::new();
+    let found = if src.json.is_some() || src.page.is_some() {
+        crate::sources::releases(client, m, src).await?
+    } else {
+        let url = manifest::catalog_url(src).ok_or_else(|| manifest::no_download(m))?;
+        manifest::select(m, src, &get_json(client, &url).await?)?
+    };
+    let mut out: Vec<Release> = Vec::new();
     let mut missing = None;
-    for found in manifest::select(m, src, &get_json(client, &url).await?)? {
-        let (mut sha256, mut sha512) = (found.sha256, found.sha512);
-        if let Some((is512, file)) = &found.checksum_file {
-            let Some(hash) = published_hash(client, file).await else {
+    for found in found {
+        // Entries for a version already found are its fallback files.
+        if out.iter().any(|r| r.version == found.version) {
+            continue;
+        }
+        let (mut sha256, mut sha512, mut md5) = (found.sha256, found.sha512, found.md5);
+        if let Some((kind, file)) = &found.checksum_file {
+            let Some(hash) = published_hash(client, file, *kind).await else {
                 missing = Some(file.clone());
                 continue;
             };
-            if *is512 { sha512 = Some(hash) } else { sha256 = Some(hash) }
+            match kind {
+                manifest::Hash::Sha256 => sha256 = Some(hash),
+                manifest::Hash::Sha512 => sha512 = Some(hash),
+                manifest::Hash::Md5 => md5 = Some(hash),
+            }
         }
-        out.push(Release { runtime, version: found.version, url: found.url, sha256, sha512, md5: None, sha3_256: None, archive: found.archive, label: found.label });
+        out.push(Release { runtime, version: found.version, url: found.url, sha256, sha512, md5, sha3_256: None, archive: found.archive, label: found.label });
     }
     match (out.is_empty(), missing) {
         (true, Some(file)) => Err(Error::msg(format!("Couldn't get {}'s published checksum ({file}), so LampRabit won't install it. Try again later.", m.name))),
@@ -1212,10 +934,11 @@ async fn manifest_releases(client: &reqwest::Client, runtime: Runtime) -> Result
     }
 }
 
-/// "<hash>  <file>" files published next to archives.
-async fn published_hash(client: &reqwest::Client, url: &str) -> Option<String> {
+/// A checksum file published next to an archive: "<hash>  <file>", a bare hash, or a
+/// listing with the hash on a line of its own (Apache Lounge's .txt).
+async fn published_hash(client: &reqwest::Client, url: &str, kind: crate::manifest::Hash) -> Option<String> {
     let r = client.get(url).send().await.ok()?.error_for_status().ok()?;
-    r.text().await.ok()?.split_whitespace().next().map(str::to_ascii_lowercase)
+    crate::sources::find_hash(&r.text().await.ok()?, kind)
 }
 
 /// Erlang/OTP for RabbitMQ: the newest of the two latest major versions, from the
@@ -1395,7 +1118,7 @@ async fn rust_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
         .ok_or_else(|| Error::msg("Couldn't read Rust's stable version"))?
         .to_string();
     let url = format!("https://static.rust-lang.org/rustup/dist/{init_target}/rustup-init{}", if cfg!(windows) { ".exe" } else { "" });
-    let sha256 = published_hash(client, &format!("{url}.sha256")).await;
+    let sha256 = published_hash(client, &format!("{url}.sha256"), crate::manifest::Hash::Sha256).await;
     Ok(vec![Release { runtime: Runtime::Rust, version, url, sha256, sha512: None, md5: None, sha3_256: None, archive: Archive::File, label: Some("Stable".into()) }])
 }
 
@@ -1685,46 +1408,6 @@ async fn adminer_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     // The all-drivers, all-languages single file.
     github_latest(client, Runtime::Adminer, "vrana/adminer", Archive::File, |n, v| n == format!("adminer-{v}.php"))
         .await
-}
-
-/// MySQL's own download pages block scripts, so the current version of each release line
-/// comes from the official Docker image's metadata (maintained with every release), and
-/// the archives from MySQL's CDN, which publishes an MD5 next to each.
-async fn mysql_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x86_64" };
-    // Candidates in order; the first with a published checksum is the download. macOS
-    // archives carry the macOS version they're built for (macos15 today), which moves on,
-    // and not every line has both architectures.
-    let (suffixes, archive): (Vec<String>, Archive) = match std::env::consts::OS {
-        "windows" => (vec!["winx64.zip".into()], Archive::Zip),
-        // "minimal": stripped of debug symbols and tests, about a tenth of the full archive.
-        "linux" if cfg!(target_arch = "x86_64") => (vec!["linux-glibc2.28-x86_64-minimal.tar.xz".into()], Archive::TarXz),
-        "linux" => (vec!["linux-glibc2.28-aarch64-minimal.tar.xz".into()], Archive::TarXz),
-        "macos" => (["macos26", "macos15", "macos14"].iter().map(|m| format!("{m}-{arch}.tar.gz")).collect(), Archive::TarGz),
-        _ => return Err(unsupported("MySQL")),
-    };
-    let suffixes = &suffixes;
-    let lines = get_json(client, "https://raw.githubusercontent.com/docker-library/mysql/master/versions.json").await?;
-    let fetches = lines.as_object().into_iter().flatten().filter_map(|(line, info)| {
-        let version = info["version"].as_str()?.to_string();
-        let label = Some(if line == "innovation" { "Innovation".to_string() } else { "LTS".to_string() });
-        Some(async move {
-            let series = version.rsplit_once('.').map_or(version.as_str(), |(s, _)| s).to_string();
-            for suffix in suffixes {
-                let url = format!("https://cdn.mysql.com/Downloads/MySQL-{series}/mysql-{version}-{suffix}");
-                let md5 = async { client.get(format!("{url}.md5")).send().await.and_then(|r| r.error_for_status()).ok()?.text().await.ok()?.split_whitespace().next().map(str::to_string) }.await;
-                if md5.is_some() {
-                    return Some(Release { runtime: Runtime::Mysql, version, url, sha256: None, sha512: None, md5, sha3_256: None, archive, label });
-                }
-            }
-            None
-        })
-    });
-    let releases: Vec<Release> = futures_util::future::join_all(fetches.collect::<Vec<_>>()).await.into_iter().flatten().collect();
-    if releases.is_empty() {
-        return Err(Error::msg("Couldn't find MySQL downloads for this system"));
-    }
-    Ok(releases)
 }
 
 /// phpRedisAdmin publishes source releases on GitHub (no separate archives or checksums,
@@ -2172,10 +1855,10 @@ mod tests {
     async fn live_manifest_catalogs() {
         let client = client();
         let mut failed = Vec::new();
-        for m in crate::manifest::built_ins().iter().filter(|m| m.source.here().is_some_and(|s| !s.builtin && !s.lamprabit)) {
+        for m in crate::manifest::built_ins().iter().filter(|m| m.source.here().is_some_and(|s| !s.lamprabit)) {
             let Some(runtime) = Runtime::from_id(&m.id) else { continue };
             match manifest_releases(&client, runtime).await {
-                Ok(list) => println!("{:<14} {}", m.id, list.iter().map(|r| format!("{} [{}{}]", r.version, if r.sha256.is_some() { "sha256" } else if r.sha512.is_some() { "sha512" } else { "unchecked" }, r.label.as_ref().map(|l| format!(", {l}")).unwrap_or_default())).collect::<Vec<_>>().join("  ")),
+                Ok(list) => println!("{:<14} {}", m.id, list.iter().map(|r| format!("{} [{}{}]", r.version, if r.sha256.is_some() { "sha256" } else if r.sha512.is_some() { "sha512" } else if r.md5.is_some() { "md5" } else { "unchecked" }, r.label.as_ref().map(|l| format!(", {l}")).unwrap_or_default())).collect::<Vec<_>>().join("  ")),
                 Err(e) if m.unavailable_here().is_some() => println!("{:<14} unavailable here: {e}", m.id),
                 Err(e) => failed.push(format!("{}: {e}", m.id)),
             }
@@ -2190,14 +1873,4 @@ mod tests {
         assert_eq!(git_version_from_tag("2.48.0-rc1.windows.1"), "2.48.0-rc1");
     }
 
-    #[test]
-    fn mongodb_build_follows_the_linux_distribution() {
-        let os = |id: &str, version: &str, extra: &str| format!("ID={id}\nVERSION_ID=\"{version}\"\n{extra}");
-        assert_eq!(mongodb_target_for(&os("ubuntu", "24.04", "")).unwrap(), "ubuntu2404");
-        assert_eq!(mongodb_target_for(&os("ubuntu", "25.10", "")).unwrap(), "ubuntu2404", "between releases: the older build");
-        assert_eq!(mongodb_target_for(&os("debian", "13", "")).unwrap(), "debian13");
-        assert_eq!(mongodb_target_for(&os("rocky", "9.4", "")).unwrap(), "rhel93");
-        assert_eq!(mongodb_target_for(&os("linuxmint", "22", "ID_LIKE=\"ubuntu debian\"\nUBUNTU_CODENAME=jammy")).unwrap(), "ubuntu2204");
-        assert!(mongodb_target_for(&os("arch", "", "PRETTY_NAME=\"Arch Linux\"")).unwrap_err().to_string().contains("Arch Linux"));
-    }
 }

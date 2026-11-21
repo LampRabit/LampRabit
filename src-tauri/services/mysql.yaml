@@ -6,7 +6,24 @@ blurb: Stores your data
 origin: Official MySQL releases; runs next to MariaDB on its own port
 homepage: https://www.mysql.com
 license: GPL-2.0
-source: { builtin: true }
+# docker-library's list of current MySQL lines; the archives are on Oracle's CDN, which
+# publishes MD5s. macOS archives carry the macOS version they're built for, which moves on.
+source:
+  json:
+    url: https://raw.githubusercontent.com/docker-library/mysql/master/versions.json
+    items: "*"
+    version: version
+    download: "https://cdn.mysql.com/Downloads/MySQL-{line}/mysql-{version}-{asset}"
+    label: { from: "@key", map: { innovation: Innovation }, else: LTS }
+  versions: all
+  assets:
+    windows: { file: winx64.zip, archive: zip }
+    # "minimal": stripped of debug symbols and tests, about a tenth of the full archive.
+    linux-x64: { file: linux-glibc2.28-x86_64-minimal.tar.xz, archive: tarxz }
+    linux-arm64: { file: linux-glibc2.28-aarch64-minimal.tar.xz, archive: tarxz }
+    macos-arm64: { file: macos26-arm64.tar.gz, archive: targz, fallbacks: [macos15-arm64.tar.gz, macos14-arm64.tar.gz] }
+    macos-x64: { file: macos26-x86_64.tar.gz, archive: targz, fallbacks: [macos15-x86_64.tar.gz, macos14-x86_64.tar.gz] }
+  checksum: { md5: "{url}.md5" }
 binary: "bin/mysqld{{exe}}"
 suggests: [phpmyadmin, adminer]
 ports:

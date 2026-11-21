@@ -10,7 +10,27 @@ origin:
   - { value: Official MariaDB releases }
 homepage: https://mariadb.org
 license: GPL-2.0
-source: { builtin: true }
+source:
+  # MariaDB publishes no macOS builds; LampRabit's CI builds the LTS lines from source.
+  - { on: [macos], lamprabit: true }
+  # Its REST API: the stable series, then each one's latest release and its files.
+  - on: [windows, linux-x64]
+    json:
+      url: https://downloads.mariadb.org/rest-api/mariadb/
+      items: major_releases
+      where: { release_status: Stable }
+      then: { url: "https://downloads.mariadb.org/rest-api/mariadb/{item.release_id}/latest/", items: "releases.*" }
+      version: release_id
+      files: files
+      file: { file_name: "{var.file}" }
+      download: "{file.file_download_url}"
+      sha256: "{file.checksum.sha256sum}"
+      label: { from: parent.release_support_type, map: { Long Term Support: LTS } }
+    versions: all
+vars:
+  file:
+    - { value: "*winx64.zip", on: [windows] }
+    - { value: "*linux-systemd-x86_64.tar.gz", on: [linux-x64] }
 binary: "bin/mariadbd{{exe}}"
 suggests: [phpmyadmin, adminer]
 ports:

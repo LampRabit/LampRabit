@@ -8,7 +8,21 @@ blurb: Runs Java web apps
 origin: Official Apache Tomcat releases (SHA-512 checked); runs on the active Java and serves Java projects behind your web server
 homepage: https://tomcat.apache.org
 license: Apache-2.0
-source: { builtin: true }
+# The newest release of each supported line from Apache's mirror, with the SHA-512 file
+# published next to each archive.
+source:
+  page:
+    url: "https://dlcdn.apache.org/tomcat/tomcat-{variant}/"
+    link: '^v(?P<version>\d+\.\d+\.\d+)/$'
+    variants:
+      - { value: "11", label: "Jakarta EE 11 · Java 17+" }
+      - { value: "10", label: "Jakarta EE 10 · Java 11+" }
+      - { value: "9", label: "Java EE 8 (javax) · Java 8+" }
+    download: "https://dlcdn.apache.org/tomcat/tomcat-{variant}/v{version}/bin/{asset}"
+  assets:
+    windows: { file: "apache-tomcat-{version}.zip", archive: zip }
+    unix: { file: "apache-tomcat-{version}.tar.gz", archive: targz }
+  checksum: { sha512: "{url}.sha512" }
 binary: bin/bootstrap.jar
 needs:
   - { runtime: java, min: "17", since: "11", why: Tomcat runs on the active Java }
