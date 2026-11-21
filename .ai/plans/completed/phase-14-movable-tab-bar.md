@@ -1,0 +1,5 @@
+# Phase 14: movable tab bar — done (2026-11-12)
+
+Status: **done**. Listed in the [roadmap](../roadmap.md).
+
+The page tab bar (`BottomNav`) docks to one of twelve places, an edge (top, right, bottom, left) and a position along it (start, center, end; bottom center by default), and takes its own space there (App lays the body out with `navLayout`), so it never covers a page. Drag it by its grip or anywhere on it: it floats under the pointer in the shape it will have, the target edge lights up, and on release it glides into place while the page slides over (Web Animations, skipped when Motion is reduced or off). Escape cancels a drag; on the grip, the arrow keys dock to that edge, Shift+arrows move it along the edge and Escape puts it back at the bottom center. Its size is published as `--nav-*` so the Apply bar and notices stay clear of it. Settings → Appearance → Page bar sets it too; the edge is saved per device (older saved positions load as their edge). Pages put their title and actions in the title bar (`PageToolbar`).

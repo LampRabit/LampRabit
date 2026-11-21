@@ -1,0 +1,12 @@
+# Decisions: Project model (Project → Processes → Endpoints, kinds)
+
+The user's decisions of 2026-11-21. Source: [the 2026-11-21 spec](../../plans/source-specs/2026-11-21-feature-context.md), "Core architecture". Plan: [../../plans/backlog/project-model.md](../../plans/backlog/project-model.md).
+
+- **LampRabit is not web-only.** Users build web apps, APIs, workers, bots, CLIs, scripts, desktop and mobile apps. Being reachable on the web is a **capability** of a project (it has an endpoint), not the project's type.
+- **No branching on project type in core code** (no `if type == web`). Features attach to capabilities: vhost, SSL, Share, QR/LAN and "Open in browser" render per **endpoint**; a project with no endpoint simply doesn't show them.
+- **Model:** a project has runtime(s), env, `processes[]` (command, cwd, env, autostart, restart policy), each with optional `endpoints[]` (port, http|tcp, expose: vhost/ssl/tunnel), the shared `services[]` it uses, and `schedules[]`. This formalises what exists today (processes with a port, domains pointing at a folder, port or process; see [projects.md](projects.md)); migrate existing site config into it, don't break it.
+- **Every project gets** runtime pinning, env, start/stop/restart, logs, CPU/RAM, cron, database services and backups, CLI + MCP control.
+- **The manifest is the existing `lamprabit.toml`**, extended with `kinds`, per-process `endpoints` and runtimes. No second file. Detectors write the default; users never have to write it by hand. It is still never applied on its own (see [projects.md](projects.md)).
+- **Project kinds** (multi-select): Web app, API/Backend, Background service/worker, CLI tool, Package/Library, Desktop app, Mobile app, Serverless, Other. Auto-detected and pre-selected on create/clone/import, confirmed or edited by the user, ask only when unsure.
+- **Kinds are UI presets, not logic.** They choose defaults and which panels show first (Web/API → add an http endpoint; worker → autostart + restart on crash; CLI → "Run with args" + optional shim; Package → build/test/pack/publish + local link; Desktop → run/build/package). Core code never reads `kinds`. Kind Web without an endpoint → "Add endpoint" prompt; an endpoint without kind Web → web panels still show.
+- **Guardrails:** not a Docker replacement or a generic process manager (pm2, supervisord). Web stays the polished default path. Per language, keep only a detector and a runtime installer; everything else is shared code.

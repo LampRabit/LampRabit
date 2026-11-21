@@ -1,0 +1,12 @@
+# Decisions: Pluggable services (service manifests)
+
+The user's decisions of 2026-11-15, for phase 27 ([../../plans/active/phase-27-pluggable-services.md](../../plans/active/phase-27-pluggable-services.md)). Format reference for service authors: [docs/services.md](../../../docs/services.md).
+
+- **Goal:** make LampRabit extensible by the community without app releases. The built-in services ship with the app; anyone can write a service as YAML and submit it.
+- **Every service is a YAML manifest** (`src-tauri/services/<id>.yaml`, engine in `manifest.rs`). **All** built-in services move to YAML. Core and hybrid services (web servers, MariaDB/MySQL data setup, PostgreSQL, pgAdmin, Tomcat) keep named `builtin` hooks for what can't be declarative (vhosts, PHP pools, data init); only built-in manifests may use them.
+- **Manifests find new versions themselves** (GitHub latest / newest per major, npm…, with a checksum required), so a software release needs no registry PR. A manifest's `revision` changes only when how the service installs or runs changes.
+- **Service options live in the manifest's `settings:`** and show up automatically in that service's Settings card on the Services page (the user's request, 2026-11-15).
+- **Registry:** the repository `LampRabit/Services`, one PR per `service.yaml` + icon + README, reviewed and merged by the user. The website's marketplace page and the app read its signed `index.json`.
+- **Signing:** the user is the only signer of the registry index (ed25519/minisign; the private key in a repository secret, the public key in the app).
+- **Safety rules for manifests:** declarative only (no shell), checksums mandatory, paths inside the service's own folders, programs inside the install, 127.0.0.1 only, ports above 1023 for community services. New capability goes into the format, not into Rust special cases.
+- **Later and separate:** "tools and plugins", extensions like a browser's. They are not services.

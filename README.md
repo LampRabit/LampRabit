@@ -137,7 +137,7 @@ Step-by-step guides for moving your sites and databases:
 - [Contributing](CONTRIBUTING.md): setup, checks and conventions
 - [Releasing](RELEASING.md): versions, the release workflow and LampRabit's own runtime builds
 - [Changelog](CHANGELOG.md): what changed in each release
-- [Roadmap](PLAN.md): what's done and what's next
+- [Roadmap](.ai/plans/roadmap.md): what's done and what's next
 - [Security policy](SECURITY.md): reporting a vulnerability
 
 ## Building from source

@@ -4,6 +4,8 @@ The Tools tab can collect the small utilities developers and designers repeatedl
 
 Research checked 2026-11-14. Links below point to established examples and primary tool pages; availability and capabilities can change.
 
+The maintainer's research notes (checked 2026-11-14), split from the old root `Features.md`. **Build order: [tools-tab-build-list.md](tools-tab-build-list.md)** (2026-11-21). Related: [product-improvements.md](product-improvements.md).
+
 ## Product principles
 
 - **Local first:** process pasted text, code, and files on the user's machine whenever possible. Clearly label any tool that needs a network request or third-party service. Don't send secrets, source code, or private files to a remote converter.
@@ -59,83 +61,6 @@ These are the maintainer's recurring use cases and should drive the Tools tab de
 - **Request-to-fixture helper:** capture a sanitized HTTP response and turn it into a JSON fixture, TypeScript type, or Markdown example.
 - **Color from screenshot:** sample colors from a dropped screenshot or local project image, then add chosen colors to a palette.
 - **Shareable local exports:** save a complete theme/snippet/tool output as a file or copyable text bundle. Make remote sharing optional and visible.
-
-## Beyond Tools: product improvements, add-ons, and accessibility
-
-LampRabit already has project doctor, Git, backups, templates, stack profiles, onboarding, keyboard shortcuts, reduced-motion settings, a CLI, and MCP. The following ideas build on those capabilities and strengthen the main local-development workflow.
-
-### Faster everyday access
-
-- **Global command palette:** search projects, services, settings, templates, commands, and actions from one keyboard shortcut. Support fuzzy search, recent actions, and context-sensitive commands for the selected project/service.
-- **Quick project switcher:** favorites and recent projects, filters for running/stopped/unhealthy, and shortcuts to open the project URL, terminal, editor, Git, dependencies, logs, or health panel.
-- **Pinned workspace:** let users choose which services, projects, and status cards appear on the home screen; provide a compact “start this project's stack” action that starts only its declared dependencies.
-- **Actionable notifications:** summarize a failed start, stopped process, expiring certificate, or completed backup with a direct button to the affected log or fix. Make noisy notifications configurable.
-- **Remembered context:** restore the last page, selected project, filters, and panel position after restart, with a setting to opt out on shared machines.
-
-### Reproducible projects and useful add-ons
-
-- **Environment lock / share file:** extend the existing project configuration with an optional, reviewable file that records required service/runtime versions, project processes, domains, and stack profile. A teammate can preview the plan and install missing components before applying it. Never put passwords, tokens, or private `.env` values in the file.
-- **Docker Compose companion:** detect a project's Compose file, show its services and port conflicts beside native LampRabit services, and offer start/stop/log actions when Docker is installed. Keep container volumes and native database data clearly distinct; don't take over Compose files silently.
-- **Trusted recipe/add-on catalog:** install versioned templates, project checks, service presets, and workflow recipes from a curated source or a local file. Show publisher, permissions, files/commands to be run, version and checksum; preview changes and ask before executing commands. Start with data-only recipes and keep executable extensions opt-in.
-- **Editor and browser integrations:** detect installed editors and browsers, remember per-project choices, and offer direct actions to open the project, local URL, logs, or a selected file. Keep manual paths and custom commands available.
-- **Project run configurations:** save named combinations of processes, environment variables, arguments, and required services (for example “frontend + API + worker”). Mask secret values, don't export them by default, and show exactly which processes will launch.
-- **Team bootstrap bundle:** export/import a project template, non-secret settings, tool versions, and example environment variables as a reviewable archive. This complements templates and stack profiles without syncing private data.
-
-### Reliability and project insight
-
-- **Service dependency map:** show which project processes depend on PHP/Node/Python versions, web servers, databases, queues, and search services; explain why a service is starting or blocked, and let a user start/stop a selected project's dependency set.
-- **Backup confidence:** extend the existing database backup/restore tools with optional schedules, retention rules, destination checks, and a restore-to-temporary-database verification flow. Show last successful backup and last verified restore, and keep backup folders on the safe-uninstall list.
-- **Environment compatibility view:** provide a project-by-project matrix for OS, architecture, runtime versions, and unavailable services, linked to the existing service catalog's reasons. Useful when moving a project between machines.
-- **Unified activity timeline:** combine project commands, Git operations, service restarts, health changes, backups, and fixes into a searchable local timeline with links back to the relevant panel/log. Do not collect or upload telemetry by default.
-- **One-click support bundle:** assemble app/runtime versions, health results, relevant logs, and platform diagnostics into a previewable archive with paths and secret-like values redacted before the user saves or shares it.
-
-### Accessibility and ease of use
-
-- **Screen-reader pass:** audit every page, dialog, tab, menu, table, status badge, progress bar, and live log update for names, roles, keyboard order, and useful announcements. Announce service state changes without repeatedly reading the whole dashboard.
-- **Keyboard-only workflows:** make project/service selection, command palette search, inline actions, dialogs, tab movement, and log filtering fully operable without a pointer. Keep visible focus and return focus to the control that opened a dialog.
-- **Readable interface options:** add a text-size control, stronger focus outlines, a high-contrast theme, and compact/comfortable density. Respect OS contrast and reduced-motion preferences; ensure status is communicated with text/icons as well as color.
-- **Larger interaction targets:** provide a comfortable control-size option and avoid requiring precise dragging for tab order, splitters, or small icon buttons.
-- **Clear error recovery:** use plain-language errors with the affected project/service, likely cause, safe next action, and “copy details” control. Keep risky actions previewed and reversible where possible.
-- **Accessible onboarding:** offer guided setup by goal (PHP site, Node app, Python API, database-only), skippable steps, keyboard support, and a persistent “what's next?” checklist that can be reopened.
-
-### Suggested product priorities
-
-1. Global command palette and a polished project switcher.
-2. Screen-reader, focus, text-size, high-contrast, and status-announcement improvements across existing screens.
-3. Project run configurations and an environment lock/share file based on the existing project settings and stack profiles.
-4. Backup scheduling and verified restore, building on the existing backup panel.
-5. Docker Compose companion as an optional integration for developers who already use containers.
-6. Trusted recipe/add-on catalog after permission previews, signing/checksum checks, and upgrade/rollback behavior are defined.
-
-The accessibility ideas use [WCAG 2.2](https://www.w3.org/TR/WCAG22/) as a reference for focus, keyboard access, and target sizing. Compose support should follow Docker's [Compose application model](https://docs.docker.com/compose/intro/compose-application-model/) and preserve user-owned files. Token interchange can track the [W3C Design Tokens Community Group format](https://www.w3.org/community/reports/design-tokens/CG-FINAL-format-20251028/).
-
-## Developer feed and Playground
-
-These are optional companion features for keeping up with the developer community and taking short breaks. Keep them secondary to project, service, and tool workflows; start with an Overview card or optional page before committing to permanent top-level tabs.
-
-### Developer feed
-
-- **External-source reader:** show developer stories from sources the user chooses, such as the official Hacker News API and user-added RSS/Atom feeds. Consider daily.dev as an optional connector if its API terms and stability fit the integration.
-- **Useful feed controls:** source and topic filters, sort by newest/popular where the source supports it, refresh status, de-duplication, bookmarks/read-later, and “open original” links. Keep the initial version read-only; no voting, posting, or app-hosted publishing.
-- **Respect the source:** label every item with its source, link to the original, and only display the metadata/excerpts allowed by that source. Avoid copying full articles or building a LampRabit-hosted content feed. Make refresh frequency configurable and show when the feed was last updated.
-- **Offline behavior:** keep a small, user-controlled cache for recently viewed headlines and clearly show that new items require an internet connection. Let users remove sources and clear cached items.
-- **Placement:** start as a collapsible Overview card or an optional “Discover” page. Promote it to a permanent tab only if it becomes a frequent part of the app's daily workflow.
-
-### Just for fun: Playground
-
-- **Short break activities:** optional logic/brain puzzles, pattern challenges, lightweight algorithm prompts, regex puzzles, and SQL challenges using a disposable local SQLite dataset.
-- **Developer mini-games:** examples include trace-the-output, spot-the-bug, arrange-the-Git-commits, find-the-regex-match, and query-the-sample-database. Keep sessions short and let users reveal hints or skip.
-- **Progress without pressure:** local streaks, personal bests, difficulty settings, and optional reminders; no account, leaderboard, or social pressure required.
-- **Offline and safe by default:** puzzle content should run locally and not execute arbitrary user code. If code challenges are added later, run them in a constrained, disposable sandbox with clear time/resource limits.
-- **Placement:** open it from a small Playground/mascot menu or optional Overview card. Keep it out of the primary navigation initially so it adds personality without competing with developer workflows.
-
-### Suggested order
-
-1. Add an optional, read-only feed card with Hacker News and custom RSS/Atom sources.
-2. Add a small collection of offline puzzles reachable from the mascot or Overview.
-3. Consider dedicated Discover/Playground pages only after usage shows that either feature merits a permanent navigation item.
-
-Reference sources: [Hacker News API](https://github.com/HackerNews/API) provides public story data; [daily.dev API documentation](https://docs.daily.dev/welcome-to-the-daily-dev-api/) describes a public API that is currently beta and subject to its terms. Check each source's content and API terms before adding a built-in connector.
 
 ## Candidate tools
 

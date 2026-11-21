@@ -1,0 +1,7 @@
+# Phase 19: project doctor
+
+Status: **done**. Listed in the [roadmap](../roadmap.md).
+
+**Done (2026-11-12):** `doctor.rs` and the Health panel at the top of a project's Overview. Checks: the web server (installed, running), PHP against composer.json's constraint (not for FrankenPHP), the ext-* extensions composer.json requires against `php -m`, Composer/npm dependencies missing or older than the lock file, .env missing next to .env.example, the database (server installed, running, database created; MySQL offered when only it is installed), Laravel's APP_URL, the hosts file and a stale web server config, the local CA's trust, and Git's identity. Each issue says why it matters; a fix is previewed, then `doctor_fix` recomputes the issues and runs it through the app's own command for it (set PHP, enable or download an extension, run the install command, copy .env, start a service, create or switch the database, set APP_URL, apply sites, trust the CA).
+
+Built on `diagnose.rs`. Per project: PHP version vs `composer.json`, missing extensions, `vendor/` or `node_modules` missing or out of date with the lockfile, missing `.env` or unreachable database, certificate expiry, hosts entry, port conflicts, invalid vhost/domain config. Each issue: what, why, affected project/service, the fix, whether it can be applied automatically, and a preview before applying. Nothing is upgraded, deleted or overwritten without confirmation.

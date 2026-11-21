@@ -28,7 +28,7 @@ The app uses `C:\lampRabit` (Windows) or `~/lampRabit` as its environment folder
 | `src/` | React + TypeScript interface (Tailwind CSS, TanStack Query, Zustand) |
 | `src-tauri/src/` | Rust backend: service supervisor, runtime downloads, config generation, sites, SSL, logs |
 | `docs/website/` | Feature list, installation and migration guides used by the website |
-| `PLAN.md` | Roadmap and design notes |
+| `.ai/` | Roadmap, design decisions and AI-agent context (start at `.ai/README.md`) |
 
 ### Checks
 

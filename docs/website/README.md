@@ -27,7 +27,7 @@ LampRabit is under active development. Every feature in these files is marked:
 - **Available**: in the app today.
 - **Coming soon**: planned but not yet shipped; don't imply a release date unless one is confirmed.
 
-Show status and platform limits where relevant. Verify claims against `PLAN.md`, `src-tauri/src/catalog.rs` and the current release before publishing.
+Show status and platform limits where relevant. Verify claims against `.ai/plans/roadmap.md`, `src-tauri/src/catalog.rs` and the current release before publishing.
 
 Some features are limited by platform. Runtime availability varies by OS, architecture and service; use [installation.md](installation.md) and the in-app catalog rather than a blanket platform claim.
 
