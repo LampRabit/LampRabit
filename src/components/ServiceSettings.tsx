@@ -6,6 +6,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { allServers, api, runtimeLabels, type Runtime, type Server, type ServiceKind, type ServiceOption, type Settings } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
 import { portsFor, serverNotes } from "../lib/settingsFields";
+import { infoFor, useCatalog } from "../lib/catalog";
 import ApplyBar from "./ApplyBar";
 import { Button, Card, Segmented, Switch, inputClass } from "./ui";
 
@@ -50,6 +51,7 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
   }, [settings.data]);
   // Only services have manifest options; other runtimes (PHP, Java…) have none.
   const service = useQuery({ queryKey: ["services"], queryFn: api.listServices }).data?.find((s) => s.kind === runtime);
+  const extraPorts = infoFor(useCatalog().data, runtime)?.ports ?? [];
   const options = useQuery({
     queryKey: ["service-options", runtime],
     queryFn: () => api.serviceOptions(runtime as ServiceKind),
@@ -86,7 +88,7 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
   const database = runtime === "mariadb" || runtime === "mysql";
   const storage = runtime === "rustfs" || runtime === "minio";
   const declared = options.data ?? [];
-  if (!server && fields.length === 0 && !workers && runtime !== "mailpit" && !database && !storage && declared.length === 0) return null;
+  if (!server && fields.length === 0 && !workers && runtime !== "mailpit" && !database && !storage && declared.length === 0 && extraPorts.length === 0) return null;
 
   const set = (patch: Partial<Settings>) => setDraft({ ...draft, ...patch });
   const dirty = JSON.stringify(pick(draft)) !== JSON.stringify(pick(settings.data)) || changedOptions.length > 0;
@@ -141,6 +143,19 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
             />
           </Row>
         ))}
+      {extraPorts.map(({ key, label, default: fallback }) => (
+        <Row key={key} label={`${label} port`}>
+          <input
+            type="number"
+            min={1024}
+            max={65535}
+            className={numberInput}
+            value={draft.ports.extra?.[key] ?? fallback}
+            onChange={(e) => set({ ports: { ...draft.ports, extra: { ...draft.ports.extra, [key]: Number(e.target.value) } } })}
+            aria-label={`${label} port`}
+          />
+        </Row>
+      ))}
       {workers && (
         <Row label="PHP workers per version" hint="Each handles one request at a time. 4 suits most projects; raise it for parallel requests.">
           <input

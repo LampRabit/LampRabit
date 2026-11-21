@@ -54,6 +54,7 @@ export default function Services() {
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const catalog = useCatalog();
   const find = (r: Runtime) => installed.data?.find((i) => i.runtime === r);
+  const backup = (["sqlite", "mariadb", "mysql", "postgres", "mongodb"] as const).find((e) => e === runtime);
   const [scope, setScopeState] = useState<"essentials" | "all">(() => (readPref("services-scope") === "all" ? "all" : "essentials"));
   const setScope = (v: "essentials" | "all") => {
     setScopeState(v);
@@ -223,7 +224,7 @@ export default function Services() {
           {runtime && <RelatedPanel key={`related-${runtime}`} runtime={runtime} installed={installed.data} onSelect={setSelected} />}
           {runtime && <ServiceSettings key={`settings-${runtime}`} runtime={runtime} />}
           {/* SQLite databases are project files: they can be backed up without the shell installed. */}
-          {(runtime === "sqlite" || ((runtime === "mariadb" || runtime === "mysql" || runtime === "postgres" || runtime === "mongodb") && find(runtime)?.active)) && <BackupsPanel key={`backups-${runtime}`} engine={runtime} />}
+          {backup && (backup === "sqlite" || find(backup)?.active) && <BackupsPanel key={`backups-${backup}`} engine={backup} />}
           {selected === "tunnels" && <p className="mt-3 text-xs text-muted">Share a project from Sites or use this panel to share any local port.</p>}
         </section>
       </div>

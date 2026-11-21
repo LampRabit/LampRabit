@@ -38,6 +38,18 @@ pub struct RuntimeInfo {
     pub needs: Vec<&'static str>,
     /// Ids of what goes well with it: a UI for its data, its shell.
     pub suggests: Vec<&'static str>,
+    /// Ports of a service that isn't built in, edited on its Settings card (built-in
+    /// services' ports have fixed fields in Settings → Ports).
+    pub ports: Vec<PortField>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortField {
+    /// Its key in `Ports.extra`: `<service id>.<port name>`.
+    pub key: String,
+    pub label: String,
+    pub default: u16,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,13 +79,19 @@ fn groups() -> Vec<Group> {
 
 pub fn catalog() -> Catalog {
     let mut groups = groups();
+    // Services that aren't built in go to the group their manifest names.
+    for m in manifest::extras() {
+        if let Some(g) = groups.iter_mut().find(|g| g.id == m.category) {
+            g.items.push(&m.id);
+        }
+    }
     // A runtime nobody put in a group still shows, under Other.
     let grouped: Vec<&str> = groups.iter().flat_map(|g| g.items.clone()).collect();
-    let other: Vec<&'static str> = Runtime::ALL.iter().map(|r| r.id()).filter(|id| !grouped.contains(id)).collect();
+    let other: Vec<&'static str> = Runtime::all().iter().map(|r| r.id()).filter(|id| !grouped.contains(id)).collect();
     if !other.is_empty() {
         groups.push(Group { id: "other", title: "Other", blurb: "More services.", items: other });
     }
-    Catalog { groups, runtimes: Runtime::ALL.into_iter().map(info).collect() }
+    Catalog { groups, runtimes: Runtime::all().into_iter().map(info).collect() }
 }
 
 fn info(runtime: Runtime) -> RuntimeInfo {
@@ -87,6 +105,12 @@ fn info(runtime: Runtime) -> RuntimeInfo {
             unavailable: m.unavailable_here(),
             needs: needs(runtime, None).into_iter().map(|n| n.runtime).collect(),
             suggests: m.suggests.iter().map(String::as_str).collect(),
+            ports: m
+                .ports
+                .iter()
+                .filter(|(_, d)| d.setting.is_none())
+                .map(|(name, d)| PortField { key: format!("{}.{name}", m.id), label: d.label.clone().unwrap_or_else(|| name.clone()), default: d.default })
+                .collect(),
         };
     }
     let win = cfg!(windows);
@@ -149,6 +173,7 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         unavailable,
         needs: needs(runtime, None).into_iter().map(|n| n.runtime).collect(),
         suggests: suggests.to_vec(),
+        ports: vec![],
     }
 }
 

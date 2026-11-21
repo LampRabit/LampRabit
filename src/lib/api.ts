@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type ServiceKind = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "minio" | "elasticsearch" | "opensearch" | "n8n" | "rabbitmq" | "mariadb" | "mailpit" | "redis" | "memcached" | "mysql";
+export type ServiceKind = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "minio" | "elasticsearch" | "opensearch" | "n8n" | "rabbitmq" | "mariadb" | "mailpit" | "redis" | "memcached" | "mysql"
+  // A service that exists only as a manifest (not built in) has an id of its own.
+  | (string & {});
 export type Server = "apache" | "nginx" | "caddy" | "frankenphp";
 export const allServers: Server[] = ["apache", "nginx", "caddy", "frankenphp"];
 export type ServiceState = "stopped" | "starting" | "running" | "stopping" | "error";
@@ -52,7 +54,9 @@ export type Runtime =
   | "bun"
   | "deno"
   | "uv"
-  | "conda";
+  | "conda"
+  // The runtime of a service that exists only as a manifest.
+  | (string & {});
 // Labels come from the backend's catalog (catalog.rs), loaded once before the first render
 // (loadLabels), so a runtime is named in one place. An id the catalog doesn't name shows as
 // itself rather than as "undefined".
@@ -122,6 +126,15 @@ export interface RuntimeInfo {
   unavailable: string | null;
   needs: string[];
   suggests: Runtime[];
+  /** Ports of a service that isn't built in, edited on its Settings card. */
+  ports: PortField[];
+}
+
+export interface PortField {
+  /** Its key in `ports.extra`. */
+  key: string;
+  label: string;
+  default: number;
 }
 
 export interface RuntimeCatalog {
@@ -663,7 +676,9 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export type LogService = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "minio" | "elasticsearch" | "opensearch" | "n8n" | "rabbitmq" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system" | "project" | "dumps";
+export type LogService = "apache" | "nginx" | "caddy" | "frankenphp" | "tomcat" | "postgres" | "pgadmin" | "mongodb" | "clickhouse" | "neo4j" | "meilisearch" | "typesense" | "rustfs" | "ollama" | "minio" | "elasticsearch" | "opensearch" | "n8n" | "rabbitmq" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system" | "project" | "dumps"
+  // A service that exists only as a manifest logs under its own id.
+  | (string & {});
 
 /** A raw log line from a service's output or one of its log files. */
 export interface RawLogLine {
@@ -869,6 +884,8 @@ export interface Settings {
     dumps: number;
     /** LampRabit's own MCP server over HTTP. */
     mcp: number;
+    /** Ports of services that aren't built in, as "<service id>.<port name>". */
+    extra: Record<string, number>;
   };
   versions: Partial<Record<Runtime, string | null>>;
   /** The web servers that run; the first is the primary one (main ports, localhost, tools). */

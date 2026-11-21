@@ -110,6 +110,8 @@ ports:
 
 Each port has a name (lowercase letters and underscores) and a default. The **first** port is the main one: it's shown on the service's card and is what `health` checks unless told otherwise. Every port is checked before the service starts, and a port that's taken stops the start with a message naming who holds it. Community services must use ports above 1023, since lower ones need administrator rights on Linux and macOS. Avoid 9000–9099, which PHP's FastCGI workers use.
 
+When a community service is installed, LampRabit gives each of its ports the default, or the next port that no other service is set to use and nothing is listening on, so two services never share one. The user can change them on the service's Settings card; they are saved in `settings.toml` under `[ports.extra]` as `"<id>.<port name>"`.
+
 ### Before it starts: `data`, `dirs`, `files`
 
 - `data`: where `{{data}}` points. `shared` (the default) is `data/<id>`. `per-major` is `data/<id>-<major>`, for software whose files only work with the major version that wrote them. `storage` is the storage folder from Settings, which can be anywhere, for object storage.

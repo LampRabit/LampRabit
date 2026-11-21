@@ -17,8 +17,8 @@ use crate::{
     layout::{Layout, exe},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// Serialized as its id (`"php"`, or a non-built-in manifest's id).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Runtime {
     Apache,
     Nginx,
@@ -115,10 +115,26 @@ pub enum Runtime {
     Uv,
     /// conda through Miniforge (conda-forge's installer), installed into its own folder.
     Conda,
+    /// The runtime of a service that exists only as a manifest: an index into
+    /// `manifest::extras()`, the same as its `ServiceKind::Plugin`.
+    Plugin(u16),
+}
+
+impl Serialize for Runtime {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(self.id())
+    }
+}
+
+impl<'de> Deserialize<'de> for Runtime {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let id = String::deserialize(d)?;
+        Self::from_id(&id).ok_or_else(|| serde::de::Error::custom(format!("unknown runtime \"{id}\"")))
+    }
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 48] = [
+    pub const BUILT_IN: [Runtime; 48] = [
         Runtime::Apache,
         Runtime::Nginx,
         Runtime::Php,
@@ -169,8 +185,15 @@ impl Runtime {
         Runtime::Conda,
     ];
 
+    /// The built-in runtimes, then those of non-built-in manifests.
+    pub fn all() -> Vec<Self> {
+        let mut all = Self::BUILT_IN.to_vec();
+        all.extend((0..crate::manifest::extras().len()).filter_map(|i| u16::try_from(i).ok()).map(Self::Plugin));
+        all
+    }
+
     pub fn from_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|r| r.id() == id)
+        Self::all().into_iter().find(|r| r.id() == id)
     }
 
     pub fn id(self) -> &'static str {
@@ -223,6 +246,7 @@ impl Runtime {
             Self::Deno => "deno",
             Self::Uv => "uv",
             Self::Conda => "conda",
+            Self::Plugin(i) => &crate::manifest::extra(i).id,
         }
     }
 
@@ -287,6 +311,7 @@ impl Runtime {
             Self::Uv => PathBuf::from(exe("uv")),
             // Written last by `setup_conda`, so a half-finished install doesn't count.
             Self::Conda => PathBuf::from("installed.txt"),
+            Self::Plugin(i) => crate::manifest::extra(i).marker(),
         }
     }
 }

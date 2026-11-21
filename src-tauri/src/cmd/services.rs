@@ -3,8 +3,8 @@
 use crate::*;
 
 /// Services that load the given runtime and must restart when it changes.
-pub(crate) fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
-    match runtime {
+pub(crate) fn dependents(runtime: Runtime) -> Vec<ServiceKind> {
+    let kinds: &[ServiceKind] = match runtime {
         Runtime::Apache => &[ServiceKind::Apache],
         Runtime::Nginx => &[ServiceKind::Nginx],
         Runtime::Caddy => &[ServiceKind::Caddy],
@@ -47,7 +47,10 @@ pub(crate) fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         Runtime::Java => &[ServiceKind::Tomcat, ServiceKind::Neo4j],
         Runtime::Redis => &[ServiceKind::Redis],
         Runtime::Memcached => &[ServiceKind::Memcached],
-    }
+        // A manifest-only service runs its own runtime, under the same index.
+        Runtime::Plugin(i) => return vec![ServiceKind::Plugin(i)],
+    };
+    kinds.to_vec()
 }
 
 /// Restarts whichever web servers are running, so they (and their PHP pools) pick up

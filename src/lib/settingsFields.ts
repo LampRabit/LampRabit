@@ -1,7 +1,8 @@
 import type { EnvPaths, Runtime, Server, Settings } from "./api";
 
 type Os = EnvPaths["os"];
-export type PortKey = keyof Settings["ports"];
+// `extra` holds non-built-in services' ports, edited on their own Settings card.
+export type PortKey = Exclude<keyof Settings["ports"], "extra">;
 
 /**
  * Every configurable port. `only` limits a field to the platforms where it does anything;

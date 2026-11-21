@@ -221,7 +221,7 @@ pub(crate) async fn diagnostics(state: State<'_, AppState>, redact: bool) -> Res
     let _ = writeln!(r, "- PHP mail() to Mailpit: {}", settings.route_mail);
 
     let _ = writeln!(r, "\n## Runtimes\n\n| Runtime | Active | Installed |\n|---|---|---|");
-    for runtime in Runtime::ALL {
+    for runtime in Runtime::all() {
         let active = settings.versions.get(runtime.id()).cloned().unwrap_or_else(|| "—".into());
         let installed = runtimes::installed(&layout, runtime).join(", ");
         let _ = writeln!(r, "| {} | {active} | {} |", runtime.id(), if installed.is_empty() { "—".into() } else { installed });

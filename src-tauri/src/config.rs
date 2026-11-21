@@ -459,6 +459,9 @@ pub struct Ports {
     pub dumps: u16,
     /// LampRabit's own MCP server over HTTP, when it's switched on.
     pub mcp: u16,
+    /// Ports of services that aren't built in, as `<service id>.<port name>`; picked free
+    /// when the service is installed, since their manifest's default may already be taken.
+    pub extra: BTreeMap<String, u16>,
 }
 
 /// Active version per runtime; `None` means not installed yet.
@@ -625,6 +628,7 @@ impl Default for Ports {
             mail_ui: 8025,
             dumps: 9912,
             mcp: 39813,
+            extra: BTreeMap::new(),
         }
     }
 }

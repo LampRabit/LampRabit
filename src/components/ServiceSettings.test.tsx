@@ -34,13 +34,14 @@ vi.mock("../lib/api", async (importOriginal) => {
     envPaths: record("envPaths", () => ({ os: "windows" })),
     listServices: record("listServices", () => [{ kind: "redis", state: running ? "running" : "stopped", installed: true }]),
     serviceOptions: record("serviceOptions", () => options),
+    runtimeInfo: record("runtimeInfo", () => ({ groups: [], runtimes: [{ id: "echo", ports: [{ key: "echo.http", label: "Web", default: 7000 }] }] })),
   };
   return { ...original, api: new Proxy({}, { get: (_, name: string) => table[name] ?? record(name) }) };
 });
 
 const { default: ServiceSettings } = await import("./ServiceSettings");
 
-function show(runtime: "redis" | "php") {
+function show(runtime: "redis" | "php" | "echo") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
@@ -84,6 +85,18 @@ describe("manifest options in a service's settings", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Apply changes/ }));
     await vi.waitFor(() => expect(calls.some((c) => c.cmd === "saveSettings")).toBe(true));
     expect(calls.some((c) => c.cmd === "restartService")).toBe(false);
+  });
+
+  it("edits the ports of a service that exists only as a manifest", async () => {
+    show("echo");
+    const port = (await screen.findByRole("spinbutton", { name: "Web port" })) as HTMLInputElement;
+    expect(port.value).toBe("7000");
+    await userEvent.clear(port);
+    await userEvent.type(port, "7100");
+    await userEvent.click(await screen.findByRole("button", { name: /Apply changes/ }));
+    await vi.waitFor(() => expect(calls.some((c) => c.cmd === "saveSettings")).toBe(true));
+    const saved = calls.find((c) => c.cmd === "saveSettings")?.args[0] as Settings;
+    expect(saved.ports.extra).toEqual({ "echo.http": 7100 });
   });
 
   it("asks nothing for runtimes that aren't services", async () => {

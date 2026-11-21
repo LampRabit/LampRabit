@@ -13,7 +13,7 @@ use std::{
     fmt,
     marker::PhantomData,
     path::{Path, PathBuf},
-    sync::OnceLock,
+    sync::{OnceLock, RwLock},
 };
 
 use serde::{
@@ -882,8 +882,39 @@ pub fn built_ins() -> &'static [Manifest] {
     BUILT_INS.get_or_init(|| BUILT_IN.iter().map(|text| parse(text, true).unwrap_or_else(|e| panic!("built-in service manifest: {e}"))).collect())
 }
 
+/// Manifests that aren't built in (local files, later the registry), in the order they were
+/// added. Append-only, so a `ServiceKind::Plugin`/`Runtime::Plugin` index stays valid.
+static EXTRAS: RwLock<Vec<&'static Manifest>> = RwLock::new(Vec::new());
+
 pub fn get(id: &str) -> Option<&'static Manifest> {
-    built_ins().iter().find(|m| m.id == id)
+    built_ins().iter().find(|m| m.id == id).or_else(|| extras().into_iter().find(|m| m.id == id))
+}
+
+pub fn extras() -> Vec<&'static Manifest> {
+    EXTRAS.read().map(|e| e.clone()).unwrap_or_default()
+}
+
+pub fn extra(index: u16) -> &'static Manifest {
+    extras()[usize::from(index)]
+}
+
+/// Adds a non-built-in manifest and returns its index. Its id must not clash with a built-in
+/// or another added manifest, or two services would share folders and settings.
+// Called from tests until local service files (phase 27, step C) load manifests at start.
+#[cfg_attr(not(test), allow(dead_code))]
+// shortcut: each added manifest is leaked to get a 'static reference; fine for a handful
+// loaded at start, revisit if manifests get reloaded often.
+pub fn register(manifest: Manifest) -> Result<u16> {
+    if !manifest.builtin.is_empty() {
+        return Err(Error::msg(format!("{}: only built-in services may use builtin hooks", manifest.id)));
+    }
+    let mut extras = EXTRAS.write().map_err(|_| Error::msg("service list is unavailable"))?;
+    if built_ins().iter().chain(extras.iter().copied()).any(|m| m.id == manifest.id) {
+        return Err(Error::msg(format!("A service with the id \"{}\" already exists. Pick another id.", manifest.id)));
+    }
+    let index = u16::try_from(extras.len()).map_err(|_| Error::msg("too many services"))?;
+    extras.push(Box::leak(Box::new(manifest)));
+    Ok(index)
 }
 
 /// Parses and checks a manifest. `builtin` allows the hooks only LampRabit's own may use.
@@ -1181,6 +1212,13 @@ impl Manifest {
         out
     }
 
+    /// `binary` relative to the install folder: the runtime's "install is complete" marker.
+    pub fn marker(&self) -> PathBuf {
+        let b = self.binary.pick().unwrap_or_default();
+        let b = b.trim_start_matches("{{home}}").trim_start_matches(['/', '\\']);
+        PathBuf::from(b.replace("{{exe}}", if cfg!(windows) { ".exe" } else { "" }).replace("{{script}}", if cfg!(windows) { ".bat" } else { "" }))
+    }
+
     /// The main port's name.
     pub fn main_port(&self) -> Option<&str> {
         self.ports.0.first().map(|(n, _)| n.as_str())
@@ -1215,7 +1253,39 @@ impl Manifest {
     /// A port's number from the settings.
     pub fn port(&self, settings: &Settings, name: &str) -> Option<u16> {
         let def = self.ports.get(name)?;
-        Some(def.setting.as_deref().and_then(|key| settings.ports.get(key)).unwrap_or(def.default))
+        let chosen = match def.setting.as_deref() {
+            Some(key) => settings.ports.get(key),
+            None => settings.ports.extra.get(&format!("{}.{name}", self.id)).copied(),
+        };
+        Some(chosen.unwrap_or(def.default))
+    }
+
+    /// Gives each port of a non-built-in service that has none yet its default, or the next
+    /// port no other service is set to use and `free` says is free right now.
+    pub fn assign_ports(&self, settings: &mut Settings, free: impl Fn(u16) -> bool) {
+        let mut taken: Vec<u16> = serde_json::to_value(&settings.ports)
+            .ok()
+            .and_then(|v| v.as_object().cloned())
+            .into_iter()
+            .flatten()
+            .filter_map(|(_, v)| v.as_u64().and_then(|p| u16::try_from(p).ok()))
+            .collect();
+        // shortcut: PHP workers take blocks of 10 from php_fpm, one per PHP version in use;
+        // 100 covers ten versions, widen it if more ever run at once.
+        taken.extend(settings.ports.php_fpm..settings.ports.php_fpm.saturating_add(100));
+        taken.extend(settings.ports.extra.iter().filter(|(k, _)| !k.starts_with(&format!("{}.", self.id))).map(|(_, p)| *p));
+        for m in built_ins().iter().chain(extras()).filter(|m| m.id != self.id) {
+            taken.extend(m.port_numbers(settings));
+        }
+        for (name, def) in self.ports.iter().filter(|(_, d)| d.setting.is_none()) {
+            let key = format!("{}.{name}", self.id);
+            if settings.ports.extra.contains_key(&key) {
+                continue;
+            }
+            let Some(port) = (def.default..=u16::MAX).find(|p| !taken.contains(p) && free(*p)) else { continue };
+            taken.push(port);
+            settings.ports.extra.insert(key, port);
+        }
     }
 
     /// Every port it listens on, the main one first.

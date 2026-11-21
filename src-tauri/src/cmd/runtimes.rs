@@ -130,7 +130,7 @@ pub(crate) async fn runtime_catalog(state: State<'_, AppState>, runtime: Runtime
 #[tauri::command]
 pub(crate) async fn installed_runtimes(state: State<'_, AppState>) -> Result<Vec<InstalledRuntime>> {
     let (settings, layout) = state.snapshot().await;
-    Ok(Runtime::ALL
+    Ok(Runtime::all()
         .into_iter()
         .map(|runtime| InstalledRuntime {
             runtime,
@@ -191,6 +191,10 @@ pub(crate) async fn install_runtime(app: AppHandle, state: State<'_, AppState>, 
     }
     result?;
 
+    // A service that isn't built in gets its ports now, clear of every other service's.
+    if let Runtime::Plugin(i) = release.runtime {
+        state.update_settings(|s| manifest::extra(i).assign_ports(s, services::port_free)).await?;
+    }
     // The first installed version of a runtime becomes the active one.
     let mut activated = false;
     state
@@ -212,6 +216,7 @@ pub(crate) async fn install_runtime(app: AppHandle, state: State<'_, AppState>, 
 
 pub(crate) fn is_tool(runtime: Runtime) -> bool {
     matches!(runtime, Runtime::Mailpit | Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin | Runtime::Phppgadmin | Runtime::Pgadmin | Runtime::Neo4j | Runtime::N8n)
+        || matches!(runtime, Runtime::Plugin(i) if manifest::extra(i).ui.is_some())
 }
 
 #[tauri::command]
@@ -220,7 +225,7 @@ pub(crate) async fn remove_runtime(app: AppHandle, state: State<'_, AppState>, r
     let was_active = settings.versions.get(runtime.id()) == Some(&version);
     // Web tools are just files served by Apache, which restarts below instead of blocking.
     if was_active && !matches!(runtime, Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin | Runtime::Phppgadmin) {
-        for &kind in dependents(runtime) {
+        for kind in dependents(runtime) {
             if state.supervisor.is_running(kind).await {
                 return Err(Error::msg(format!("Stop {} before removing the version it is using", kind.label())));
             }
@@ -270,7 +275,7 @@ pub(crate) async fn set_active_version(
     }
 
     let mut restart = Vec::new();
-    for &kind in dependents(runtime) {
+    for kind in dependents(runtime) {
         if state.supervisor.is_running(kind).await {
             state.supervisor.stop(&app, kind).await;
             restart.push(kind);

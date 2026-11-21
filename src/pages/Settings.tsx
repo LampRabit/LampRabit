@@ -44,7 +44,7 @@ import UninstallDialog from "../components/UninstallDialog";
 import McpSettings from "../components/McpSettings";
 import MoveEnvironmentDialog from "../components/MoveEnvironmentDialog";
 import ApplyBar from "../components/ApplyBar";
-import { portFields, portShown, serverNotes } from "../lib/settingsFields";
+import { portFields, portShown, serverNotes, type PortKey } from "../lib/settingsFields";
 import { Button, Card, Segmented, Switch, inputClass } from "../components/ui";
 import { usePageToolbar } from "../components/PageToolbar";
 
@@ -184,7 +184,7 @@ export default function Settings() {
 
   if (!draft || !versions) return null;
   const set = (patch: Partial<SettingsT>) => setDraft({ ...draft, ...patch });
-  const setPort = (key: keyof SettingsT["ports"], value: number) => setDraft({ ...draft, ports: { ...draft.ports, [key]: value } });
+  const setPort = (key: PortKey, value: number) => setDraft({ ...draft, ports: { ...draft.ports, [key]: value } });
   const installedServices = (services.data ?? []).filter((s) => s.installed && !s.external);
   const dbInstalled = { mariadb: !!activeVersions?.mariadb, mysql: !!activeVersions?.mysql };
 

@@ -33,8 +33,8 @@ const READY_TIMEOUT: Duration = Duration::from_secs(90);
 const MAX_RESTARTS: u32 = 3;
 const RESTART_WINDOW: Duration = Duration::from_secs(300);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+/// Serialized as its id (`"mariadb"`, or a non-built-in manifest's id).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ServiceKind {
     Apache,
     Nginx,
@@ -70,12 +70,34 @@ pub enum ServiceKind {
     /// n8n, behind the web servers at n8n.test.
     N8n,
     Rabbitmq,
+    /// A service that exists only as a manifest (not built in): an index into
+    /// `manifest::extras()`.
+    Plugin(u16),
+}
+
+impl Serialize for ServiceKind {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(self.id())
+    }
+}
+
+impl<'de> Deserialize<'de> for ServiceKind {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let id = String::deserialize(d)?;
+        Self::from_id(&id).ok_or_else(|| serde::de::Error::custom(format!("unknown service \"{id}\"")))
+    }
 }
 
 
 impl ServiceKind {
     pub fn all() -> Vec<Self> {
-        vec![Self::Apache, Self::Nginx, Self::Caddy, Self::Frankenphp, Self::Tomcat, Self::Mariadb, Self::Mysql, Self::Postgres, Self::Mongodb, Self::Clickhouse, Self::Neo4j, Self::Meilisearch, Self::Typesense, Self::Rustfs, Self::Minio, Self::Elasticsearch, Self::Opensearch, Self::Rabbitmq, Self::Ollama, Self::N8n, Self::Mailpit, Self::Redis, Self::Memcached, Self::Pgadmin]
+        let mut all = vec![Self::Apache, Self::Nginx, Self::Caddy, Self::Frankenphp, Self::Tomcat, Self::Mariadb, Self::Mysql, Self::Postgres, Self::Mongodb, Self::Clickhouse, Self::Neo4j, Self::Meilisearch, Self::Typesense, Self::Rustfs, Self::Minio, Self::Elasticsearch, Self::Opensearch, Self::Rabbitmq, Self::Ollama, Self::N8n, Self::Mailpit, Self::Redis, Self::Memcached, Self::Pgadmin];
+        all.extend((0..manifest::extras().len()).filter_map(|i| u16::try_from(i).ok()).map(Self::Plugin));
+        all
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::all().into_iter().find(|k| k.id() == id)
     }
 
     /// The web servers' services, in `Server::ALL` order.
@@ -149,6 +171,7 @@ impl ServiceKind {
             Self::Mailpit => "mailpit",
             Self::Redis => "redis",
             Self::Memcached => "memcached",
+            Self::Plugin(i) => &manifest::extra(i).id,
         }
     }
 
@@ -1438,8 +1461,83 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtimes::Runtime;
 
     const MIN: u64 = 60_000;
+
+    const ECHO: &str = r#"
+schema: 1
+id: echo
+name: Echo
+category: tools
+blurb: Says things back
+source:
+  github: someone/echo
+  assets:
+    windows: { file: "echo-{version}-windows.zip", archive: zip }
+    linux: { file: "echo-{version}-linux.tar.gz", archive: targz }
+    macos: { file: "echo-{version}-macos.tar.gz", archive: targz }
+binary: "echo{{exe}}"
+ports:
+  http: { default: 7000, label: Web }
+run:
+  program: "{{home}}/echo{{exe}}"
+  args: [--port, "{{port.http}}"]
+health: { http: { path: /health } }
+"#;
+
+    /// Registers the community service once for every test that needs it (they share the
+    /// process, and ids must be unique).
+    fn echo() -> u16 {
+        static INDEX: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+        *INDEX.get_or_init(|| manifest::register(manifest::parse(ECHO, false).unwrap()).unwrap())
+    }
+
+    #[test]
+    fn a_manifest_only_service_works_without_an_enum_variant() {
+        let i = echo();
+        let kind = ServiceKind::from_id("echo").unwrap();
+        assert_eq!(kind, ServiceKind::Plugin(i));
+        assert_eq!(serde_json::to_string(&kind).unwrap(), "\"echo\"");
+        assert_eq!(serde_json::from_str::<ServiceKind>("\"echo\"").unwrap(), kind);
+        assert_eq!(kind.label(), "Echo");
+
+        let runtime = Runtime::from_id("echo").unwrap();
+        assert_eq!(runtime, Runtime::Plugin(i));
+        assert_eq!(serde_json::from_str::<Runtime>("\"echo\"").unwrap(), runtime);
+        assert_eq!(runtime.marker(), PathBuf::from(if cfg!(windows) { "echo.exe" } else { "echo" }));
+        assert_eq!(crate::cmd::dependents(runtime), vec![kind]);
+
+        // Its default port is another service's and 7001 is busy: it gets 7002, kept on reinstall.
+        let mut settings = Settings::default();
+        settings.ports.extra.insert("other.http".into(), 7000);
+        kind.manifest().assign_ports(&mut settings, |p| p != 7001);
+        assert_eq!(settings.ports.extra.get("echo.http"), Some(&7002));
+        kind.manifest().assign_ports(&mut settings, |_| true);
+        assert_eq!(kind.port_of(&settings), 7002);
+
+        // It launches from its manifest once installed.
+        settings.versions.set("echo", Some("1.0".into()));
+        let layout = Layout::new(std::env::temp_dir().join("lr-plugin-service"));
+        let home = layout.bin("echo", "1.0");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(runtime.marker()), "").unwrap();
+        let spec = launch_spec(kind, &settings, &layout).unwrap();
+        assert_eq!(spec.program, home.join(runtime.marker()));
+        assert_eq!(spec.args, vec!["--port".to_string(), "7002".to_string()]);
+
+        // The Services page lists it in its category, with its port to edit.
+        let catalog = crate::catalog::catalog();
+        assert!(catalog.groups.iter().any(|g| g.id == "tools" && g.items.contains(&"echo")));
+        let info = catalog.runtimes.iter().find(|r| r.id == "echo").unwrap();
+        assert_eq!((info.ports[0].key.as_str(), info.ports[0].label.as_str(), info.ports[0].default), ("echo.http", "Web", 7000));
+    }
+
+    #[test]
+    fn a_manifest_only_service_cant_take_a_built_in_id() {
+        let m = manifest::parse(&ECHO.replace("id: echo", "id: redis"), false).unwrap();
+        assert!(manifest::register(m).unwrap_err().to_string().contains("already exists"));
+    }
 
     #[test]
     fn restart_budget_allows_three_then_stops() {

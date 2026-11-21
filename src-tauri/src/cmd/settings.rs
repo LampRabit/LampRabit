@@ -16,7 +16,7 @@ pub(crate) fn tidy_extension_choices(settings: &mut Settings) -> bool {
 /// Drops active versions whose files are gone (e.g. deleted by hand).
 pub(crate) fn reconcile_versions(settings: &mut Settings) {
     let layout = Layout::new(&settings.root_dir);
-    for runtime in Runtime::ALL {
+    for runtime in Runtime::all() {
         let installed = runtimes::installed(&layout, runtime);
         if settings.versions.get(runtime.id()).is_none_or(|v| !installed.contains(v)) {
             settings.versions.set(runtime.id(), installed.into_iter().next());

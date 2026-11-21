@@ -568,7 +568,7 @@ function dbTools(service: ServiceInfo, sites: SitesInfo | undefined, settings: S
       .filter((d) => settings?.versions[d])
       .sort((a, b) => Number(b === settings?.defaultDatabase) - Number(a === settings?.defaultDatabase));
     return [
-      ...at("phpmyadmin", toolUrl("phpmyadmin", sites, mailUi), `?server=${Math.max(1, order.indexOf(service.kind) + 1)}`),
+      ...at("phpmyadmin", toolUrl("phpmyadmin", sites, mailUi), `?server=${Math.max(1, order.findIndex((d) => d === service.kind) + 1)}`),
       ...at("adminer", toolUrl("adminer", sites, mailUi), `?server=127.0.0.1:${service.port}&username=root`),
     ];
   }
