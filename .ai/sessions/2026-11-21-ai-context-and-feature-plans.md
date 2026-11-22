@@ -38,3 +38,11 @@
 ## Next step
 
 Phase 27 step D: the LampRabit/Services registry repository, the signed `index.json` and the Community section on the Services page. Needs the user: creating the repository and the signing key.
+
+## 2026-11-22
+
+- The user: marketplace later; make the format cover every service with nothing hard-coded (site engine excepted, their choice); do the B/C leftovers; commit to `dev-1.0`, no PR. Then: add KarotX (first-party, priority over other DB clients). Then: another developer had started on KarotX; revert anything wrong (nothing of theirs was found on disk).
+- Done and committed: E1 ports, E2 needs, E3 downloads, KarotX (+`connects`), E4 setup, E5 site engine, E6 tables/links, E7a keywords/docs/config files, E7b backup hooks. Smoke-tested live on Windows: MariaDB, MySQL, PostgreSQL, Java, Tomcat, Python, pgAdmin, Apache, Nginx, Caddy, PHP, Ollama, KarotX install path, backup round trips.
+- Bugs found and fixed: Services page `runtime` used before declaration (B3); Home/Settings crash for services without a hand-written entry; MySQL restore failing on GTID lines.
+- Blocker: the KarotX repository is private, so it can't be downloaded until it (or its releases) is public.
+- Next: ask the user about E7 rest (scope: project, adapters, kind: tool/cli) and pushing the branch for macOS CI; click-test Add/Remove in the running app.
