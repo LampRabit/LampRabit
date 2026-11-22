@@ -36,3 +36,5 @@ connection:
     TYPESENSE_PORT: "{{port.api}}"
     TYPESENSE_PROTOCOL: http
     TYPESENSE_API_KEY: lamprabit
+keywords: [search, full text]
+docs: https://typesense.org/docs/

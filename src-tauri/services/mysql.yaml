@@ -101,3 +101,5 @@ libraries:
   dir: "{{home}}/lib/compat"
   renamed: { libaio.so.1: libaio.so.1t64 }
   hint: "MySQL needs system libraries that aren't installed ({missing}). Install them, then start MySQL again: sudo apt install libaio1t64 libnuma1 (Ubuntu 24.04+, Debian 13), sudo apt install libaio1 libnuma1 (older Ubuntu/Debian), or sudo dnf install libaio numactl-libs (Fedora)."
+keywords: [sql, database]
+docs: https://dev.mysql.com/doc/

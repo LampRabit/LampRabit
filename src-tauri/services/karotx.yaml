@@ -46,3 +46,4 @@ connects:
       user: "{{db.user}}"
       database: "{{db.database}}"
       tls: { mode: "off" }
+keywords: [database client, sql, gui, mysql, postgres, mongodb, redis]

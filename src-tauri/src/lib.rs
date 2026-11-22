@@ -828,6 +828,7 @@ pub fn run() {
             service_options,
             set_service_option,
             inspect_service_file,
+            service_config_files,
             add_service_file,
             remove_local_service,
             list_sites,

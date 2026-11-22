@@ -95,3 +95,5 @@ guard:
   marker: "{{data}}/lamprabit-version"
   when: "{{data}}/mysql"
   upgrade: ["{{home}}/bin/mariadb-upgrade{{exe}}", "--defaults-file={{etc}}/my.ini", --user=root]
+keywords: [mysql, sql, database]
+docs: https://mariadb.com/kb/en/documentation/

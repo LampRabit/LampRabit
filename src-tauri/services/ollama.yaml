@@ -48,3 +48,5 @@ external:
   args: [serve]
   env:
     OLLAMA_HOST: "127.0.0.1:{{port.api}}"
+keywords: [ai, llm, models, chat]
+docs: https://docs.ollama.com/

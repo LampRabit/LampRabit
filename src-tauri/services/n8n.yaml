@@ -58,3 +58,5 @@ connection:
   url: "http://127.0.0.1:{{port.http}}"
   env:
     N8N_URL: "http://127.0.0.1:{{port.http}}"
+keywords: [automation, workflow, ai]
+docs: https://docs.n8n.io/

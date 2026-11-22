@@ -31,3 +31,5 @@ run:
   # while the real server runs on untracked.
   args: [-d, "{{home}}", -f, "{{etc}}/httpd.conf", { values: [-D, FOREGROUND], on: [unix] }]
   test: [-d, "{{home}}", -f, "{{etc}}/httpd.conf", -t]
+keywords: [web server, httpd, htaccess]
+docs: https://httpd.apache.org/docs/2.4/

@@ -67,3 +67,5 @@ connection:
     RABBITMQ_PORT: "{{port.amqp}}"
     RABBITMQ_USER: guest
     RABBITMQ_PASSWORD: guest
+keywords: [queue, amqp, message broker, jobs]
+docs: https://www.rabbitmq.com/docs

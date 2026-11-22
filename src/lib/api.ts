@@ -134,6 +134,16 @@ export interface RuntimeInfo {
   uiPort: string | null;
   /** A page of its own to open from its card: a console, a query page. */
   open: { label: string; port: string; path: string } | null;
+  /** Other words it's found by, and its documentation. */
+  keywords: string[];
+  docs: string | null;
+}
+
+export interface ConfigFileInfo {
+  label: string;
+  path: string;
+  /** Not yet: it's written when the service starts. */
+  exists: boolean;
 }
 
 /** What a service file does, for the user to approve before it's added (manifest.rs `Review`). */
@@ -1033,6 +1043,7 @@ export const api = {
   serviceOptions: (kind: ServiceKind) => invoke<ServiceOption[]>("service_options", { kind }),
   setServiceOption: (kind: ServiceKind, name: string, value: string) => invoke<ServiceOption[]>("set_service_option", { kind, name, value }),
   inspectServiceFile: (path: string) => invoke<ServiceFile>("inspect_service_file", { path }),
+  serviceConfigFiles: (kind: ServiceKind) => invoke<ConfigFileInfo[]>("service_config_files", { kind }),
   /** The backend refuses without `approve`: the user must have seen the review. */
   addServiceFile: (path: string, approve: boolean) => invoke<string>("add_service_file", { path, approve }),
   removeLocalService: (id: string) => invoke<void>("remove_local_service", { id }),

@@ -78,3 +78,5 @@ connection:
     CLICKHOUSE_PORT: "{{port.http}}"
     CLICKHOUSE_USER: default
     CLICKHOUSE_PASSWORD: ""
+keywords: [analytics, olap, sql, database]
+docs: https://clickhouse.com/docs

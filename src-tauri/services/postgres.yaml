@@ -65,3 +65,8 @@ init:
 after_start:
   - program: "{{home}}/bin/psql{{exe}}"
     args: [-h, 127.0.0.1, -p, "{{port.postgres}}", -U, postgres, -d, postgres, -qtAc, "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'root') THEN CREATE ROLE root SUPERUSER LOGIN; END IF; END $$;"]
+keywords: [pgsql, sql, database]
+docs: https://www.postgresql.org/docs/
+config_files:
+  - { path: "{{data}}/postgresql.conf" }
+  - { path: "{{data}}/pg_hba.conf", label: "pg_hba.conf (who may connect)" }

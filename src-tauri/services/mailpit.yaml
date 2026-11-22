@@ -45,3 +45,5 @@ connection:
     MAIL_USERNAME: "null"
     MAIL_PASSWORD: "null"
     MAIL_ENCRYPTION: "null"
+keywords: [mail, email, smtp, inbox]
+docs: https://mailpit.axllent.org/docs/

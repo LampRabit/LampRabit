@@ -302,6 +302,34 @@ pub(crate) async fn set_service_option(state: State<'_, AppState>, kind: Service
     Ok(kind.manifest().options(&settings))
 }
 
+/// One of a service's config files, for its card's Open / Reveal / Copy path.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConfigFileInfo {
+    pub(crate) label: String,
+    pub(crate) path: PathBuf,
+    pub(crate) exists: bool,
+}
+
+/// Its manifest's `config_files`, or its single `config` when it lists none.
+#[tauri::command]
+pub(crate) async fn service_config_files(state: State<'_, AppState>, kind: ServiceKind) -> Result<Vec<ConfigFileInfo>> {
+    let (settings, layout) = state.snapshot().await;
+    let m = kind.manifest();
+    let ctx = manifest::Ctx::any(m, &settings, &layout);
+    let mut out = Vec::new();
+    for f in &m.config_files {
+        let path = PathBuf::from(ctx.render(&f.path)?);
+        let label = f.label.clone().unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        out.push(ConfigFileInfo { exists: path.exists(), label, path });
+    }
+    if out.is_empty() && m.config.is_some() {
+        let path = kind.config_path(&settings, &layout);
+        out.push(ConfigFileInfo { label: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), exists: path.exists(), path });
+    }
+    Ok(out)
+}
+
 /// A service file's summary for the user to approve, and whether it replaces one they added.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

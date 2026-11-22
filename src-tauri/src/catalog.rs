@@ -45,6 +45,9 @@ pub struct RuntimeInfo {
     /// Its web interface's port name (served at its .test domain), and a page of its own.
     pub ui_port: Option<String>,
     pub open: Option<manifest::OpenLink>,
+    /// Other words it's found by, and its documentation.
+    pub keywords: Vec<&'static str>,
+    pub docs: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -131,6 +134,8 @@ fn info(runtime: Runtime) -> RuntimeInfo {
             local: manifest::extras().iter().any(|e| e.id == m.id) && !manifest::is_bundled(&m.id),
             ui_port: m.ui.as_ref().map(|u| u.port.clone().or_else(|| m.main_port().map(str::to_string)).unwrap_or_default()),
             open: m.open.clone(),
+            keywords: m.keywords.iter().map(String::as_str).collect(),
+            docs: m.docs.as_deref(),
         };
     }
     let win = cfg!(windows);
@@ -197,6 +202,8 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         local: false,
         ui_port: None,
         open: None,
+        keywords: vec![],
+        docs: None,
     }
 }
 

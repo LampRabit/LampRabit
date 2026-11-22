@@ -202,12 +202,12 @@
         "blurb": "Mail catching and web interfaces for your databases and caches.",
         "items": [
           "karotx",
-          "git",
           "mailpit",
+          "pgadmin",
+          "git",
           "phpmyadmin",
           "adminer",
           "phppgadmin",
-          "pgadmin",
           "phpredisadmin",
           "compass",
           "mongosh",
@@ -237,7 +237,13 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "web server",
+          "httpd",
+          "htaccess"
+        ],
+        "docs": "https://httpd.apache.org/docs/2.4/"
       },
       {
         "id": "nginx",
@@ -250,7 +256,12 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "web server",
+          "reverse proxy"
+        ],
+        "docs": "https://nginx.org/en/docs/"
       },
       {
         "id": "php",
@@ -265,7 +276,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "mariadb",
@@ -289,7 +302,13 @@
         ],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "mysql",
+          "sql",
+          "database"
+        ],
+        "docs": "https://mariadb.com/kb/en/documentation/"
       },
       {
         "id": "mailpit",
@@ -315,7 +334,14 @@
         ],
         "local": false,
         "uiPort": "ui",
-        "open": null
+        "open": null,
+        "keywords": [
+          "mail",
+          "email",
+          "smtp",
+          "inbox"
+        ],
+        "docs": "https://mailpit.axllent.org/docs/"
       },
       {
         "id": "adminer",
@@ -330,7 +356,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "phpmyadmin",
@@ -345,7 +373,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "ngrok",
@@ -358,7 +388,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "cloudflared",
@@ -371,7 +403,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "redis",
@@ -394,7 +428,14 @@
         ],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "cache",
+          "queue",
+          "session",
+          "key value"
+        ],
+        "docs": "https://redis.io/docs/latest/"
       },
       {
         "id": "composer",
@@ -409,7 +450,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "mysql",
@@ -433,7 +476,12 @@
         ],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "sql",
+          "database"
+        ],
+        "docs": "https://dev.mysql.com/doc/"
       },
       {
         "id": "phpredisadmin",
@@ -449,7 +497,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "memcached",
@@ -469,7 +519,12 @@
         ],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "cache",
+          "session"
+        ],
+        "docs": "https://github.com/memcached/memcached/wiki"
       },
       {
         "id": "caddy",
@@ -482,7 +537,12 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "web server",
+          "caddyfile"
+        ],
+        "docs": "https://caddyserver.com/docs/"
       },
       {
         "id": "java",
@@ -495,7 +555,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "tomcat",
@@ -523,7 +585,13 @@
         ],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "java",
+          "servlet",
+          "jakarta"
+        ],
+        "docs": "https://tomcat.apache.org/"
       },
       {
         "id": "frankenphp",
@@ -536,7 +604,13 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "web server",
+          "php",
+          "worker mode"
+        ],
+        "docs": "https://frankenphp.dev/docs/"
       },
       {
         "id": "postgres",
@@ -561,7 +635,13 @@
         ],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "pgsql",
+          "sql",
+          "database"
+        ],
+        "docs": "https://www.postgresql.org/docs/"
       },
       {
         "id": "python",
@@ -574,7 +654,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "phppgadmin",
@@ -590,7 +672,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "pgadmin",
@@ -613,7 +697,14 @@
         ],
         "local": false,
         "uiPort": "http",
-        "open": null
+        "open": null,
+        "keywords": [
+          "postgres",
+          "postgresql",
+          "admin",
+          "gui"
+        ],
+        "docs": "https://www.pgadmin.org/docs/"
       },
       {
         "id": "mongodb",
@@ -638,7 +729,13 @@
         ],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "nosql",
+          "document",
+          "database"
+        ],
+        "docs": "https://www.mongodb.com/docs/manual/"
       },
       {
         "id": "mongosh",
@@ -653,7 +750,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "mongotools",
@@ -668,7 +767,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "compass",
@@ -683,7 +784,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "sqlite",
@@ -696,7 +799,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "clickhouse",
@@ -726,7 +831,14 @@
           "label": "Open console",
           "port": "http",
           "path": "/play"
-        }
+        },
+        "keywords": [
+          "analytics",
+          "olap",
+          "sql",
+          "database"
+        ],
+        "docs": "https://clickhouse.com/docs"
       },
       {
         "id": "neo4j",
@@ -754,7 +866,13 @@
         ],
         "local": false,
         "uiPort": "http",
-        "open": null
+        "open": null,
+        "keywords": [
+          "graph",
+          "cypher",
+          "database"
+        ],
+        "docs": "https://neo4j.com/docs/"
       },
       {
         "id": "meilisearch",
@@ -778,7 +896,12 @@
           "label": "Open search preview",
           "port": "http",
           "path": "/"
-        }
+        },
+        "keywords": [
+          "search",
+          "full text"
+        ],
+        "docs": "https://www.meilisearch.com/docs"
       },
       {
         "id": "typesense",
@@ -798,7 +921,12 @@
         ],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "search",
+          "full text"
+        ],
+        "docs": "https://typesense.org/docs/"
       },
       {
         "id": "rustfs",
@@ -828,7 +956,14 @@
           "label": "Open console",
           "port": "console",
           "path": "/"
-        }
+        },
+        "keywords": [
+          "s3",
+          "storage",
+          "object storage",
+          "files"
+        ],
+        "docs": "https://docs.rustfs.com/"
       },
       {
         "id": "ollama",
@@ -848,7 +983,14 @@
         ],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "ai",
+          "llm",
+          "models",
+          "chat"
+        ],
+        "docs": "https://docs.ollama.com/"
       },
       {
         "id": "minio",
@@ -878,7 +1020,14 @@
           "label": "Open console",
           "port": "console",
           "path": "/"
-        }
+        },
+        "keywords": [
+          "s3",
+          "storage",
+          "object storage",
+          "files"
+        ],
+        "docs": "https://min.io/docs/minio/linux/index.html"
       },
       {
         "id": "elasticsearch",
@@ -904,7 +1053,13 @@
         ],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "search",
+          "full text",
+          "elastic"
+        ],
+        "docs": "https://www.elastic.co/docs"
       },
       {
         "id": "opensearch",
@@ -930,7 +1085,12 @@
         ],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [
+          "search",
+          "full text"
+        ],
+        "docs": "https://docs.opensearch.org/"
       },
       {
         "id": "n8n",
@@ -952,7 +1112,13 @@
         ],
         "local": false,
         "uiPort": "http",
-        "open": null
+        "open": null,
+        "keywords": [
+          "automation",
+          "workflow",
+          "ai"
+        ],
+        "docs": "https://docs.n8n.io/"
       },
       {
         "id": "rabbitmq",
@@ -984,7 +1150,14 @@
           "label": "Open management console",
           "port": "management",
           "path": "/"
-        }
+        },
+        "keywords": [
+          "queue",
+          "amqp",
+          "message broker",
+          "jobs"
+        ],
+        "docs": "https://www.rabbitmq.com/docs"
       },
       {
         "id": "erlang",
@@ -997,7 +1170,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "go",
@@ -1010,7 +1185,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "rust",
@@ -1023,7 +1200,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "maven",
@@ -1038,7 +1217,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "gradle",
@@ -1053,7 +1234,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "git",
@@ -1066,7 +1249,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "bun",
@@ -1079,7 +1264,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "deno",
@@ -1092,7 +1279,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "uv",
@@ -1105,7 +1294,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "conda",
@@ -1118,7 +1309,9 @@
         "ports": [],
         "local": false,
         "uiPort": null,
-        "open": null
+        "open": null,
+        "keywords": [],
+        "docs": null
       },
       {
         "id": "karotx",
@@ -1138,7 +1331,17 @@
         ],
         "local": false,
         "uiPort": "http",
-        "open": null
+        "open": null,
+        "keywords": [
+          "database client",
+          "sql",
+          "gui",
+          "mysql",
+          "postgres",
+          "mongodb",
+          "redis"
+        ],
+        "docs": null
       }
     ]
   }

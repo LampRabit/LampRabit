@@ -32,3 +32,5 @@ run:
 # Through the admin API: a clean shutdown on Windows too, where there's no SIGTERM.
 stop:
   command: ["{{home}}/caddy{{exe}}", stop, --address, "127.0.0.1:{{server.admin}}"]
+keywords: [web server, caddyfile]
+docs: https://caddyserver.com/docs/

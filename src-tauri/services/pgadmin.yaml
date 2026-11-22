@@ -95,3 +95,7 @@ run:
     # Its output in our log right away rather than when Python's buffer fills.
     PYTHONUNBUFFERED: "1"
     PGADMIN_SERVER_MODE: "OFF"
+keywords: [postgres, postgresql, admin, gui]
+docs: https://www.pgadmin.org/docs/
+config_files:
+  - { path: "{{var.package}}/config_local.py" }

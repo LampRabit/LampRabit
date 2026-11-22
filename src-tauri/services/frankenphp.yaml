@@ -32,3 +32,8 @@ run:
     PHP_INI_SCAN_DIR: "{{etc}}/conf.d"
 stop:
   command: ["{{home}}/frankenphp{{exe}}", stop, --address, "127.0.0.1:{{server.admin}}"]
+keywords: [web server, php, worker mode]
+docs: https://frankenphp.dev/docs/
+config_files:
+  - { path: "{{etc}}/Caddyfile" }
+  - { path: "{{etc}}/conf.d", label: "PHP settings (conf.d)" }

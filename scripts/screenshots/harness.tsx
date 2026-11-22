@@ -221,6 +221,7 @@ const answers: Record<string, unknown> = {
   node_available: [],
   service_usage: services.map((s) => ({ id: s.kind, cpu: s.state === "running" ? 1.2 : 0, memory: s.state === "running" ? 120_000_000 : 0, processes: 1 })),
   port_status: [],
+  service_config_files: [{ label: "httpd.conf", path: "C:/lampRabit/etc/apache/httpd.conf", exists: true }],
   log_history: { lines: logLines, cursor: 0 },
   list_dumps: [],
   tunnel_list: [],

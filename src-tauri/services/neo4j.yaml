@@ -57,3 +57,5 @@ connection:
   url: "http://127.0.0.1:{{port.http}}"
   env:
     NEO4J_HTTP_URL: "http://127.0.0.1:{{port.http}}"
+keywords: [graph, cypher, database]
+docs: https://neo4j.com/docs/

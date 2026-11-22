@@ -70,3 +70,7 @@ stop:
 # The site engine writes etc/tomcat (server.xml with a <Host> per Java project) before
 # every start.
 engine: tomcat
+keywords: [java, servlet, jakarta]
+docs: https://tomcat.apache.org/
+config_files:
+  - { path: "{{etc}}/conf/server.xml" }

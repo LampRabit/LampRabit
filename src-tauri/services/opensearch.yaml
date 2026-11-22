@@ -62,3 +62,5 @@ connection:
   url: "http://127.0.0.1:{{port.http}}"
   env:
     OPENSEARCH_HOST: "http://127.0.0.1:{{port.http}}"
+keywords: [search, full text]
+docs: https://docs.opensearch.org/

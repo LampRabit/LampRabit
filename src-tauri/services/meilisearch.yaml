@@ -33,3 +33,5 @@ connection:
   env:
     MEILISEARCH_HOST: "http://127.0.0.1:{{port.http}}"
     MEILISEARCH_KEY: ""
+keywords: [search, full text]
+docs: https://www.meilisearch.com/docs

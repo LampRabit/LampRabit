@@ -43,3 +43,5 @@ connection:
     REDIS_HOST: 127.0.0.1
     REDIS_PASSWORD: "null"
     REDIS_PORT: "{{port.redis}}"
+keywords: [cache, queue, session, key value]
+docs: https://redis.io/docs/latest/

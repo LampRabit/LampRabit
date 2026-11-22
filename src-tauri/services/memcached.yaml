@@ -33,3 +33,5 @@ connection:
   env:
     MEMCACHED_HOST: 127.0.0.1
     MEMCACHED_PORT: "{{port.memcached}}"
+keywords: [cache, session]
+docs: https://github.com/memcached/memcached/wiki

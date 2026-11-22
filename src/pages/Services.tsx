@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, FilePlus2, FolderOpen, Hexagon, Search, X, Play, Puzzle, RefreshCw, RotateCw, Share2, Square, Trash2 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import AddServiceDialog from "../components/AddServiceDialog";
+import ConfigFiles from "../components/ConfigFiles";
 import ExtensionsDialog from "../components/ExtensionsDialog";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import clsx from "clsx";
@@ -70,7 +71,7 @@ export default function Services() {
       ...g,
       items: (g.items as ServiceSelection[]).filter((item) => {
         const q = filter.trim().toLowerCase();
-        if (q) return `${item} ${labelFor(catalog.data, item)} ${g.title}`.toLowerCase().includes(q);
+        if (q) return `${item} ${labelFor(catalog.data, item)} ${g.title} ${infoFor(catalog.data, item)?.keywords?.join(" ") ?? ""}`.toLowerCase().includes(q);
         return scope === "all" || ESSENTIALS.includes(item) || (item !== "node" && item !== "tunnels" && (find(item)?.versions.length ?? 0) > 0);
       }),
     }))
@@ -254,6 +255,7 @@ export default function Services() {
           ) : selected === "node" ? <NodeCard /> : <TunnelsPanel />}
           {runtime && <RelatedPanel key={`related-${runtime}`} runtime={runtime} installed={installed.data} onSelect={setSelected} />}
           {runtime && <ServiceSettings key={`settings-${runtime}`} runtime={runtime} />}
+          {runtime && services.data?.some((s) => s.kind === runtime) && <ConfigFiles key={`config-${runtime}`} kind={runtime} docs={infoFor(catalog.data, runtime)?.docs ?? null} />}
           {/* SQLite databases are project files: they can be backed up without the shell installed. */}
           {backup && (backup === "sqlite" || find(backup)?.active) && <BackupsPanel key={`backups-${backup}`} engine={backup} />}
           {selected === "tunnels" && <p className="mt-3 text-xs text-muted">Share a project from Sites or use this panel to share any local port.</p>}

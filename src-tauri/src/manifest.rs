@@ -144,6 +144,16 @@ pub struct Manifest {
     /// What "Open config" opens.
     #[serde(default)]
     pub config: Option<Text>,
+    /// Its config files, listed on its card with Open, Reveal and Copy path (a service
+    /// configured on the command line has none).
+    #[serde(default)]
+    pub config_files: Vec<ConfigFile>,
+    /// Other words people search for it by ("cache", "s3", "queue").
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// Its documentation, linked from its card.
+    #[serde(default)]
+    pub docs: Option<String>,
     /// The site engine it's built around (the web servers, Tomcat); built-in manifests only.
     #[serde(default)]
     pub engine: Option<Engine>,
@@ -938,6 +948,14 @@ pub struct Connection {
     pub env: Ordered<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigFile {
+    pub path: String,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpenLink {
@@ -1272,6 +1290,13 @@ impl Manifest {
             && !port_ok(&Some(open.port.clone())) {
                 return Err("open names a port that isn't in ports".into());
             }
+        for f in &self.config_files {
+            inside(&f.path).map_err(|e| format!("config_files: {e}"))?;
+        }
+        if let Some(docs) = &self.docs
+            && !docs.starts_with("https://") {
+                return Err(format!("docs \"{docs}\" must be an https:// address"));
+            }
 
         // Sources.
         for src in self.source.all() {
@@ -1445,6 +1470,7 @@ impl Manifest {
         let mut out: Vec<&str> = Vec::new();
         out.extend(self.binary.all());
         out.extend(self.config.iter().flat_map(Text::all));
+        out.extend(self.config_files.iter().map(|f| f.path.as_str()));
         out.extend(self.dirs.iter().flat_map(Arg::all));
         for f in &self.files {
             out.extend([&f.path, &f.content, &f.copy, &f.to].into_iter().flatten().map(String::as_str));

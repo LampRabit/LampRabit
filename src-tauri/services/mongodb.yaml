@@ -70,3 +70,5 @@ connection:
   env:
     DB_CONNECTION: mongodb
     MONGODB_URI: "mongodb://127.0.0.1:{{port.mongodb}}"
+keywords: [nosql, document, database]
+docs: https://www.mongodb.com/docs/manual/

@@ -42,3 +42,5 @@ connection:
     AWS_SECRET_ACCESS_KEY: lamprabit-secret
     AWS_DEFAULT_REGION: us-east-1
     AWS_USE_PATH_STYLE_ENDPOINT: "true"
+keywords: [s3, storage, object storage, files]
+docs: https://docs.rustfs.com/
