@@ -23,4 +23,11 @@ binary: "bin/httpd{{exe}}"
 health: { http: { path: / } }
 log: apache-error.log
 config: "{{etc}}/httpd.conf"
-builtin: [ports, prepare, launch]
+# The site engine writes httpd.conf, the virtual hosts and PHP's pools before every start.
+engine: apache
+run:
+  program: "{{home}}/bin/httpd{{exe}}"
+  # Outside Windows httpd forks into the background, and the supervisor would see it exit
+  # while the real server runs on untracked.
+  args: [-d, "{{home}}", -f, "{{etc}}/httpd.conf", { values: [-D, FOREGROUND], on: [unix] }]
+  test: [-d, "{{home}}", -f, "{{etc}}/httpd.conf", -t]

@@ -158,15 +158,6 @@ pub(crate) async fn install_runtime(app: AppHandle, state: State<'_, AppState>, 
                 logs::system(&app, logs::Level::Info, format!("Installing Rust {} with rustup", release.version));
                 runtimes::setup_rust(&layout, &release.version).await
             }
-            Runtime::N8n => {
-                logs::system(&app, logs::Level::Info, "Installing n8n and its packages with npm (several minutes)");
-                runtimes::setup_n8n(&layout, &release.version).await
-            }
-            Runtime::Pgadmin => {
-                logs::system(&app, logs::Level::Info, "Installing pgAdmin's Python packages (a few minutes)");
-                let settings = state.snapshot().await.0;
-                runtimes::setup_pgadmin(&app, &settings, &layout, &release.version).await
-            }
             Runtime::Conda => {
                 logs::system(&app, logs::Level::Info, "Running the Miniforge installer (a few minutes)");
                 runtimes::setup_conda(&layout, &release.version).await
@@ -175,7 +166,21 @@ pub(crate) async fn install_runtime(app: AppHandle, state: State<'_, AppState>, 
                 logs::system(&app, logs::Level::Info, "Adding Predis, phpRedisAdmin's Redis client");
                 runtimes::add_predis(&state.http, &layout, &release.version).await
             }
-            _ => Ok(()),
+            // A service's own install steps (its manifest's `install`).
+            _ => match manifest::get(release.runtime.id()).filter(|m| m.install.is_some()) {
+                Some(m) => {
+                    logs::system(&app, logs::Level::Info, format!("Setting up {} (a few minutes)", m.name));
+                    let settings = state.snapshot().await.0;
+                    match services::need_values(m, &settings, &layout, Some(&release.version)) {
+                        Ok(needs) => crate::setup::install(m, &settings, &layout, &release.version, &needs).await,
+                        Err(e) => {
+                            let _ = std::fs::remove_dir_all(layout.bin(release.runtime.id(), &release.version));
+                            Err(e)
+                        }
+                    }
+                }
+                None => Ok(()),
+            },
         };
         if runtimes::has_setup(release.runtime) {
             let stage = if setup.is_ok() { "done" } else { "error" };
@@ -215,8 +220,8 @@ pub(crate) async fn install_runtime(app: AppHandle, state: State<'_, AppState>, 
 }
 
 pub(crate) fn is_tool(runtime: Runtime) -> bool {
-    matches!(runtime, Runtime::Mailpit | Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin | Runtime::Phppgadmin | Runtime::Pgadmin | Runtime::Neo4j | Runtime::N8n)
-        || matches!(runtime, Runtime::Plugin(i) if manifest::extra(i).ui.is_some())
+    // The PHP tools, and services with a web interface (their manifest's `ui`).
+    matches!(runtime, Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin | Runtime::Phppgadmin) || manifest::get(runtime.id()).is_some_and(|m| m.ui.is_some())
 }
 
 #[tauri::command]

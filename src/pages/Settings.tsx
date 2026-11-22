@@ -39,7 +39,7 @@ import { useMotion } from "../lib/motion";
 import { installAppUpdate, useAppUpdate } from "../lib/updates";
 import { getVersion } from "@tauri-apps/api/app";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
-import { runtimeTiles } from "../components/runtimes";
+import { tileFor } from "../components/runtimes";
 import UninstallDialog from "../components/UninstallDialog";
 import McpSettings from "../components/McpSettings";
 import MoveEnvironmentDialog from "../components/MoveEnvironmentDialog";
@@ -451,8 +451,8 @@ export default function Settings() {
                     key={runtime}
                     label={
                       <span className="flex items-center gap-2.5">
-                        <span className={clsx("flex size-7 items-center justify-center rounded-lg", runtimeTiles[runtime].className)} aria-hidden>
-                          {runtimeTiles[runtime].icon(15)}
+                        <span className={clsx("flex size-7 items-center justify-center rounded-lg", tileFor(runtime).className)} aria-hidden>
+                          {tileFor(runtime).icon(15)}
                         </span>
                         {runtimeLabels[runtime]}
                       </span>

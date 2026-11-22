@@ -50,10 +50,11 @@ pub(crate) async fn restore_backup(app: AppHandle, state: State<'_, AppState>, e
     Ok(())
 }
 
-/// Where an Ollama installed outside LampRabit is, if there is one.
+/// Where an Ollama installed outside LampRabit is, if there is one (its manifest's `external`).
 #[tauri::command]
-pub(crate) fn ollama_elsewhere() -> Option<PathBuf> {
-    runtimes::ollama_elsewhere()
+pub(crate) async fn ollama_elsewhere(state: State<'_, AppState>) -> Result<Option<PathBuf>> {
+    let (settings, layout) = state.snapshot().await;
+    Ok(services::external_program(ServiceKind::Ollama, &settings, &layout))
 }
 
 /// Opens MongoDB Compass connected to LampRabit's MongoDB.

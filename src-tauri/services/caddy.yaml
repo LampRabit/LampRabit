@@ -19,4 +19,16 @@ binary: "caddy{{exe}}"
 health: { http: { path: / } }
 log: caddy-error.log
 config: "{{etc}}/Caddyfile"
-builtin: [ports, prepare, launch]
+# The site engine writes the Caddyfile (virtual hosts, PHP's pools) before every start.
+engine: caddy
+run:
+  program: "{{home}}/caddy{{exe}}"
+  args: [run, --config, "{{etc}}/Caddyfile", --adapter, caddyfile]
+  test: [validate, --config, "{{etc}}/Caddyfile", --adapter, caddyfile]
+  env:
+    # Its state (certificates it would fetch, autosaved config) in tmp/<id>, not the user's home.
+    XDG_CONFIG_HOME: "{{tmp}}"
+    XDG_DATA_HOME: "{{tmp}}"
+# Through the admin API: a clean shutdown on Windows too, where there's no SIGTERM.
+stop:
+  command: ["{{home}}/caddy{{exe}}", stop, --address, "127.0.0.1:{{server.admin}}"]

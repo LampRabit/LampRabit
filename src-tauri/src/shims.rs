@@ -160,7 +160,7 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
     // installed on the computer.
     let ollama = match settings.versions.get("ollama") {
         Some(v) => Some(layout.bin("ollama", v).join(crate::runtimes::Runtime::Ollama.marker())),
-        None => crate::runtimes::ollama_elsewhere(),
+        None => crate::services::external_program(crate::services::ServiceKind::Ollama, settings, layout),
     };
     if let Some(target) = ollama
         && target.exists() {

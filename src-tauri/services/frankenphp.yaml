@@ -18,4 +18,17 @@ binary: "frankenphp{{exe}}"
 health: { http: { path: / } }
 log: frankenphp-error.log
 config: "{{etc}}/Caddyfile"
-builtin: [ports, prepare, launch]
+# Caddy with PHP built in: the same commands under its own name. The site engine writes its
+# Caddyfile and its PHP settings (etc/frankenphp/conf.d).
+engine: frankenphp
+run:
+  program: "{{home}}/frankenphp{{exe}}"
+  args: [run, --config, "{{etc}}/Caddyfile", --adapter, caddyfile]
+  test: [validate, --config, "{{etc}}/Caddyfile", --adapter, caddyfile]
+  env:
+    # Its state (certificates it would fetch, autosaved config) in tmp/<id>, not the user's home.
+    XDG_CONFIG_HOME: "{{tmp}}"
+    XDG_DATA_HOME: "{{tmp}}"
+    PHP_INI_SCAN_DIR: "{{etc}}/conf.d"
+stop:
+  command: ["{{home}}/frankenphp{{exe}}", stop, --address, "127.0.0.1:{{server.admin}}"]

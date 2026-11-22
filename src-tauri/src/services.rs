@@ -14,12 +14,12 @@ use crate::{
     config::Server,
     configs,
     diagnose::{self, Probe, Problem},
-    manifest::{self, Check, Hook, Manifest},
+    manifest::{self, Check, Manifest},
     php::{self, PhpPools, PoolPlan},
     error::{Error, Result},
     logs::{self, Level},
     sites,
-    layout::{Layout, exe},
+    layout::Layout,
     procgroup::{self, ProcGroup},
     runtimes,
 };
@@ -320,14 +320,6 @@ struct LaunchSpec {
     /// `nginx -t`, `caddy validate`.
     test: Option<Vec<String>>,
 }
-
-/// Caddy keeps state (autosave.json, certificates it would otherwise issue) in the user's
-/// config and data folders; LampRabit's stays under tmp/<id>, removed on uninstall.
-fn caddy_env(layout: &Layout, id: &str) -> Vec<(&'static str, String)> {
-    let dir = layout.tmp().join(id).to_string_lossy().into_owned();
-    vec![("XDG_CONFIG_HOME", dir.clone()), ("XDG_DATA_HOME", dir)]
-}
-
 /// The admin API port of Caddy and FrankenPHP, which reload and stop go through.
 fn admin_port(kind: ServiceKind, settings: &Settings) -> Option<u16> {
     match kind {
@@ -337,21 +329,32 @@ fn admin_port(kind: ServiceKind, settings: &Settings) -> Option<u16> {
     }
 }
 
-/// Ollama installed outside LampRabit, used when LampRabit has none of its own. It keeps
-/// its models where it always does, so the user's downloaded models stay available.
-fn system_ollama(settings: &Settings) -> Option<LaunchSpec> {
-    if settings.versions.get("ollama").is_some() {
+/// A copy installed outside LampRabit (its manifest's `external`), when there is one.
+pub fn external_program(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Option<PathBuf> {
+    let m = kind.manifest();
+    let x = m.external.as_ref()?;
+    let ctx = manifest::Ctx::any(m, settings, layout);
+    ctx.args(&x.paths).ok()?.into_iter().map(PathBuf::from).find(|p| p.exists())
+}
+
+/// That copy's command line, used while LampRabit has none of its own.
+fn external_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Option<LaunchSpec> {
+    if kind.version(settings).is_some() {
         return None;
     }
-    let program = runtimes::ollama_elsewhere()?;
+    let m = kind.manifest();
+    let x = m.external.as_ref()?;
+    let program = external_program(kind, settings, layout)?;
+    let ctx = manifest::Ctx::any(m, settings, layout);
+    let env: Vec<(&'static str, String)> = x.env.iter().filter_map(|(k, v)| ctx.pick(v).and_then(|v| ctx.render(v).ok()).map(|v| (k.as_str(), v))).collect();
     Some(LaunchSpec {
         cwd: program.parent().map(Path::to_path_buf).unwrap_or_default(),
+        args: ctx.args(&x.args).ok()?,
         program,
-        args: vec!["serve".into()],
         test: None,
         stop_cmd: None,
         path_prepend: vec![],
-        env: vec![("OLLAMA_HOST", format!("127.0.0.1:{}", settings.ports.service("ollama.api")))],
+        env,
     })
 }
 
@@ -362,13 +365,8 @@ fn answers(port: u16) -> bool {
 
 fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
     let m = kind.manifest();
-    if m.uses(Hook::External)
-        && kind == ServiceKind::Ollama
-        && let Some(spec) = system_ollama(settings) {
-            return Ok(spec);
-        }
-    if m.uses(Hook::Launch) {
-        return builtin_launch_spec(kind, settings, layout);
+    if let Some(spec) = external_spec(kind, settings, layout) {
+        return Ok(spec);
     }
     // A half-finished install (n8n's npm step, an interrupted download) has no marker yet.
     if let Some(binary) = manifest::Ctx::new(m, settings, layout)?.binary()
@@ -380,14 +378,24 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
 
 /// The command line of a service from its manifest's `run` and `stop`, with what it
 /// `needs` found and checked first.
+/// `{{needs.<id>.home}}` and `{{needs.<id>.bin}}` for a service at `version`: what it
+/// runs on, checked to be installed in a version that works.
+pub(crate) fn need_values(m: &Manifest, settings: &Settings, layout: &Layout, version: Option<&str>) -> Result<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    for need in m.needs.iter().filter(|n| n.applies(version)) {
+        let (home, bin) = need_home(m, need, settings, layout)?;
+        out.push((format!("needs.{}.home", need.runtime), home.to_string_lossy().into_owned()));
+        out.push((format!("needs.{}.bin", need.runtime), bin.to_string_lossy().into_owned()));
+    }
+    Ok(out)
+}
+
 fn manifest_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
     let m: &'static Manifest = kind.manifest();
     let mut ctx = manifest::Ctx::new(m, settings, layout)?;
     let version = kind.version(settings);
-    for need in m.needs.iter().filter(|n| n.applies(version.as_deref())) {
-        let (home, bin) = need_home(m, need, settings, layout)?;
-        ctx.set(format!("needs.{}.home", need.runtime), home.to_string_lossy());
-        ctx.set(format!("needs.{}.bin", need.runtime), bin.to_string_lossy());
+    for (k, v) in need_values(m, settings, layout, version.as_deref())? {
+        ctx.set(k, v);
     }
     for need in m.system_needs.iter().filter(|n| manifest::matches(&n.on)) {
         if !std::env::var_os("PATH").is_some_and(|p| crate::apps::on_path(&need.command, &p)) {
@@ -419,6 +427,20 @@ fn manifest_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Res
         None => None,
     };
     let env = run.env.iter().filter_map(|(k, v)| ctx.pick(v).map(|v| ctx.render(v).map(|v| (k.as_str(), v)))).collect::<Result<_>>()?;
+    // Elevated on Windows: LampRabit starts it and stands in for it (`run.elevated`).
+    if let Some(e) = run.elevated.as_ref().filter(|_| cfg!(windows) && procgroup::elevated()) {
+        let mut stop = ctx.args(&e.stop)?.into_iter();
+        let stop_program = stop.next().map(PathBuf::from);
+        return Ok(LaunchSpec {
+            program: std::env::current_exe()?,
+            args: ctx.args(&e.args)?,
+            cwd: ctx.home(),
+            path_prepend: vec![],
+            stop_cmd: stop_program.map(|p| (p, stop.collect())),
+            env: vec![],
+            test: None,
+        });
+    }
     Ok(LaunchSpec {
         program: PathBuf::from(ctx.render(program)?),
         args: ctx.args(&run.args)?,
@@ -429,7 +451,7 @@ fn manifest_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Res
         path_prepend: ctx.args(&run.path)?.into_iter().map(PathBuf::from).collect(),
         stop_cmd,
         env,
-        test: None,
+        test: Some(ctx.args(&run.test)?).filter(|t| !t.is_empty()),
     })
 }
 
@@ -474,175 +496,6 @@ fn need_home(m: &Manifest, need: &manifest::Need, settings: &Settings, layout: &
     Ok((home, bin))
 }
 
-/// The command lines of the services whose manifest says `builtin: [launch]`: the web
-/// servers (their config test and admin API), Tomcat (Java's classpath), PostgreSQL (the
-/// elevated case) and pgAdmin (its package folder is found at start).
-fn builtin_launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
-    let version = kind
-        .version(settings)
-        .ok_or_else(|| Error::msg(format!("{} is not installed", kind.label())))?;
-    let home = layout.bin(kind.runtime(), &version);
-    let path = |p: PathBuf| p.to_string_lossy().into_owned();
-
-    let spec = match kind {
-        ServiceKind::Apache => LaunchSpec {
-            program: home.join("bin").join(exe("httpd")),
-            args: {
-                let mut args = vec!["-d".into(), path(home.clone()), "-f".into(), path(layout.etc("apache").join("httpd.conf"))];
-                // Outside Windows httpd forks into the background, and the supervisor would
-                // see it exit while the real server runs on untracked.
-                if !cfg!(windows) {
-                    args.extend(["-D".into(), "FOREGROUND".into()]);
-                }
-                args
-            },
-            test: Some(vec!["-d".into(), path(home.clone()), "-f".into(), path(layout.etc("apache").join("httpd.conf")), "-t".into()]),
-            cwd: home,
-            path_prepend: vec![],
-            stop_cmd: None,
-            env: vec![],
-        },
-        ServiceKind::Nginx => {
-            let prefix = format!("{}/", path(layout.tmp().join("nginx")));
-            let conf = path(layout.etc("nginx").join("nginx.conf"));
-            LaunchSpec {
-                program: home.join(exe("nginx")),
-                args: {
-                    let mut args = vec!["-p".into(), prefix.clone(), "-c".into(), conf.clone()];
-                    // Stay in the foreground, as on Windows (see Apache above).
-                    if !cfg!(windows) {
-                        args.extend(["-g".into(), "daemon off;".into()]);
-                    }
-                    args
-                },
-                test: Some(vec!["-p".into(), prefix.clone(), "-c".into(), conf.clone(), "-t".into()]),
-                stop_cmd: Some((home.join(exe("nginx")), vec!["-p".into(), prefix, "-c".into(), conf, "-s".into(), "quit".into()])),
-                cwd: home,
-                path_prepend: vec![],
-                env: vec![],
-            }
-        }
-        // FrankenPHP is Caddy with PHP built in: the same commands, under its own name.
-        ServiceKind::Caddy | ServiceKind::Frankenphp => {
-            let id = kind.id();
-            let conf = path(kind.config_path(settings, layout));
-            let config = |cmd: &str| vec![cmd.into(), "--config".into(), conf.clone(), "--adapter".into(), "caddyfile".into()];
-            let admin = format!("127.0.0.1:{}", admin_port(kind, settings).unwrap_or_default());
-            let mut env = caddy_env(layout, id);
-            if kind == ServiceKind::Frankenphp {
-                env.push(("PHP_INI_SCAN_DIR", path(layout.etc("frankenphp").join("conf.d"))));
-            }
-            LaunchSpec {
-                program: home.join(exe(id)),
-                args: config("run"),
-                test: Some(config("validate")),
-                // Through the admin API: a clean shutdown on Windows too, where there's no SIGTERM.
-                stop_cmd: Some((home.join(exe(id)), vec!["stop".into(), "--address".into(), admin])),
-                cwd: home,
-                path_prepend: vec![],
-                env,
-            }
-        }
-        // Tomcat's own scripts (catalina.bat/.sh) only assemble this command; running Java
-        // directly keeps the supervisor on the real process and works the same everywhere.
-        ServiceKind::Tomcat => {
-            let java = configs::tomcat_java(settings, layout, &version)?;
-            let java_home = java.parent().and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default();
-            let base = configs::tomcat_base(layout);
-            let sep = if cfg!(windows) { ";" } else { ":" };
-            let classpath = format!("{}{sep}{}", path(home.join("bin").join("bootstrap.jar")), path(home.join("bin").join("tomcat-juli.jar")));
-            let args = |command: &str| -> Vec<String> {
-                vec![
-                    format!("-Dcatalina.home={}", path(home.clone())),
-                    format!("-Dcatalina.base={}", path(base.clone())),
-                    format!("-Djava.io.tmpdir={}", path(layout.tmp().join("tomcat").join("temp"))),
-                    "-Djava.util.logging.manager=org.apache.juli.ClassLoaderLogManager".into(),
-                    format!("-Djava.util.logging.config.file={}", path(base.join("conf").join("logging.properties"))),
-                    "-cp".into(),
-                    classpath.clone(),
-                    "org.apache.catalina.startup.Bootstrap".into(),
-                    command.into(),
-                ]
-            };
-            LaunchSpec {
-                program: java.clone(),
-                args: args("start"),
-                test: None,
-                // Bootstrap stop sends SHUTDOWN to the shutdown port: Tomcat undeploys its apps cleanly.
-                stop_cmd: Some((java, args("stop"))),
-                cwd: home.clone(),
-                path_prepend: vec![],
-                env: vec![("JAVA_HOME", path(java_home)), ("CATALINA_HOME", path(home.clone())), ("CATALINA_BASE", path(base.clone()))],
-            }
-        }
-        // PostgreSQL won't run with administrator rights, and LampRabit has them when UAC is off
-        // or it was started with "Run as administrator". pg_ctl starts it with those rights
-        // dropped; LampRabit's `--pg-elevated` mode runs pg_ctl, then stands in for the server
-        // (its output, and exiting when the server does) so the supervisor works as usual.
-        ServiceKind::Postgres if cfg!(windows) && procgroup::elevated() => {
-            let data = path(configs::postgres_data(settings, layout));
-            let bin = home.join("bin");
-            LaunchSpec {
-                program: std::env::current_exe()?,
-                args: vec![
-                    "--pg-elevated".into(),
-                    path(bin.join(exe("pg_ctl"))),
-                    data.clone(),
-                    settings.ports.service("postgres.postgres").to_string(),
-                    path(layout.tmp().join("postgres-pgctl.log")),
-                ],
-                test: None,
-                stop_cmd: Some((bin.join(exe("pg_ctl")), vec!["stop".into(), "-D".into(), data, "-m".into(), "fast".into(), "-s".into()])),
-                env: vec![],
-                cwd: home,
-                path_prepend: vec![],
-            }
-        }
-        ServiceKind::Postgres => {
-            let data = path(configs::postgres_data(settings, layout));
-            LaunchSpec {
-                program: home.join("bin").join(exe("postgres")),
-                // Only on 127.0.0.1, and no Unix socket: its default folder (/var/run/postgresql)
-                // usually doesn't exist or isn't writable, and clients get PGHOST from the shims.
-                args: vec![
-                    "-D".into(),
-                    data.clone(),
-                    "-p".into(),
-                    settings.ports.service("postgres.postgres").to_string(),
-                    "-c".into(),
-                    "listen_addresses=127.0.0.1".into(),
-                    "-c".into(),
-                    "unix_socket_directories=".into(),
-                ],
-                test: None,
-                // A fast shutdown: open connections are closed, nothing is lost.
-                stop_cmd: Some((home.join("bin").join(exe("pg_ctl")), vec!["stop".into(), "-D".into(), data, "-m".into(), "fast".into(), "-s".into()])),
-                env: if cfg!(target_os = "linux") { vec![("LD_LIBRARY_PATH", path(home.join("lib")))] } else { vec![] },
-                cwd: home,
-                path_prepend: vec![],
-            }
-        }
-        // pgAdmin's own entry point, on the Python of its virtual environment.
-        ServiceKind::Pgadmin => {
-            let package = runtimes::pgadmin_package(&home)
-                .ok_or_else(|| Error::msg("pgAdmin's install is incomplete. Remove it on the Services page and install it again."))?;
-            LaunchSpec {
-                program: runtimes::venv_python(&home.join("venv")),
-                args: vec![path(package.join("pgAdmin4.py"))],
-                test: None,
-                stop_cmd: None,
-                cwd: package,
-                path_prepend: vec![],
-                // Its output in our log right away rather than when Python's buffer fills.
-                // Desktop mode (no pgAdmin login), as its desktop app starts it.
-                env: vec![("PYTHONUNBUFFERED", "1".into()), ("PGADMIN_SERVER_MODE", "OFF".into())],
-            }
-        }
-        _ => return Err(Error::msg(format!("{} is started from its manifest, not by builtin code", kind.label()))),
-    };
-    Ok(spec)
-}
-
 /// Writes configs and does first-run setup for a service. Web servers return the PHP
 /// pools their sites need.
 async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<Vec<PoolPlan>> {
@@ -675,38 +528,19 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             tauri::async_runtime::spawn(async move { sync_hosts(&app, &settings, &layout, &sites).await });
             Ok(plan)
         }
-        ServiceKind::Mariadb => {
-            configs::write_mariadb(settings, layout)?;
-            configs::init_mariadb_data(settings, layout).await?;
-            Ok(vec![])
-        }
-        ServiceKind::Mysql => {
-            configs::mysql_libraries(&configs::mysql_home(settings, layout)?)?;
-            configs::write_mysql(settings, layout)?;
-            configs::init_mysql_data(settings, layout).await?;
-            Ok(vec![])
-        }
         ServiceKind::Tomcat => {
             configs::write_tomcat(settings, layout, &sites::tomcat_apps(settings, layout))?;
             Ok(vec![])
         }
-        ServiceKind::Postgres => {
-            configs::init_postgres_data(settings, layout).await?;
-            Ok(vec![])
-        }
-        ServiceKind::Pgadmin => {
-            let version = kind.version(settings).unwrap_or_default();
-            let package = runtimes::pgadmin_package(&layout.bin("pgadmin", &version)).ok_or_else(|| Error::msg("pgAdmin's install is incomplete"))?;
-            configs::write_pgadmin(settings, layout, &package)?;
-            let python = runtimes::venv_python(&layout.bin("pgadmin", &version).join("venv"));
-            if let Err(e) = configs::register_pgadmin_server(settings, layout, &python, &package).await {
-                logs::system(app, Level::Warn, format!("Couldn't add LampRabit's PostgreSQL to pgAdmin; add it yourself (127.0.0.1, user root): {e}"));
-            }
-            Ok(vec![])
-        }
         _ => {
-            // Its manifest's `dirs` and `files`.
-            manifest::Ctx::new(kind.manifest(), settings, layout)?.prepare()?;
+            // Its manifest's `dirs` and `files`, library links, then a new data folder's set-up.
+            let m = kind.manifest();
+            manifest::Ctx::new(m, settings, layout)?.prepare()?;
+            crate::setup::libraries(m, settings, layout)?;
+            crate::setup::init(m, settings, layout).await?;
+            if let Err(e) = crate::setup::once(m, settings, layout).await {
+                logs::system(app, Level::Warn, format!("{}'s one-time step failed: {e}", m.name));
+            }
             Ok(vec![])
         }
     }
@@ -962,8 +796,9 @@ impl Supervisor {
                 let installed = launch_spec(kind, settings, layout)
                     .map(|s| s.program.exists())
                     .unwrap_or(false);
-                // The Ollama app usually serves on its own; that counts as running.
-                let external = handle.is_none() && kind == ServiceKind::Ollama && installed && answers(kind.port(settings));
+                // A copy installed outside LampRabit (the Ollama app) usually serves on its
+                // own; that counts as running.
+                let external = handle.is_none() && kind.manifest().external.is_some() && installed && answers(kind.port(settings));
                 ServiceInfo {
                     kind,
                     label: kind.label(),
@@ -1130,23 +965,17 @@ impl Supervisor {
                 return Err(Error::msg(message));
             }
         }
-        let upgrade_from = if kind == ServiceKind::Mariadb {
-            match configs::mariadb_version_guard(settings, layout) {
-                Ok(previous) => previous,
-                Err(e) => {
-                    self.set_problem(
-                        kind,
-                        Problem::new("MariaDB data is from a newer version", e.to_string(), &["Switch back on the Services page."]),
-                    );
-                    return Err(e);
-                }
+        // Its data from a newer release line would be damaged by an older one.
+        let upgrade_from = match crate::setup::guard(kind.manifest(), settings, layout) {
+            Ok(previous) => previous,
+            Err(e) => {
+                self.set_problem(kind, Problem::new(&format!("{} data is from a newer version", kind.label()), e.to_string(), &["Switch back on the Services page."]));
+                return Err(e);
             }
-        } else {
-            None
         };
         let plan = prepare(app, kind, settings, layout).await?;
-        if kind == ServiceKind::Mariadb && upgrade_from.is_none() && !configs::mariadb_marker_exists(layout) {
-            configs::write_mariadb_marker(settings, layout);
+        if upgrade_from.is_none() {
+            crate::setup::mark_new(kind.manifest(), settings, layout)?;
         }
         if kind.web_server().is_some() {
             if let Some(output) = server_config_test(&spec).await {
@@ -1270,28 +1099,28 @@ impl Supervisor {
                 }
             });
         }
-        if kind == ServiceKind::Postgres {
+        // Once it answers: the upgrade after a move to a newer release line, then its
+        // `after_start` commands.
+        if upgrade_from.is_some() || !kind.manifest().after_start.is_empty() {
             let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = configs::postgres_root_role(&settings, &layout).await {
-                    logs::system(&app, Level::Warn, format!("Couldn't add the root role to PostgreSQL: {e}"));
-                }
-            });
-        }
-        if let Some(previous) = upgrade_from {
-            let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
-            let port = settings.ports.service("mariadb.mysql");
-            tauri::async_runtime::spawn(async move {
-                for _ in 0..60 {
-                    if matches!(diagnose::probe_mysql(port).await, Probe::Ok) {
+                let client = reqwest::Client::new();
+                for _ in 0..120 {
+                    if kind.probe_now(&settings, &client).await {
                         break;
                     }
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
-                logs::system(&app, Level::Info, format!("Upgrading MariaDB system tables from {previous}"));
-                match configs::mariadb_upgrade(&settings, &layout).await {
-                    Ok(_) => logs::system(&app, Level::Info, "MariaDB upgrade finished"),
-                    Err(e) => logs::system(&app, Level::Error, e.to_string()),
+                let m = kind.manifest();
+                if let Some(previous) = upgrade_from {
+                    logs::system(&app, Level::Info, format!("Upgrading {}'s data from {previous}", m.name));
+                    match crate::setup::upgrade(m, &settings, &layout).await {
+                        Ok(_) => logs::system(&app, Level::Info, format!("{} upgrade finished", m.name)),
+                        Err(e) => logs::system(&app, Level::Error, e.to_string()),
+                    }
+                }
+                if let Err(e) = crate::setup::after_start(m, &settings, &layout).await {
+                    logs::system(&app, Level::Warn, format!("{}'s start-up step failed: {e}", m.name));
                 }
             });
         }

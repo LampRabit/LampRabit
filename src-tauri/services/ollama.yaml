@@ -38,5 +38,13 @@ connection:
   url: "http://127.0.0.1:{{port.api}}"
   env:
     OLLAMA_HOST: "http://127.0.0.1:{{port.api}}"
-# An Ollama installed outside LampRabit is used when LampRabit has none (services::system_ollama).
-builtin: [external]
+# The Ollama app installed by its own installer is used while LampRabit has none; it keeps
+# its models where it always does, so the user's downloaded models stay available.
+external:
+  paths:
+    - { value: "{{env.LOCALAPPDATA}}/Programs/Ollama/ollama.exe", on: [windows] }
+    - { values: [/Applications/Ollama.app/Contents/Resources/ollama, /usr/local/bin/ollama, /opt/homebrew/bin/ollama], on: [macos] }
+    - { values: [/usr/local/bin/ollama, /usr/bin/ollama], on: [linux] }
+  args: [serve]
+  env:
+    OLLAMA_HOST: "127.0.0.1:{{port.api}}"

@@ -177,7 +177,7 @@ mod tests {
     fn karotx_lists_every_installed_database() {
         let kind = ServiceKind::from_id("karotx").expect("KarotX is bundled");
         let m = kind.manifest();
-        assert!(manifest::is_bundled("karotx") && m.builtin.is_empty());
+        assert!(manifest::is_bundled("karotx") && m.engine.is_none());
         let c = m.connects.as_ref().unwrap();
         let mut settings = Settings::default();
         for (id, v) in [("mariadb", "11.8.5"), ("postgres", "18.1.0"), ("redis", "8.4.0"), ("mailpit", "1.34.0"), ("karotx", "0.1.0")] {

@@ -135,15 +135,18 @@ pub struct Manifest {
     /// A web interface, served at https://<domain>.test through the web server.
     #[serde(default)]
     pub ui: Option<Ui>,
+    /// A page of its own to open from its card (a console, a query page), on one of its ports.
+    #[serde(default)]
+    pub open: Option<OpenLink>,
     /// The service's own log in logs/; `<id>-output.log` (its output) when it has none.
     #[serde(default)]
     pub log: Option<String>,
     /// What "Open config" opens.
     #[serde(default)]
     pub config: Option<Text>,
-    /// Parts handled by LampRabit's own code (built-in manifests only).
+    /// The site engine it's built around (the web servers, Tomcat); built-in manifests only.
     #[serde(default)]
-    pub builtin: Vec<Hook>,
+    pub engine: Option<Engine>,
     /// Values that differ by platform or Linux distribution, as `{var.<name>}` in a
     /// source (MongoDB's build per distribution). The first case that matches wins.
     #[serde(default)]
@@ -151,6 +154,29 @@ pub struct Manifest {
     /// A database client: LampRabit adds a connection to it for each local database.
     #[serde(default)]
     pub connects: Option<crate::clients::Connects>,
+    /// Commands that set up a new data folder (a database's system tables).
+    #[serde(default)]
+    pub init: Option<crate::setup::Init>,
+    /// The release line the data was last used by: an older one is refused, a newer one
+    /// upgraded after start.
+    #[serde(default)]
+    pub guard: Option<crate::setup::Guard>,
+    /// Links to system libraries some Linux distributions renamed.
+    #[serde(default)]
+    pub libraries: Option<crate::setup::Libraries>,
+    /// Commands run once the service answers (PostgreSQL's root role).
+    #[serde(default)]
+    pub after_start: Vec<crate::setup::Command>,
+    #[serde(default)]
+    pub external: Option<External>,
+    /// Steps after the download is unpacked (a Python app's virtual environment, npm's
+    /// packages); the install counts once they've all worked.
+    #[serde(default)]
+    pub install: Option<crate::setup::Install>,
+    /// Commands run once before a start (when their marker is missing and `if` holds):
+    /// registering LampRabit's PostgreSQL in pgAdmin.
+    #[serde(default)]
+    pub once: Vec<crate::setup::Once>,
 }
 
 fn one() -> u32 {
@@ -165,17 +191,24 @@ pub struct Requires {
     pub lamprabit: Option<String>,
 }
 
+/// The part of LampRabit's own code a service is built around: the site engine, which
+/// writes the web servers' virtual hosts, PHP pools, HTTPS certificates and hosts file, and
+/// Tomcat's per-project hosts. Built-in manifests only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Hook {
-    /// Ports come from the web server settings.
-    Ports,
-    /// Config and first-run set-up before start (vhosts, data folders).
-    Prepare,
-    /// The command line is assembled in Rust.
-    Launch,
-    /// Something not started by LampRabit may already be running it (the Ollama app).
-    External,
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    Apache,
+    Nginx,
+    Caddy,
+    Frankenphp,
+    Tomcat,
+}
+
+impl Engine {
+    /// A web server: its ports come from Settings → Web server (which one is primary).
+    pub fn web(self) -> bool {
+        self != Engine::Tomcat
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -187,6 +220,9 @@ pub enum DataMode {
     /// data/<id>-<major>: for software whose files only work with the major version that
     /// wrote them.
     PerMajor,
+    /// data/<id>-<major>.<minor>: for software that can't move its files to another
+    /// release line (MySQL can't downgrade, and upgrades are one-way).
+    PerLine,
     /// The storage folder from Settings (object storage, which can live anywhere).
     Storage,
 }
@@ -554,6 +590,10 @@ pub struct Source {
     /// The download's archive type when no `assets` entry gives it; else from its address.
     #[serde(default)]
     pub archive: Option<Archive>,
+    /// The name a single-file download is saved under for the `install` steps
+    /// (`pgadmin4-{version}-py3-none-any.whl`: pip wants a wheel's real name).
+    #[serde(default)]
+    pub save_as: Option<String>,
     #[serde(default)]
     pub versions: Versions,
     /// The oldest major version offered (`per-major`).
@@ -780,6 +820,38 @@ pub struct Run {
     /// Folders put in front of PATH.
     #[serde(default)]
     pub path: Vec<Arg>,
+    /// Arguments that check the config without starting (`httpd -t`, `caddy validate`); a
+    /// failure stops the start with the program's own message.
+    #[serde(default)]
+    pub test: Vec<Arg>,
+    /// Windows, when LampRabit runs with administrator rights: LampRabit itself starts the
+    /// service with these arguments and stands in for it (PostgreSQL refuses to run
+    /// elevated, but `pg_ctl` drops the rights). Built-in manifests only.
+    #[serde(default)]
+    pub elevated: Option<Elevated>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Elevated {
+    pub args: Vec<Arg>,
+    #[serde(default)]
+    pub stop: Vec<Arg>,
+}
+
+/// A copy installed outside LampRabit by the software's own installer, used while LampRabit
+/// has none of its own (Ollama keeps its models where it always does). One already answering
+/// on the service's port shows as running. Built-in manifests only: it runs a program from
+/// outside the install.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct External {
+    /// Where it may be installed, tried in order (`{{env.<VAR>}}` reads the environment).
+    pub paths: Vec<Arg>,
+    #[serde(default)]
+    pub args: Vec<Arg>,
+    #[serde(default)]
+    pub env: Ordered<Text>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -864,6 +936,20 @@ pub struct Connection {
     pub url: String,
     #[serde(default)]
     pub env: Ordered<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenLink {
+    /// The button's words ("Open console").
+    pub label: String,
+    pub port: String,
+    #[serde(default = "root_path")]
+    pub path: String,
+}
+
+fn root_path() -> String {
+    "/".into()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -981,8 +1067,8 @@ pub fn extra(index: u16) -> &'static Manifest {
 // shortcut: each added manifest is leaked to get a 'static reference; fine for the handful
 // added by hand, revisit if manifests get reloaded often.
 pub fn register(manifest: Manifest) -> Result<u16> {
-    if !manifest.builtin.is_empty() {
-        return Err(Error::msg(format!("{}: only built-in services may use builtin hooks", manifest.id)));
+    if manifest.engine.is_some() {
+        return Err(Error::msg(format!("{}: only built-in services may use an engine", manifest.id)));
     }
     if built_ins().iter().any(|m| m.id == manifest.id) {
         return Err(Error::msg(format!("LampRabit already has a service with the id \"{}\". Pick another id.", manifest.id)));
@@ -1065,14 +1151,21 @@ pub struct Review {
     pub needs: Vec<String>,
 }
 
+/// `version>=10.11`, `version<9`…: an operator and the version it compares with.
+pub fn version_condition(when: &str) -> Option<(&'static str, &str)> {
+    let rest = when.strip_prefix("version")?;
+    [">=", "<=", "==", ">", "<"].into_iter().find_map(|op| rest.strip_prefix(op).map(|v| (op, v.trim())))
+}
+
 /// Placeholders every manifest can use.
-const PLAIN: &[&str] = &["home", "data", "etc", "logs", "tmp", "version", "major", "exe", "script"];
+const PLAIN: &[&str] = &["home", "data", "etc", "logs", "tmp", "version", "major", "exe", "script", "loopback", "log", "pathsep"];
 /// Placeholders that name a folder: a value starting with one is a path.
 const FOLDERS: &[&str] = &["home", "data", "etc", "logs", "tmp"];
 
 impl Manifest {
-    pub fn uses(&self, hook: Hook) -> bool {
-        self.builtin.contains(&hook)
+    /// A web server, whose ports come from Settings → Web server.
+    pub fn web_server(&self) -> bool {
+        self.engine.is_some_and(Engine::web)
     }
 
     fn check(&self, builtin: bool) -> std::result::Result<(), String> {
@@ -1098,11 +1191,8 @@ impl Manifest {
             return Err(format!("category \"{}\" isn't one of {}", self.category, CATEGORIES.join(", ")));
         }
         if !builtin {
-            if !self.builtin.is_empty() {
-                return Err("builtin hooks are only for LampRabit's own services".into());
-            }
-            if self.health.mysql.is_some() || self.health.postgres.is_some() {
-                return Err("health: mysql and postgres checks are only for LampRabit's own services".into());
+            if self.engine.is_some() {
+                return Err("engine is only for LampRabit's own services".into());
             }
         }
 
@@ -1151,7 +1241,7 @@ impl Manifest {
                 return Err(format!("port \"{name}\": {} needs administrator rights on Linux and macOS; pick one above 1023", port.default));
             }
         }
-        if names.is_empty() && !self.uses(Hook::Ports) {
+        if names.is_empty() && !self.web_server() {
             return Err("at least one port is needed".into());
         }
         let port_ok = |p: &Option<String>| p.as_deref().is_none_or(|p| names.contains(&p));
@@ -1178,6 +1268,10 @@ impl Manifest {
                 return Err("ui names a port that isn't in ports".into());
             }
         }
+        if let Some(open) = &self.open
+            && !port_ok(&Some(open.port.clone())) {
+                return Err("open names a port that isn't in ports".into());
+            }
 
         // Sources.
         for src in self.source.all() {
@@ -1200,7 +1294,7 @@ impl Manifest {
         }
 
         // Launch.
-        if self.run.is_none() && !self.uses(Hook::Launch) {
+        if self.run.is_none() {
             return Err("run is needed (program and args)".into());
         }
         if let Some(run) = &self.run {
@@ -1213,6 +1307,24 @@ impl Manifest {
                 if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
                     return Err(format!("run.env: \"{key}\" isn't a variable name"));
                 }
+            }
+        }
+        if !builtin && (self.external.is_some() || self.run.as_ref().is_some_and(|r| r.elevated.is_some())) {
+            return Err("external and run.elevated are only for LampRabit's own services".into());
+        }
+        // Set-up commands run programs from the install too.
+        let commands = self
+            .init
+            .iter()
+            .flat_map(|i| i.run.iter())
+            .chain(&self.after_start)
+            .chain(self.install.iter().flat_map(|i| i.run.iter()))
+            .chain(self.once.iter().flat_map(|o| o.run.iter()))
+            .map(|c| c.program.as_str());
+        let upgrade = self.guard.iter().filter_map(|g| g.upgrade.first().and_then(|a| a.all().first().copied()));
+        for program in commands.chain(upgrade) {
+            if !["{{home}}", "{{needs."].iter().any(|p| program.starts_with(p)) {
+                return Err(format!("set-up command \"{program}\" must be a program inside the install ({{{{home}}}}/…) or a needed runtime's"));
             }
         }
         if let Some(stop) = &self.stop {
@@ -1260,10 +1372,14 @@ impl Manifest {
             seen.push(name);
             def.check_def().map_err(|e| format!("setting \"{name}\": {e}"))?;
         }
-        for when in self.conditions() {
+        let var_conditions = self.vars.iter().flat_map(|(_, cases)| cases.iter().filter_map(|c| c.when.as_deref()));
+        for when in self.conditions().into_iter().chain(var_conditions) {
+            if version_condition(when).is_some() || when.strip_prefix("installed.").is_some_and(|id| !id.is_empty()) {
+                continue;
+            }
             let name = when.trim_start_matches('!').strip_prefix("setting.").unwrap_or_default();
             if self.settings.get(name).is_none() {
-                return Err(format!("if: \"{when}\" must be setting.<name> (or !setting.<name>) for a setting in settings"));
+                return Err(format!("if: \"{when}\" must be setting.<name> (or !setting.<name>) for a setting in settings, or a version comparison like version>=10.11"));
             }
         }
 
@@ -1275,6 +1391,7 @@ impl Manifest {
         let mut allowed: Vec<String> = PLAIN.iter().map(|s| s.to_string()).collect();
         allowed.extend(self.settings.iter().map(|(n, _)| format!("setting.{n}")));
         allowed.extend(names.iter().map(|n| format!("port.{n}")));
+        allowed.extend(self.vars.iter().map(|(n, _)| format!("var.{n}")));
         for n in &self.needs {
             allowed.push(format!("needs.{}.home", n.runtime));
             allowed.push(format!("needs.{}.bin", n.runtime));
@@ -1287,7 +1404,8 @@ impl Manifest {
         }
         for text in self.texts() {
             for name in placeholders(text)? {
-                if !allowed.contains(&name) {
+                let engine_only = name == "server.admin" && self.engine.is_some();
+                if !allowed.contains(&name) && !engine_only && !(builtin && name.starts_with("env.")) && !name.strip_prefix("ports.").is_some_and(|k| k.contains('.')) {
                     return Err(format!("unknown placeholder {{{{{name}}}}}"));
                 }
             }
@@ -1348,6 +1466,40 @@ impl Manifest {
         if let Some(c) = &self.connection {
             out.push(&c.url);
             out.extend(c.env.iter().map(|(_, v)| v.as_str()));
+        }
+        fn command(c: &crate::setup::Command) -> Vec<&str> {
+            std::iter::once(c.program.as_str()).chain(c.args.iter().flat_map(Arg::all)).collect()
+        }
+        if let Some(i) = &self.init {
+            out.extend(i.done.iter().map(String::as_str));
+            out.extend(i.run.iter().flat_map(command));
+        }
+        if let Some(g) = &self.guard {
+            out.extend([g.marker.as_str(), g.when.as_str()]);
+            out.extend(g.upgrade.iter().flat_map(Arg::all));
+        }
+        if let Some(l) = &self.libraries {
+            out.extend([l.check.as_str(), l.dir.as_str()]);
+        }
+        out.extend(self.after_start.iter().flat_map(command));
+        if let Some(run) = &self.run {
+            out.extend(run.test.iter().flat_map(Arg::all));
+        }
+        if let Some(e) = self.run.as_ref().and_then(|r| r.elevated.as_ref()) {
+            out.extend(e.args.iter().chain(&e.stop).flat_map(Arg::all));
+        }
+        if let Some(x) = &self.external {
+            out.extend(x.paths.iter().chain(&x.args).flat_map(Arg::all));
+            out.extend(x.env.iter().flat_map(|(_, t)| t.all()));
+        }
+        out.extend(self.vars.iter().flat_map(|(_, cases)| cases.iter().flat_map(|c| c.value.as_deref().into_iter().chain(c.glob.as_deref()))));
+        if let Some(i) = &self.install {
+            out.extend(i.clean.iter().map(String::as_str));
+            out.extend(i.run.iter().flat_map(command));
+        }
+        for o in &self.once {
+            out.push(&o.marker);
+            out.extend(o.run.iter().flat_map(command));
         }
         out
     }
@@ -1581,6 +1733,11 @@ impl<'a> Ctx<'a> {
         Ok(Self { manifest, settings, layout, version, extra: BTreeMap::new() })
     }
 
+    /// For a version that isn't active yet (its install steps).
+    pub fn at(manifest: &'a Manifest, settings: &'a Settings, layout: &'a Layout, version: &str) -> Self {
+        Self { manifest, settings, layout, version: version.to_string(), extra: BTreeMap::new() }
+    }
+
     /// For what doesn't need an install (paths shown before the first one, connection
     /// details): the active version when there is one.
     pub fn any(manifest: &'a Manifest, settings: &'a Settings, layout: &'a Layout) -> Self {
@@ -1605,6 +1762,10 @@ impl<'a> Ctx<'a> {
         match self.manifest.data {
             DataMode::Shared => self.layout.data(id),
             DataMode::PerMajor => self.layout.data(&format!("{id}-{}", self.major())),
+            DataMode::PerLine => {
+                let n = crate::version::numbers(&self.version);
+                self.layout.data(&format!("{id}-{}.{}", n.first().copied().unwrap_or(0), n.get(1).copied().unwrap_or(0)))
+            }
             DataMode::Storage => self.settings.storage_dir(self.layout, id),
         }
     }
@@ -1636,9 +1797,40 @@ impl<'a> Ctx<'a> {
             "major" => self.major().to_string(),
             "exe" => if cfg!(windows) { ".exe" } else { "" }.to_string(),
             "script" => if cfg!(windows) { ".bat" } else { "" }.to_string(),
+            "pathsep" => if cfg!(windows) { ";" } else { ":" }.to_string(),
+            // The service's own log file (its `log`), which the Logs page reads.
+            "log" => self.layout.logs().join(self.manifest.log_file()).to_string_lossy().into_owned(),
+            // Both loopback addresses where the machine has IPv6: "localhost" often resolves
+            // to ::1 first (Windows does), so a server on 127.0.0.1 alone can refuse clients.
+            "loopback" => if std::net::TcpListener::bind("[::1]:0").is_ok() { "127.0.0.1,::1" } else { "127.0.0.1" }.to_string(),
             _ => {
                 if let Some(setting) = name.strip_prefix("setting.") {
                     return self.manifest.setting(self.settings, setting).ok_or_else(|| Error::msg(format!("{}: no setting named {setting}", self.manifest.id)));
+                }
+                // A web server's admin API (Caddy and FrankenPHP reload and stop through it).
+                if name == "server.admin" {
+                    return Ok(match self.manifest.engine {
+                        Some(Engine::Caddy) => self.settings.ports.caddy_admin,
+                        Some(Engine::Frankenphp) => self.settings.ports.frankenphp_admin,
+                        _ => 0,
+                    }
+                    .to_string());
+                }
+                // Another service's port: `{{ports.postgres.postgres}}`.
+                if let Some(key) = name.strip_prefix("ports.") {
+                    return Ok(self.settings.ports.service(key).to_string());
+                }
+                if let Some(var) = name.strip_prefix("env.") {
+                    return Ok(std::env::var(var).unwrap_or_default());
+                }
+                if let Some(var) = name.strip_prefix("var.") {
+                    let cases = self.manifest.vars.get(var).ok_or_else(|| Error::msg(format!("{}: no var named {var}", self.manifest.id)))?;
+                    let case = crate::sources::pick_case(self.manifest, var, cases, |w| self.holds(Some(w))).map_err(Error::msg)?;
+                    if let Some(pattern) = &case.glob {
+                        let pattern = self.render(pattern)?;
+                        return crate::sources::glob_path(&pattern).map(|p| p.to_string_lossy().into_owned()).ok_or_else(|| Error::msg(format!("{}: nothing matches {pattern}", self.manifest.name)));
+                    }
+                    return self.render(case.value.as_deref().unwrap_or_default());
                 }
                 if let Some(port) = name.strip_prefix("port.") {
                     return self.manifest.port(self.settings, port).map(|p| p.to_string()).ok_or_else(|| Error::msg(format!("{}: no port named {port}", self.manifest.id)));
@@ -1692,6 +1884,20 @@ impl<'a> Ctx<'a> {
     /// Whether an `if:` holds: a toggle that's on, or any other setting that isn't empty.
     pub fn holds(&self, when: Option<&str>) -> bool {
         let Some(when) = when else { return true };
+        if let Some(id) = when.strip_prefix("installed.") {
+            return self.settings.versions.get(id).is_some();
+        }
+        if let Some((op, want)) = version_condition(when) {
+            let want = crate::version::numbers(want);
+            let have: Vec<u64> = crate::version::numbers(&self.version).into_iter().take(want.len()).collect();
+            return match op {
+                ">=" => have >= want,
+                "<=" => have <= want,
+                ">" => have > want,
+                "<" => have < want,
+                _ => have == want,
+            };
+        }
         let (negate, name) = match when.strip_prefix('!') {
             Some(rest) => (true, rest),
             None => (false, when),
@@ -2081,7 +2287,8 @@ connection:
             let e = with(extra).unwrap_err();
             assert!(e.contains(says), "{extra}: {e}");
         };
-        bad("builtin: [launch]\n", "builtin hooks");
+        bad("engine: apache\n", "engine is only");
+        bad("external: { paths: [/usr/bin/sh] }\n", "only for LampRabit");
         bad("files:\n  - { path: ../../evil, content: x }\n", "leaves its folder");
         bad("files:\n  - { path: \"{{home}}/../x\", content: x }\n", "leaves its folder");
         bad("files:\n  - { path: \"C:/Windows/x\", content: x }\n", "relative");

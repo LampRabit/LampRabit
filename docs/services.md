@@ -237,6 +237,84 @@ Each setting shows in the service's **Settings** card on the Services page, with
 
 `{{setting.<name>}}` is the value, anywhere placeholders work (arguments, environment, file contents). `if: setting.<name>` keeps an argument, a value or a file only while the setting is on (a toggle that's on, or any other setting that isn't empty or `0`); `if: "!setting.<name>"` is the opposite. LampRabit checks every value against its type before saving it, keeps only values that differ from the default (so a new default reaches users), and restarts the service when it's running.
 
+### Around the start: `init`, `guard`, `libraries`, `after_start`
+
+For services with a data folder that needs setting up once (a database's system tables), data that only works with some versions, or a step once the service answers:
+
+```yaml
+# Commands that set up a new data folder. `done` lists paths whose presence means it's set up;
+# a folder that isn't empty but isn't set up is left alone (it may be someone's data), and a
+# failed set-up removes the folder so the next start tries again.
+init:
+  done: ["{{data}}/mysql"]
+  creates_folder: false          # true: the program creates the folder itself (mysqld refuses one that exists)
+  run:
+    - { program: "{{home}}/bin/mariadb-install-db{{exe}}", args: ["--datadir={{data}}"], on: [windows] }
+    - { program: "{{home}}/scripts/mariadb-install-db", args: [--no-defaults, "--datadir={{data}}"], on: [unix] }
+
+# The release line that last used the data, kept in `marker` once `when` exists. Starting an
+# older line on newer data is refused (it can damage it); after a move to a newer line,
+# `upgrade` runs once the service answers, and the marker moves on when it succeeds.
+guard:
+  marker: "{{data}}/lamprabit-version"
+  when: "{{data}}/mysql"
+  line: 2                        # parts of the version that make a line: 10.11
+  upgrade: ["{{home}}/bin/mariadb-upgrade{{exe}}", "--defaults-file={{etc}}/my.ini", --user=root]
+
+# Linux: system libraries the program needs that some distributions renamed. A link under
+# the old name goes in `dir` (put it on LD_LIBRARY_PATH in run.env); `hint` says what to
+# install when libraries are still missing ({missing} lists them).
+libraries:
+  check: "{{home}}/bin/mysqld"
+  dir: "{{home}}/lib/compat"
+  renamed: { libaio.so.1: libaio.so.1t64 }
+  hint: "MySQL needs system libraries that aren't installed ({missing}). …"
+
+# Commands once the service answers its health check.
+after_start:
+  - { program: "{{home}}/bin/psql{{exe}}", args: [-h, 127.0.0.1, -p, "{{port.postgres}}", -U, postgres, -c, "…"] }
+```
+
+These commands run programs from the install (or a needed runtime), with the service's `run.env`. `data: per-line` keeps a data folder per `major.minor` (`data/mysql-8.4`), for software that can't move its files between release lines.
+
+### Installing, one-time steps and outside copies: `install`, `once`, `external`
+
+```yaml
+# After the download is unpacked: steps that finish the install (a Python app's virtual
+# environment, npm's packages). `clean` is removed first; the install counts (its `binary`
+# marker is written) once every step worked, and a failure removes it.
+install:
+  clean: ["{{home}}/venv"]
+  run:
+    - { program: "{{needs.python.bin}}/python3", args: [-m, venv, "{{home}}/venv"], on: [unix] }
+    - { program: "{{needs.node.bin}}/npm", args: [install, --prefix, "{{home}}", "n8n@{{version}}"], path: ["{{needs.node.bin}}"], on: [unix] }
+
+# Commands run before a start while their marker is missing and `if` holds; a failure is a
+# warning, not a failed start.
+once:
+  - marker: "{{data}}/lamprabit-servers.json"
+    if: installed.postgres
+    run:
+      - { program: "{{home}}/venv/bin/python3", args: ["{{var.package}}/setup.py", load-servers, "{{tmp}}/servers.json"], cwd: "{{var.package}}" }
+```
+
+A command may have `path` (folders put in front of PATH) and `cwd`. A single-file download with install steps is saved as `source.save_as` (`pgadmin4-{version}-py3-none-any.whl`). `{{ports.<id>.<port>}}` is another service's port, and `if: installed.<id>` holds when that service is installed. A var case can be a `glob` instead of a `value`: the first existing path that matches (`{{home}}/venv/lib/python*/site-packages/pgadmin4`).
+
+LampRabit's own manifests may also use `external` (a copy installed by the software's own installer, used while LampRabit has none; `paths` may read `{{env.<VAR>}}`) and `run.elevated` (Windows with administrator rights: LampRabit starts the service with these arguments and stands in for it, as PostgreSQL needs).
+
+### Values that depend on the version: `vars` with `if`
+
+`vars` (see the sources section) also work while the service runs, as `{{var.<name>}}` in files, arguments and the environment. A case can have an `if:` with a setting (`setting.<name>`) or a version comparison (`version>=10.11`, `version<9`; compared by prefix, so `version<9` holds for 8.4.7):
+
+```yaml
+vars:
+  bind:
+    - { value: "{{loopback}}", if: "version>=10.11" }   # 127.0.0.1,::1 where the machine has IPv6
+    - { value: 127.0.0.1 }
+```
+
+`{{loopback}}` is `127.0.0.1,::1` where the machine has IPv6 loopback, else `127.0.0.1`. `{{log}}` is the service's own log file (its `log`), which the Logs page reads.
+
 ### Starting and stopping: `run`, `stop`
 
 ```yaml
@@ -257,6 +335,8 @@ stop:
 - It must listen on **127.0.0.1** only: LampRabit is for local development, and a service open to the network is a hole in the user's machine.
 - Its output goes to `logs/<id>-output.log`. Set `log` to the name of the service's own log in `logs/` when it keeps one.
 - `stop.command` asks the service to shut down cleanly. Without it, LampRabit ends the process tree after a grace period. `if_installed: mongosh` runs the command only when that other runtime is installed, and `{{runtime.mongosh.home}}` points at it.
+
+`run.test` gives arguments that check the config without starting (`httpd -t`, `caddy validate`); when it fails, the start stops with the program's own message.
 
 ### Is it up: `health`
 
@@ -367,7 +447,7 @@ lamprabit service try service.yaml     # install, start, health check, stop, in 
 
 ## Built-in services
 
-LampRabit's own manifests may use `builtin:` for the parts its code still handles, because they can't be described as files and commands: `ports` (the web servers' ports come from Settings → Web server), `prepare` (vhosts, PHP pools, database data folders), `launch` (Tomcat's classpath, PostgreSQL started through `pg_ctl` when LampRabit has administrator rights) and `external` (an Ollama installed outside LampRabit). They may also use `source: { lamprabit: true }` for LampRabit's own CI builds, `checksum: none` (Typesense publishes no checksums), and the `mysql` and `postgres` health checks. Community manifests can't use any of these.
+LampRabit's own web servers and Tomcat name the **site engine** they're built around with `engine: apache | nginx | caddy | frankenphp | tomcat`. The engine is the one part that stays LampRabit's code: before every start it writes the virtual hosts, PHP's pools, the HTTPS certificates and the hosts file (Tomcat: a `<Host>` per Java project), and a web server's ports come from Settings → Web server (which one is primary). Their downloads, start, config test, stop and settings are in their manifests like any service's; `{{server.admin}}` is Caddy's or FrankenPHP's admin API port. Every other service, built in or not, is described entirely by its manifest. They may also use `source: { lamprabit: true }` for LampRabit's own CI builds, `checksum: none` (Typesense publishes no checksums). Community manifests can't use these.
 
 ## Checks
 

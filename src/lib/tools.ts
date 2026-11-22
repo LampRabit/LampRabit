@@ -10,6 +10,8 @@ export function toolUrl(runtime: Runtime, sites: SitesInfo | undefined, mailUi: 
   if (!tool) return undefined;
   // pgAdmin and Neo4j Browser are their own web servers, without a localhost/<tool>/
   // alias: `direct` is their port.
-  if (runtime === "pgadmin" || runtime === "neo4j" || runtime === "n8n" || runtime === "karotx") return sites?.hostsOk ? tool.url : direct ? `http://localhost:${direct}/` : undefined;
+  // A service that's its own web server (pgAdmin, KarotX…) has no localhost/<tool>/ alias:
+  // its port is given.
+  if (direct !== undefined) return sites?.hostsOk ? tool.url : direct ? `http://localhost:${direct}/` : undefined;
   return sites?.hostsOk ? tool.url : `http://localhost/${runtime}/`;
 }

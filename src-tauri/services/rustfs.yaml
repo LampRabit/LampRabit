@@ -33,6 +33,7 @@ run:
     RUSTFS_SECRET_KEY: lamprabit-secret
 health: { http: { path: /health } }
 config: "{{data}}"
+open: { label: Open console, port: console }
 connection:
   url: "http://127.0.0.1:{{port.api}}"
   env:

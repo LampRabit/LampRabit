@@ -7,11 +7,18 @@ origin: n8n from npm, installed into its own folder and run on NVM's Node.js (24
 homepage: https://n8n.io
 license: Sustainable Use License
 source:
-  # The tarball is only checked here; installing runs npm in its folder (runtimes::setup_n8n).
+  # The tarball is only checked here; installing runs npm in its folder (install below).
   npm: n8n
   checksum: npm
   label: "Node {node}"
 binary: installed.txt
+# npm installs n8n and its packages from the registry, from a clean folder: an interrupted
+# earlier install leaves empty package folders npm would take as installed.
+install:
+  clean: ["{{home}}/installed.txt", "{{home}}/node_modules", "{{home}}/package.json", "{{home}}/package-lock.json"]
+  run:
+    - { program: "{{needs.node.bin}}/npm.cmd", on: [windows], args: [install, --prefix, "{{home}}", "n8n@{{version}}", --omit=dev, --no-audit, --no-fund, --loglevel=error], path: ["{{needs.node.bin}}"] }
+    - { program: "{{needs.node.bin}}/npm", on: [unix], args: [install, --prefix, "{{home}}", "n8n@{{version}}", --omit=dev, --no-audit, --no-fund, --loglevel=error], path: ["{{needs.node.bin}}"] }
 needs:
   - { runtime: node, min: "24", why: "n8n runs on NVM's default Node.js" }
 ports:

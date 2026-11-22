@@ -14,7 +14,7 @@ import {
   type Runtime,
   type ServiceFile,
 } from "../lib/api";
-import { infoFor, labelFor, meet, needsNote, unmet, useCatalog } from "../lib/catalog";
+import { infoFor, labelFor, meet, needsNote, serviceLink, unmet, useCatalog } from "../lib/catalog";
 import RequirementsDialog from "../components/RequirementsDialog";
 import { installKey, readPref, useAppStore, writePref, notifyError } from "../lib/store";
 import { toolUrl } from "../lib/tools";
@@ -91,15 +91,12 @@ export default function Services() {
   } else if (runtime === "mongodb" && find("mongodb")?.active && !find("mongosh")?.active) {
     note = "Install mongosh too: the MongoDB shell, which also lets LampRabit stop MongoDB cleanly.";
   }
-  if (runtime === "mailpit" || runtime === "phpmyadmin" || runtime === "adminer" || runtime === "phpredisadmin" || runtime === "phppgadmin" || runtime === "pgadmin" || runtime === "neo4j") {
-    openUrl = toolUrl(runtime, sites.data, settings.data?.ports.services["mailpit.ui"], runtime === "neo4j" ? settings.data?.ports.services["neo4j.http"] : settings.data?.ports.services["pgadmin.http"]);
+  // The PHP tools are folders the web server serves; services link to their own page.
+  if (runtime === "phpmyadmin" || runtime === "adminer" || runtime === "phpredisadmin" || runtime === "phppgadmin") {
+    openUrl = toolUrl(runtime, sites.data, settings.data?.ports.services["mailpit.ui"]);
+  } else if (runtime) {
+    openUrl = serviceLink(infoFor(catalog.data, runtime), sites.data, settings.data)?.url;
   }
-  if (runtime === "clickhouse") openUrl = settings.data ? `http://localhost:${settings.data.ports.services["clickhouse.http"]}/play` : undefined;
-  if (runtime === "meilisearch") openUrl = settings.data ? `http://localhost:${settings.data.ports.services["meilisearch.http"]}/` : undefined;
-  if (runtime === "rustfs") openUrl = settings.data ? `http://localhost:${settings.data.ports.services["rustfs.console"]}/` : undefined;
-  if (runtime === "minio") openUrl = settings.data ? `http://localhost:${settings.data.ports.services["minio.console"]}/` : undefined;
-  if (runtime === "rabbitmq") openUrl = settings.data ? `http://localhost:${settings.data.ports.services["rabbitmq.management"]}/` : undefined;
-  if (runtime === "n8n") openUrl = toolUrl("n8n", sites.data, settings.data?.ports.services["mailpit.ui"], settings.data?.ports.services["n8n.http"]);
 
 
   const status = (item: ServiceSelection) => {

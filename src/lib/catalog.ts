@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, runtimeLabels, type Requirement, type Runtime, type RuntimeInfo } from "./api";
+import { api, runtimeLabels, type Requirement, type Runtime, type RuntimeInfo, type Settings, type SitesInfo } from "./api";
 
 /** The backend's runtime list: groups, labels, sources, platform gaps and companions. */
 export function useCatalog() {
@@ -14,6 +14,26 @@ export function infoFor(catalog: { runtimes: RuntimeInfo[] } | undefined, id: st
 export function labelFor(catalog: { runtimes: RuntimeInfo[] } | undefined, id: string): string {
   if (id === "node") return "Node.js";
   return infoFor(catalog, id)?.label ?? runtimeLabels[id as Runtime] ?? id;
+}
+
+/**
+ * A service's own page, from its manifest: its web interface at its .test domain (on its
+ * port while the hosts file isn't set up), else the page its `open` names.
+ */
+export function serviceLink(info: RuntimeInfo | undefined, sites: SitesInfo | undefined, settings: Settings | undefined): { label: string; url: string } | undefined {
+  if (!info) return undefined;
+  const port = (name: string) => settings?.ports.services[`${info.id}.${name}`];
+  if (info.uiPort) {
+    const tool = sites?.tools.find((t) => t.tool === info.id);
+    const direct = port(info.uiPort);
+    const url = sites?.hostsOk && tool ? tool.url : direct ? `http://localhost:${direct}/` : undefined;
+    return url ? { label: `Open ${info.label}`, url } : undefined;
+  }
+  if (info.open) {
+    const direct = port(info.open.port);
+    return direct ? { label: info.open.label, url: `http://localhost:${direct}${info.open.path}` } : undefined;
+  }
+  return undefined;
 }
 
 /** Needs that something has to happen for (the rest are met already). */

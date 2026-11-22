@@ -2,55 +2,14 @@
 
 use crate::*;
 
-/// Services that load the given runtime and must restart when it changes.
+/// Services that load the given runtime and must restart when it changes: a service runs
+/// its own runtime, and one that `needs` another (Tomcat and Neo4j run on Java) restarts
+/// with it. PHP and the PHP tools are served by the web servers.
 pub(crate) fn dependents(runtime: Runtime) -> Vec<ServiceKind> {
-    let kinds: &[ServiceKind] = match runtime {
-        Runtime::Apache => &[ServiceKind::Apache],
-        Runtime::Nginx => &[ServiceKind::Nginx],
-        Runtime::Caddy => &[ServiceKind::Caddy],
-        Runtime::Frankenphp => &[ServiceKind::Frankenphp],
-        Runtime::Tomcat => &[ServiceKind::Tomcat],
-        Runtime::Postgres => &[ServiceKind::Postgres],
-        Runtime::Pgadmin => &[ServiceKind::Pgadmin],
-        Runtime::Mongodb => &[ServiceKind::Mongodb],
-        // The shell runs from the terminal; MongoDB uses it only to shut down.
-        Runtime::Mongosh => &[],
-        // Command-line tools and a desktop app: nothing runs them in the background.
-        Runtime::Mongotools | Runtime::Compass | Runtime::Sqlite => &[],
-        Runtime::Clickhouse => &[ServiceKind::Clickhouse],
-        Runtime::Neo4j => &[ServiceKind::Neo4j],
-        Runtime::Meilisearch => &[ServiceKind::Meilisearch],
-        Runtime::Typesense => &[ServiceKind::Typesense],
-        Runtime::Rustfs => &[ServiceKind::Rustfs],
-        Runtime::Ollama => &[ServiceKind::Ollama],
-        Runtime::Minio => &[ServiceKind::Minio],
-        Runtime::Elasticsearch => &[ServiceKind::Elasticsearch],
-        Runtime::Opensearch => &[ServiceKind::Opensearch],
-        Runtime::N8n => &[ServiceKind::N8n],
-        Runtime::Rabbitmq | Runtime::Erlang => &[ServiceKind::Rabbitmq],
-        // Languages run from the terminal and projects' own processes.
-        Runtime::Go | Runtime::Rust | Runtime::Maven | Runtime::Gradle | Runtime::Git => &[],
-        Runtime::Bun | Runtime::Deno | Runtime::Uv | Runtime::Conda => &[],
-        // Projects run Python themselves; pgAdmin keeps the Python it was installed with.
-        Runtime::Python => &[],
-        Runtime::Phppgadmin => &ServiceKind::WEB,
-        // PHP pools are owned by the web servers; restarting them restarts PHP.
-        Runtime::Php => &ServiceKind::WEB,
-        Runtime::Mariadb => &[ServiceKind::Mariadb],
-        Runtime::Mysql => &[ServiceKind::Mysql],
-        Runtime::Mailpit => &[ServiceKind::Mailpit],
-        // Served by the primary web server through their own virtual hosts.
-        Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin => &ServiceKind::WEB,
-        // Tunnels start on demand; Composer runs from the terminal.
-        Runtime::Ngrok | Runtime::Cloudflared | Runtime::Composer => &[],
-        // Tomcat runs on the active Java.
-        Runtime::Java => &[ServiceKind::Tomcat, ServiceKind::Neo4j],
-        Runtime::Redis => &[ServiceKind::Redis],
-        Runtime::Memcached => &[ServiceKind::Memcached],
-        // A manifest-only service runs its own runtime, under the same index.
-        Runtime::Plugin(i) => return vec![ServiceKind::Plugin(i)],
-    };
-    kinds.to_vec()
+    if matches!(runtime, Runtime::Php | Runtime::Phppgadmin | Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin) {
+        return ServiceKind::WEB.to_vec();
+    }
+    ServiceKind::all().into_iter().filter(|k| k.id() == runtime.id() || k.manifest().needs.iter().any(|n| n.runtime == runtime.id())).collect()
 }
 
 /// Restarts whichever web servers are running, so they (and their PHP pools) pick up

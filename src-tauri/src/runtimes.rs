@@ -252,53 +252,29 @@ impl Runtime {
 
     /// File that must exist inside an installed version's directory.
     pub fn marker(self) -> PathBuf {
+        // A service's comes from its manifest's `binary`.
+        if let Some(m) = crate::manifest::get(self.id()) {
+            return m.marker();
+        }
         match self {
-            Self::Apache => Path::new("bin").join(exe("httpd")),
-            Self::Nginx => PathBuf::from(exe("nginx")),
             Self::Php if cfg!(windows) => PathBuf::from(exe("php")),
             Self::Php => PathBuf::from("php-fpm"),
-            Self::Mariadb => Path::new("bin").join(exe("mariadbd")),
-            Self::Mailpit => PathBuf::from(exe("mailpit")),
             Self::Adminer => PathBuf::from("adminer.php"),
             Self::Phpmyadmin => PathBuf::from("index.php"),
             Self::Ngrok => PathBuf::from(exe("ngrok")),
             Self::Cloudflared => PathBuf::from(exe("cloudflared")),
-            Self::Redis => PathBuf::from(exe("redis-server")),
             Self::Composer => PathBuf::from("composer.phar"),
-            Self::Mysql => Path::new("bin").join(exe("mysqld")),
             Self::Phpredisadmin => PathBuf::from("index.php"),
-            Self::Memcached => PathBuf::from(exe("memcached")),
-            Self::Caddy => PathBuf::from(exe("caddy")),
             Self::Java => Path::new("bin").join(exe("java")),
-            Self::Tomcat => Path::new("bin").join("bootstrap.jar"),
-            Self::Frankenphp => PathBuf::from(exe("frankenphp")),
-            Self::Postgres => Path::new("bin").join(exe("postgres")),
             Self::Python if cfg!(windows) => PathBuf::from("python.exe"),
             Self::Python => Path::new("bin").join("python3"),
             Self::Phppgadmin => PathBuf::from("index.php"),
-            // Written last by `setup_pgadmin`, so a half-finished install doesn't count.
-            Self::Pgadmin => PathBuf::from("installed.txt"),
-            Self::Mongodb => Path::new("bin").join(exe("mongod")),
             Self::Mongosh => Path::new("bin").join(exe("mongosh")),
             Self::Mongotools => Path::new("bin").join(exe("mongodump")),
             // Compass is an Electron app: its executable's name varies, its app bundle doesn't.
             Self::Compass if cfg!(target_os = "macos") => Path::new("MongoDB Compass.app").join("Contents").join("Resources").join("app.asar"),
             Self::Compass => Path::new("resources").join("app.asar"),
             Self::Sqlite => PathBuf::from(exe("sqlite3")),
-            Self::Clickhouse => Path::new("usr").join("bin").join("clickhouse"),
-            Self::Neo4j => Path::new("bin").join(if cfg!(windows) { "neo4j.bat" } else { "neo4j" }),
-            Self::Meilisearch => PathBuf::from(exe("meilisearch")),
-            Self::Typesense => PathBuf::from("typesense-server"),
-            Self::Rustfs => PathBuf::from(exe("rustfs")),
-            // Linux archives put it in bin/ (next to lib/ollama); Windows and macOS at the top.
-            Self::Ollama if cfg!(target_os = "linux") => Path::new("bin").join("ollama"),
-            Self::Ollama => PathBuf::from(exe("ollama")),
-            Self::Minio => PathBuf::from(exe("minio")),
-            Self::Elasticsearch => Path::new("bin").join(if cfg!(windows) { "elasticsearch.bat" } else { "elasticsearch" }),
-            Self::Opensearch => Path::new("bin").join(if cfg!(windows) { "opensearch.bat" } else { "opensearch" }),
-            // Written last by `setup_n8n`, so a half-finished install doesn't count.
-            Self::N8n => PathBuf::from("installed.txt"),
-            Self::Rabbitmq => Path::new("sbin").join(if cfg!(windows) { "rabbitmq-server.bat" } else { "rabbitmq-server" }),
             Self::Erlang => Path::new("bin").join(exe("erl")),
             Self::Go => Path::new("bin").join(exe("go")),
             // Written last by `setup_rust`, so a half-finished install doesn't count.
@@ -311,7 +287,8 @@ impl Runtime {
             Self::Uv => PathBuf::from(exe("uv")),
             // Written last by `setup_conda`, so a half-finished install doesn't count.
             Self::Conda => PathBuf::from("installed.txt"),
-            Self::Plugin(i) => crate::manifest::extra(i).marker(),
+            // Services: from their manifest, above.
+            _ => PathBuf::new(),
         }
     }
 }
@@ -713,65 +690,9 @@ async fn phppgadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     }])
 }
 
-/// The Python a pgAdmin install runs on: the newest installed 3.10–3.14 (its
-/// dependencies ship binary wheels for those), preferring the active version.
-pub fn pgadmin_python(settings: &crate::config::Settings, layout: &Layout) -> Result<PathBuf> {
-    let usable = |v: &str| version_key(v).get(..2).is_some_and(|mm| mm[0] == 3 && (10..=14).contains(&mm[1]));
-    let mut versions = installed(layout, Runtime::Python);
-    versions.retain(|v| usable(v));
-    versions.sort_by_key(|v| std::cmp::Reverse(version_key(v)));
-    let version = settings.versions.get("python").filter(|v| usable(v)).cloned().or_else(|| versions.into_iter().next())
-        .ok_or_else(|| Error::msg("pgAdmin runs on Python: install Python 3.13 (Services → Languages → Python) first."))?;
-    Ok(layout.bin("python", &version).join(Runtime::Python.marker()))
-}
-
-/// A virtual environment's Python.
-pub fn venv_python(venv: &Path) -> PathBuf {
-    if cfg!(windows) { venv.join("Scripts").join("python.exe") } else { venv.join("bin").join("python3") }
-}
-
-/// pgAdmin's package folder inside its virtual environment (Lib/site-packages/pgadmin4 on
-/// Windows, lib/pythonX.Y/site-packages/pgadmin4 elsewhere).
-pub fn pgadmin_package(home: &Path) -> Option<PathBuf> {
-    let venv = home.join("venv");
-    if cfg!(windows) {
-        return Some(venv.join("Lib").join("site-packages").join("pgadmin4")).filter(|p| p.is_dir());
-    }
-    std::fs::read_dir(venv.join("lib")).ok()?.flatten().map(|e| e.path().join("site-packages").join("pgadmin4")).find(|p| p.is_dir())
-}
-
 /// Runs a setup command, failing with the last line it printed to stderr.
 async fn run_quiet(program: &Path, args: &[String], cwd: &Path) -> Result<()> {
     run_quiet_env(program, args, cwd, &[]).await
-}
-
-/// Installs a downloaded pgAdmin wheel into its own virtual environment, with its
-/// dependencies from PyPI. Leaves nothing behind when it fails.
-pub async fn setup_pgadmin(app: &AppHandle, settings: &crate::config::Settings, layout: &Layout, version: &str) -> Result<()> {
-    let home = layout.bin("pgadmin", version);
-    let result = async {
-        let python = pgadmin_python(settings, layout)?;
-        let _ = app.emit("install-progress", InstallProgress { runtime: Runtime::Pgadmin, version: version.into(), stage: "extracting", downloaded: 0, total: None });
-        run_quiet(&python, &["-m".into(), "venv".into(), home.join("venv").display().to_string()], &home).await?;
-        // pip only accepts a wheel under its real file name.
-        let wheel = home.join(format!("pgadmin4-{version}-py3-none-any.whl"));
-        std::fs::rename(home.join("installed.txt"), &wheel)?;
-        let pip = |extra: &[&str]| {
-            let mut args: Vec<String> = vec!["-m".into(), "pip".into(), "install".into(), "--disable-pip-version-check".into(), "--no-input".into()];
-            args.extend(extra.iter().map(|s| s.to_string()));
-            args
-        };
-        run_quiet(&venv_python(&home.join("venv")), &pip(&[&wheel.display().to_string()]), &home).await?;
-        std::fs::remove_file(&wheel)?;
-        std::fs::write(home.join("installed.txt"), format!("pgAdmin {version}\n"))?;
-        Ok::<_, Error>(())
-    }
-    .await;
-    if let Err(e) = &result {
-        let _ = std::fs::remove_dir_all(&home);
-        return Err(Error::msg(format!("Installing pgAdmin's Python packages failed: {e}")));
-    }
-    result
 }
 
 async fn mongosh_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
@@ -1178,47 +1099,6 @@ pub fn n8n_node(minimum: u32) -> Result<PathBuf> {
     Ok(bin)
 }
 
-/// Installs a downloaded n8n into its own folder with npm, on NVM's Node. Leaves nothing
-/// behind when it fails.
-pub async fn setup_n8n(layout: &Layout, version: &str) -> Result<()> {
-    let home = layout.bin("n8n", version);
-    let result = async {
-        let bin = n8n_node(24)?;
-        // The package tarball was saved as the marker; npm installs from the registry.
-        let _ = std::fs::remove_file(home.join("installed.txt"));
-        // From a clean folder: an interrupted earlier install leaves empty package folders
-        // that npm would take as installed (n8n then fails on a missing module).
-        let _ = std::fs::remove_dir_all(home.join("node_modules"));
-        for file in ["package.json", "package-lock.json"] {
-            let _ = std::fs::remove_file(home.join(file));
-        }
-        let npm = bin.join(if cfg!(windows) { "npm.cmd" } else { "npm" });
-        let path = crate::apps::node_path(&bin, layout);
-        let mut cmd = tokio::process::Command::new(&npm);
-        cmd.args(["install", "--prefix"])
-            .arg(&home)
-            .arg(format!("n8n@{version}"))
-            .args(["--omit=dev", "--no-audit", "--no-fund", "--loglevel=error"])
-            .env("PATH", path)
-            .current_dir(&home)
-            .stdin(std::process::Stdio::null());
-        crate::procgroup::prepare(&mut cmd);
-        let out = cmd.output().await?;
-        if !out.status.success() {
-            let last = crate::error::last_line(&out.stderr).unwrap_or_default();
-            return Err(Error::msg(format!("npm install failed: {last}")));
-        }
-        std::fs::write(home.join("installed.txt"), format!("n8n {version}\n"))?;
-        Ok::<_, Error>(())
-    }
-    .await;
-    if let Err(e) = result {
-        let _ = std::fs::remove_dir_all(&home);
-        return Err(Error::msg(format!("Installing n8n failed: {e}")));
-    }
-    Ok(())
-}
-
 /// Bun from its GitHub releases ("bun-v1.3.2" tags). Windows on Arm runs the x64 build.
 async fn bun_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     let name = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
@@ -1322,19 +1202,6 @@ pub async fn setup_conda(layout: &Layout, version: &str) -> Result<()> {
         return Err(Error::msg(format!("Installing Miniforge failed: {e}")));
     }
     Ok(())
-}
-
-/// The ollama program of an Ollama installed outside LampRabit (its own installer or app),
-/// which many people already have. LampRabit uses it instead of downloading another.
-pub fn ollama_elsewhere() -> Option<PathBuf> {
-    let candidates: Vec<PathBuf> = if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").map(|d| vec![PathBuf::from(d).join("Programs").join("Ollama").join("ollama.exe")]).unwrap_or_default()
-    } else if cfg!(target_os = "macos") {
-        vec![PathBuf::from("/Applications/Ollama.app/Contents/Resources/ollama"), PathBuf::from("/usr/local/bin/ollama"), PathBuf::from("/opt/homebrew/bin/ollama")]
-    } else {
-        vec![PathBuf::from("/usr/local/bin/ollama"), PathBuf::from("/usr/bin/ollama")]
-    };
-    candidates.into_iter().find(|p| p.exists())
 }
 
 /// The executable of an installed Compass: the app bundle on macOS, otherwise the file
@@ -1605,7 +1472,7 @@ pub struct InstallProgress {
 /// Runtimes whose install continues after the download (npm, pip, rustup, Predis): the
 /// installer reports "setup" rather than "done", and the app reports done when it ends.
 pub fn has_setup(runtime: Runtime) -> bool {
-    matches!(runtime, Runtime::Rust | Runtime::N8n | Runtime::Pgadmin | Runtime::Phpredisadmin | Runtime::Conda)
+    matches!(runtime, Runtime::Rust | Runtime::Phpredisadmin | Runtime::Conda) || crate::manifest::get(runtime.id()).is_some_and(|m| m.install.is_some())
 }
 
 pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout, release: &Release) -> Result<()> {
@@ -1675,8 +1542,10 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
         }
 
         progress("extracting", downloaded, total);
+        // A single file with install steps keeps the name they expect (`source.save_as`).
+        let save_as = crate::manifest::get(runtime.id()).and_then(|m| m.source.here()).and_then(|s| s.save_as.as_ref()).map(|n| PathBuf::from(n.replace("{version}", &release.version)));
         let (archive_path, extract_dir, dest, marker, kind) =
-            (archive_path.clone(), extract_dir.clone(), dest.clone(), runtime.marker(), release.archive);
+            (archive_path.clone(), extract_dir.clone(), dest.clone(), save_as.unwrap_or_else(|| runtime.marker()), release.archive);
         tokio::task::spawn_blocking(move || extract_into(&archive_path, kind, &extract_dir, &dest, &marker))
             .await
             .map_err(|e| Error::msg(e.to_string()))??;

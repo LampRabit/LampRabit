@@ -130,6 +130,10 @@ export interface RuntimeInfo {
   ports: PortField[];
   /** Added by the user from a file, so it can be removed. */
   local: boolean;
+  /** Its web interface's port name (served at its .test domain). */
+  uiPort: string | null;
+  /** A page of its own to open from its card: a console, a query page. */
+  open: { label: string; port: string; path: string } | null;
 }
 
 /** What a service file does, for the user to approve before it's added (manifest.rs `Review`). */

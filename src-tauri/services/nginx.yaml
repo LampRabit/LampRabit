@@ -25,4 +25,13 @@ binary: "nginx{{exe}}"
 health: { http: { path: / } }
 log: nginx-error.log
 config: "{{etc}}/nginx.conf"
-builtin: [ports, prepare, launch]
+# The site engine writes nginx.conf, the virtual hosts and PHP's pools before every start;
+# its writable prefix (logs/, temp/) is tmp/nginx.
+engine: nginx
+run:
+  program: "{{home}}/nginx{{exe}}"
+  # Stay in the foreground, as on Windows (see Apache).
+  args: [-p, "{{tmp|slash}}/", -c, "{{etc}}/nginx.conf", { values: [-g, "daemon off;"], on: [unix] }]
+  test: [-p, "{{tmp|slash}}/", -c, "{{etc}}/nginx.conf", -t]
+stop:
+  command: ["{{home}}/nginx{{exe}}", -p, "{{tmp|slash}}/", -c, "{{etc}}/nginx.conf", -s, quit]

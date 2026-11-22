@@ -36,6 +36,7 @@ mod relocate;
 mod runtimes;
 mod services;
 mod shims;
+mod setup;
 mod sites;
 mod sources;
 mod smoke;

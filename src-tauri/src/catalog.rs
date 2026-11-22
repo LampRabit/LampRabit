@@ -42,6 +42,9 @@ pub struct RuntimeInfo {
     pub ports: Vec<PortField>,
     /// Added by the user from a file (`<root>/services/<id>/`), so it can be removed.
     pub local: bool,
+    /// Its web interface's port name (served at its .test domain), and a page of its own.
+    pub ui_port: Option<String>,
+    pub open: Option<manifest::OpenLink>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -66,40 +69,47 @@ pub struct Catalog {
 fn groups() -> Vec<Group> {
     let g = |id, title, blurb, items: &[&'static str]| Group { id, title, blurb, items: items.to_vec() };
     vec![
-        g("web", "Web and app servers", "Apache, Nginx, Caddy or FrankenPHP serve your sites; Tomcat runs Java web apps behind them. Several can run side by side.", &["apache", "nginx", "caddy", "frankenphp", "tomcat"]),
+        g("web", "Web and app servers", "Apache, Nginx, Caddy or FrankenPHP serve your sites; Tomcat runs Java web apps behind them. Several can run side by side.", &[]),
         g("languages", "Languages", "Several versions side by side; projects pick theirs.", &["php", "java", "python", "go", "rust", "node"]),
         g("packages", "Package managers", "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH. npm comes with Node.js (pnpm and Yarn through corepack), pip with Python, Cargo with Rust; each project's Dependencies tab uses them.", &["composer", "bun", "deno", "uv", "conda", "maven", "gradle"]),
-        g("databases", "Databases", "They can all run side by side, each on its own port.", &["mariadb", "mysql", "postgres", "mongodb", "clickhouse", "neo4j", "sqlite"]),
-        g("search", "Search", "Full-text search engines for your apps.", &["meilisearch", "typesense", "elasticsearch", "opensearch"]),
-        g("storage", "Storage", "S3-compatible object storage. Their storage folder can be anywhere, even outside the LampRabit folder.", &["rustfs", "minio"]),
-        g("queues", "Queues", "Message brokers for background jobs and events.", &["rabbitmq", "erlang"]),
-        g("ai", "AI and automation", "Run language models locally and automate workflows.", &["ollama", "n8n"]),
-        g("cache", "Cache", "In-memory stores for caches, sessions and queues.", &["redis", "memcached"]),
-        g("tools", "Developer tools", "Mail catching and web interfaces for your databases and caches.", &["git", "mailpit", "phpmyadmin", "adminer", "phppgadmin", "pgadmin", "phpredisadmin", "compass", "mongosh", "mongotools"]),
+        g("databases", "Databases", "They can all run side by side, each on its own port.", &["sqlite"]),
+        g("search", "Search", "Full-text search engines for your apps.", &[]),
+        g("storage", "Storage", "S3-compatible object storage. Their storage folder can be anywhere, even outside the LampRabit folder.", &[]),
+        g("queues", "Queues", "Message brokers for background jobs and events.", &["erlang"]),
+        g("ai", "AI and automation", "Run language models locally and automate workflows.", &[]),
+        g("cache", "Cache", "In-memory stores for caches, sessions and queues.", &[]),
+        g("tools", "Developer tools", "Mail catching and web interfaces for your databases and caches.", &["git", "phpmyadmin", "adminer", "phppgadmin", "phpredisadmin", "compass", "mongosh", "mongotools"]),
         g("sharing", "Sharing", "Put a project or local port on a public URL.", &["cloudflared", "ngrok", "tunnels"]),
     ]
 }
 
 pub fn catalog() -> Catalog {
     let mut groups = groups();
-    // Services that aren't built in go to the group their manifest names; LampRabit's own
-    // bundled ones (KarotX) first, others after the built-in ones.
-    for m in manifest::extras() {
-        if let Some(g) = groups.iter_mut().find(|g| g.id == m.category) {
-            if manifest::is_bundled(&m.id) {
-                g.items.insert(0, &m.id);
-            } else {
-                g.items.push(&m.id);
-            }
+    // One look at the added services, so one added meanwhile can't be listed but ungrouped.
+    let extras = manifest::extras();
+    let all: Vec<Runtime> = Runtime::BUILT_IN.iter().copied().chain(extras.iter().filter_map(|m| Runtime::from_id(&m.id))).collect();
+    // Services go to the group their manifest names, before its other runtimes: LampRabit's
+    // own bundled ones (KarotX) first, then the built-in ones in manifest order, then any
+    // added from a file.
+    let services = extras.iter().filter(|m| manifest::is_bundled(&m.id)).copied().chain(manifest::built_ins()).chain(extras.iter().filter(|m| !manifest::is_bundled(&m.id)).copied());
+    let mut placed: Vec<(usize, &'static str)> = Vec::new();
+    for m in services {
+        if let Some(g) = groups.iter().position(|g| g.id == m.category) {
+            placed.push((g, &m.id));
         }
+    }
+    for (g, group) in groups.iter_mut().enumerate() {
+        let mut items: Vec<&'static str> = placed.iter().filter(|(i, _)| *i == g).map(|(_, id)| *id).collect();
+        items.append(&mut group.items);
+        group.items = items;
     }
     // A runtime nobody put in a group still shows, under Other.
     let grouped: Vec<&str> = groups.iter().flat_map(|g| g.items.clone()).collect();
-    let other: Vec<&'static str> = Runtime::all().iter().map(|r| r.id()).filter(|id| !grouped.contains(id)).collect();
+    let other: Vec<&'static str> = all.iter().map(|r| r.id()).filter(|id| !grouped.contains(id)).collect();
     if !other.is_empty() {
         groups.push(Group { id: "other", title: "Other", blurb: "More services.", items: other });
     }
-    Catalog { groups, runtimes: Runtime::all().into_iter().map(info).collect() }
+    Catalog { groups, runtimes: all.into_iter().map(info).collect() }
 }
 
 fn info(runtime: Runtime) -> RuntimeInfo {
@@ -119,6 +129,8 @@ fn info(runtime: Runtime) -> RuntimeInfo {
                 .map(|(name, d)| PortField { key: format!("{}.{name}", m.id), label: d.label.clone(), hint: d.hint.clone(), default: d.default })
                 .collect(),
             local: manifest::extras().iter().any(|e| e.id == m.id) && !manifest::is_bundled(&m.id),
+            ui_port: m.ui.as_ref().map(|u| u.port.clone().or_else(|| m.main_port().map(str::to_string)).unwrap_or_default()),
+            open: m.open.clone(),
         };
     }
     let win = cfg!(windows);
@@ -183,6 +195,8 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         suggests: suggests.to_vec(),
         ports: vec![],
         local: false,
+        ui_port: None,
+        open: None,
     }
 }
 
@@ -506,7 +520,7 @@ mod tests {
     #[test]
     fn every_runtime_is_grouped_and_named() {
         let catalog = catalog();
-        assert!(catalog.groups.iter().all(|g| g.id != "other"), "add new runtimes to a group");
+        assert!(catalog.groups.iter().all(|g| g.id != "other"), "add new runtimes to a group: {:?}", catalog.groups.iter().find(|g| g.id == "other").map(|g| &g.items));
         for r in &catalog.runtimes {
             assert!(!r.label.is_empty() && !r.source.is_empty(), "{}", r.id);
             for id in r.needs.iter().chain(&r.suggests) {

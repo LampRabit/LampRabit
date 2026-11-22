@@ -121,6 +121,14 @@ pub struct VarCase {
     /// and its version from this one on (VERSION_ID).
     #[serde(default)]
     pub from: Option<String>,
+    /// A condition on the installed version or a setting (`version>=10.11`), for values used
+    /// while the service runs; such a case never matches in a download source.
+    #[serde(default, rename = "if")]
+    pub when: Option<String>,
+    /// A path found by pattern (`*` in a folder name) while the service runs: pgAdmin's
+    /// package folder inside its virtual environment names the Python version.
+    #[serde(default)]
+    pub glob: Option<String>,
 }
 
 /// Checks the parts that can be checked without fetching anything.
@@ -526,7 +534,44 @@ impl Vars {
     }
 }
 
+/// The case of a var that applies while the service is prepared or run (`if` conditions
+/// are checked too); its `value` or `glob` is the caller's to use.
+pub fn pick_case<'c>(m: &Manifest, name: &str, cases: &'c [VarCase], holds: impl Fn(&str) -> bool) -> std::result::Result<&'c VarCase, String> {
+    let release = if cfg!(target_os = "linux") { std::fs::read_to_string("/etc/os-release").unwrap_or_default() } else { String::new() };
+    pick(m, name, cases, &release, holds)
+}
+
 fn resolve(m: &Manifest, name: &str, cases: &[VarCase], release: &str) -> std::result::Result<String, String> {
+    let case = pick(m, name, cases, release, |_| false)?;
+    case.value.clone().ok_or_else(|| format!("{}: var {name}: a case needs value or unavailable", m.id))
+}
+
+/// The first existing path that matches a pattern with `*` in its folder names.
+pub fn glob_path(pattern: &str) -> Option<std::path::PathBuf> {
+    let mut found = vec![std::path::PathBuf::new()];
+    for (i, part) in pattern.split(['/', '\\']).enumerate() {
+        let mut next = Vec::new();
+        for base in &found {
+            if part.contains('*') {
+                for entry in std::fs::read_dir(if base.as_os_str().is_empty() { std::path::Path::new(".") } else { base }).ok()?.flatten() {
+                    if glob(part, &entry.file_name().to_string_lossy()) {
+                        next.push(entry.path());
+                    }
+                }
+            } else if i == 0 && part.is_empty() {
+                next.push(std::path::PathBuf::from("/"));
+            } else if i == 0 {
+                next.push(std::path::PathBuf::from(format!("{part}{}", std::path::MAIN_SEPARATOR)));
+            } else {
+                next.push(base.join(part));
+            }
+        }
+        found = next;
+    }
+    found.into_iter().find(|p| p.exists())
+}
+
+fn pick<'c>(m: &Manifest, name: &str, cases: &'c [VarCase], release: &str, holds: impl Fn(&str) -> bool) -> std::result::Result<&'c VarCase, String> {
     let field = |key: &str| release.lines().find_map(|l| l.strip_prefix(&format!("{key}="))).map(|v| v.trim_matches('"').to_string()).unwrap_or_default();
     let (id, like, version) = (field("ID"), field("ID_LIKE"), field("VERSION_ID"));
     let codename = Some(field("UBUNTU_CODENAME")).filter(|c| !c.is_empty()).unwrap_or_else(|| field("VERSION_CODENAME"));
@@ -535,7 +580,8 @@ fn resolve(m: &Manifest, name: &str, cases: &[VarCase], release: &str) -> std::r
             && (case.distro.is_empty() || case.distro.contains(&id))
             && case.like.as_ref().is_none_or(|l| like.split_whitespace().any(|w| w == l))
             && case.codename.as_ref().is_none_or(|c| *c == codename)
-            && case.from.as_ref().is_none_or(|f| crate::version::numbers(&version) >= crate::version::numbers(f));
+            && case.from.as_ref().is_none_or(|f| crate::version::numbers(&version) >= crate::version::numbers(f))
+            && case.when.as_deref().is_none_or(&holds);
         if !holds {
             continue;
         }
@@ -543,7 +589,7 @@ fn resolve(m: &Manifest, name: &str, cases: &[VarCase], release: &str) -> std::r
             let distro = Some(field("PRETTY_NAME")).filter(|n| !n.is_empty()).unwrap_or_else(|| "this system".into());
             return Err(why.replace("{distro}", &distro));
         }
-        return case.value.clone().ok_or_else(|| format!("{}: var {name}: a case needs value or unavailable", m.id));
+        return Ok(case);
     }
     Err(format!("{} has no download for {} ({name}).", m.name, manifest::platform()))
 }

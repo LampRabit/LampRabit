@@ -70,6 +70,7 @@ run:
 health: { http: { path: /ping } }
 behaviour: { heavy: true }
 config: "{{etc}}/config.xml"
+open: { label: Open console, port: http, path: /play }
 connection:
   url: "http://127.0.0.1:{{port.http}}"
   env:

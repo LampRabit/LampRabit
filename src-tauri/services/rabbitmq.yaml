@@ -58,6 +58,7 @@ stop:
 health: { tcp: {} }
 behaviour: { heavy: true, slow: true }
 config: "{{etc}}/rabbitmq.conf"
+open: { label: Open management console, port: management }
 connection:
   url: "amqp://guest:guest@127.0.0.1:{{port.amqp}}"
   env:

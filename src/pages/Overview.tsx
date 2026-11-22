@@ -13,6 +13,7 @@ import {
   DatabaseZap,
   ExternalLink,
   Feather,
+  Package,
   FileCog,
   FileText,
   FolderOpen,
@@ -55,6 +56,7 @@ import {
   serviceLabels,
   type Database as DatabaseKind,
   type PortStatus,
+  type RuntimeInfo,
   type ServiceInfo,
   type ServiceKind,
   type Settings,
@@ -64,7 +66,7 @@ import {
 } from "../lib/api";
 import { readPref, useAppStore, writePref, type Activity, notifyError } from "../lib/store";
 import { toolUrl } from "../lib/tools";
-import { runtimeTiles } from "../components/runtimes";
+import { runtimeTiles, tileFor } from "../components/runtimes";
 import { formatClock, formatUptime, useNow } from "../lib/time";
 import { randomQuote } from "../lib/quotes";
 import { connection, copyText, envText } from "../lib/connections";
@@ -77,6 +79,7 @@ import ProblemPanel from "../components/ProblemPanel";
 import ProfilesDialog, { ProfilesTransfer } from "../components/ProfilesDialog";
 import Sparkline from "../components/Sparkline";
 import { Kbd } from "../components/Dialog";
+import { infoFor, serviceLink, useCatalog } from "../lib/catalog";
 
 const greetings = [
   { until: 5, text: "Good evening", icon: Moon },
@@ -135,6 +138,7 @@ export default function Overview() {
   const active = usePageActive();
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: active ? 15_000 : false });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const catalog = useCatalog();
   const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: active ? 5000 : false });
   const stack = useStack();
 
@@ -209,7 +213,7 @@ export default function Overview() {
     s: () => stack.start(chosen.length ? chosen : current?.installed ? [current.kind] : []),
     x: () => stack.stop(chosen.length ? chosen : current?.installed ? [current.kind] : []),
     r: () => current?.state === "running" && api.restartService(current.kind).catch(notifyError),
-    o: () => current && openAction(current, sites.data, settings.data, navigate)?.run(),
+    o: () => current && openAction(current, sites.data, settings.data, navigate, catalog.data)?.run(),
     c: () => current?.installed && copy(copyText(connection(current), connMode), `${current.label} ${connMode === "env" ? ".env" : "URL"}`),
     e: () => setConnMode(connMode === "url" ? "env" : "url"),
     l: () => {
@@ -596,8 +600,8 @@ function openAction(
   sites: SitesInfo | undefined,
   settings: Settings | undefined,
   navigate: (p: "services") => void,
+  catalog?: { runtimes: RuntimeInfo[] },
 ): { label: string; icon: typeof ExternalLink; run: () => void; always?: boolean } | null {
-  const mailUi = settings?.ports.services["mailpit.ui"];
   if (isServer(service.kind)) {
     return { label: "Open in browser", icon: ExternalLink, run: () => openUrl(connection(service).url + "/").catch(notifyError) };
   }
@@ -616,41 +620,10 @@ function openAction(
       ? { label: "Open Compass", icon: Table2, run: () => api.openCompass().catch(notifyError) }
       : { label: `Install ${runtimeLabels.karotx ?? "KarotX"}`, icon: Table2, run: () => navigate("services"), always: true };
   }
-  if (service.kind === "meilisearch") {
-    return { label: "Open search preview", icon: ExternalLink, run: () => openUrl(`http://localhost:${service.port}/`).catch(notifyError) };
-  }
-  if (service.kind === "minio") {
-    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.services["minio.console"] ?? 9111}/`).catch(notifyError) };
-  }
-  if (service.kind === "rabbitmq") {
-    return { label: "Open management console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.services["rabbitmq.management"] ?? 15672}/`).catch(notifyError) };
-  }
-  if (service.kind === "n8n") {
-    const url = toolUrl("n8n", sites, mailUi, service.port);
-    return url ? { label: "Open n8n", icon: ExternalLink, run: () => openUrl(url).catch(notifyError) } : null;
-  }
-  if (service.kind === "rustfs") {
-    return { label: "Open console", icon: ExternalLink, run: () => openUrl(`http://localhost:${settings?.ports.services["rustfs.console"] ?? 9101}/`).catch(notifyError) };
-  }
-  if (service.kind === "clickhouse") {
-    return { label: "Open console", icon: Table2, run: () => openUrl(`http://localhost:${service.port}/play`).catch(notifyError) };
-  }
-  if (service.kind === "neo4j") {
-    const url = toolUrl("neo4j", sites, mailUi, service.port);
-    return url ? { label: "Open Neo4j Browser", icon: ExternalLink, run: () => openUrl(url).catch(notifyError) } : null;
-  }
-  if (service.kind === "pgadmin") {
-    const url = toolUrl("pgadmin", sites, mailUi, settings?.ports.services["pgadmin.http"]);
-    return url ? { label: "Open pgAdmin", icon: ExternalLink, run: () => openUrl(url).catch(notifyError) } : null;
-  }
-  if (service.kind === "redis") {
-    const url = toolUrl("phpredisadmin", sites, mailUi);
-    return url
-      ? { label: "Open phpRedisAdmin", icon: Table2, run: () => openUrl(url).catch(notifyError) }
-      : { label: `Install ${runtimeLabels.karotx ?? "KarotX"}`, icon: Table2, run: () => navigate("services"), always: true };
-  }
-  if (service.kind === "mailpit") {
-    return { label: "Open inbox", icon: ExternalLink, run: () => openUrl(toolUrl("mailpit", sites, mailUi) ?? "http://localhost:8025/").catch(notifyError) };
+  // Its own page, from its manifest (a web interface, a console).
+  const link = serviceLink(infoFor(catalog, service.kind), sites, settings);
+  if (link) {
+    return { label: link.label, icon: ExternalLink, run: () => openUrl(link.url).catch(notifyError) };
   }
   return null;
 }
@@ -691,6 +664,7 @@ function ServiceRow({
   profileActive?: boolean;
   onCopy: (text: string, what: string) => void;
 }) {
+  const catalog = useCatalog();
   const notify = useAppStore((s) => s.notify);
   const navigate = useAppStore((s) => s.navigate);
   const showLogs = useAppStore((s) => s.showLogs);
@@ -704,7 +678,9 @@ function ServiceRow({
   const start = useMutation({ mutationFn: () => api.startService(service.kind), onError: () => { } });
   const stop = useMutation({ mutationFn: () => api.stopService(service.kind), onError: notifyError });
   const restart = useMutation({ mutationFn: () => api.restartService(service.kind), onError: notifyError });
-  const meta = serviceMeta[service.kind];
+  // A service added from a file (or bundled, like KarotX) has no entry: the plain tile and
+  // its manifest's blurb.
+  const meta = serviceMeta[service.kind] ?? { icon: Package, tile: tileFor(service.kind).className, blurb: infoFor(catalog.data, service.kind)?.blurb ?? "" };
   const running = service.state === "running";
   // Spawned and waiting to answer (Elasticsearch, n8n… take up to a minute): it can be
   // stopped already.
@@ -716,7 +692,7 @@ function ServiceRow({
   // Re-renders the row when a different tool is picked from the menu (the choice itself
   // lives in the device's preferences).
   const [, setToolPick] = useState<string | null>(null);
-  const action = openAction(service, sites, settings, navigate);
+  const action = openAction(service, sites, settings, navigate, catalog.data);
   const conn = connection(service);
   const connValue = copyText(conn, connMode);
 

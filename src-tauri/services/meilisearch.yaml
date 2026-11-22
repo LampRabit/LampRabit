@@ -27,6 +27,7 @@ run:
   cwd: "{{data}}"
 health: { http: { path: /health } }
 config: "{{data}}"
+open: { label: Open search preview, port: http }
 connection:
   url: "http://127.0.0.1:{{port.http}}"
   env:

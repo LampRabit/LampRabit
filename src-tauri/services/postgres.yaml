@@ -38,4 +38,30 @@ connection:
     DB_PORT: "{{port.postgres}}"
     DB_USERNAME: root
     DB_PASSWORD: ""
-builtin: [prepare, launch]
+run:
+  program: "{{home}}/bin/postgres{{exe}}"
+  # Only on 127.0.0.1, and no Unix socket: its default folder (/var/run/postgresql) usually
+  # doesn't exist or isn't writable, and clients get PGHOST from the shims.
+  args: [-D, "{{data}}", -p, "{{port.postgres}}", -c, listen_addresses=127.0.0.1, -c, "unix_socket_directories="]
+  env:
+    LD_LIBRARY_PATH: { value: "{{home}}/lib", on: [linux] }
+  # PostgreSQL refuses to run with administrator rights; pg_ctl drops them, and LampRabit
+  # stands in for it (lib.rs: --pg-elevated) so the supervisor works unchanged.
+  elevated:
+    args: [--pg-elevated, "{{home}}/bin/pg_ctl{{exe}}", "{{data}}", "{{port.postgres}}", "{{tmp}}/pgctl.log"]
+    stop: ["{{home}}/bin/pg_ctl{{exe}}", stop, -D, "{{data}}", -m, fast, -s]
+# A fast shutdown: open connections are closed, nothing is lost.
+stop:
+  command: ["{{home}}/bin/pg_ctl{{exe}}", stop, -D, "{{data}}", -m, fast, -s]
+dirs: ["{{tmp}}"]
+init:
+  done: ["{{data}}/PG_VERSION"]
+  run:
+    - { program: "{{home}}/bin/initdb{{exe}}", args: [-D, "{{data}}", -U, postgres, -A, trust, -E, UTF8, --no-locale] }
+  explain:
+    administrative: PostgreSQL refuses to run with administrator rights; start LampRabit normally, not as administrator.
+    root: PostgreSQL refuses to run with administrator rights; start LampRabit normally, not as administrator.
+# Framework defaults (DB_USERNAME=root) work against it: a root superuser, added once.
+after_start:
+  - program: "{{home}}/bin/psql{{exe}}"
+    args: [-h, 127.0.0.1, -p, "{{port.postgres}}", -U, postgres, -d, postgres, -qtAc, "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'root') THEN CREATE ROLE root SUPERUSER LOGIN; END IF; END $$;"]

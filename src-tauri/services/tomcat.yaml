@@ -38,4 +38,35 @@ connection:
   url: "http://127.0.0.1:{{port.http}}"
   env:
     TOMCAT_URL: "http://127.0.0.1:{{port.http}}"
-builtin: [prepare, launch]
+# Its CATALINA_BASE is etc/tomcat, with a <Host> per Java project (the site engine).
+run:
+  program: "{{needs.java.bin}}/java{{exe}}"
+  args:
+    - "-Dcatalina.home={{home}}"
+    - "-Dcatalina.base={{etc}}"
+    - "-Djava.io.tmpdir={{tmp}}/temp"
+    - -Djava.util.logging.manager=org.apache.juli.ClassLoaderLogManager
+    - "-Djava.util.logging.config.file={{etc}}/conf/logging.properties"
+    - -cp
+    - "{{home}}/bin/bootstrap.jar{{pathsep}}{{home}}/bin/tomcat-juli.jar"
+    - org.apache.catalina.startup.Bootstrap
+    - start
+  env:
+    JAVA_HOME: "{{needs.java.home}}"
+    CATALINA_HOME: "{{home}}"
+    CATALINA_BASE: "{{etc}}"
+stop:
+  command:
+    - "{{needs.java.bin}}/java{{exe}}"
+    - "-Dcatalina.home={{home}}"
+    - "-Dcatalina.base={{etc}}"
+    - "-Djava.io.tmpdir={{tmp}}/temp"
+    - -Djava.util.logging.manager=org.apache.juli.ClassLoaderLogManager
+    - "-Djava.util.logging.config.file={{etc}}/conf/logging.properties"
+    - -cp
+    - "{{home}}/bin/bootstrap.jar{{pathsep}}{{home}}/bin/tomcat-juli.jar"
+    - org.apache.catalina.startup.Bootstrap
+    - stop
+# The site engine writes etc/tomcat (server.xml with a <Host> per Java project) before
+# every start.
+engine: tomcat
