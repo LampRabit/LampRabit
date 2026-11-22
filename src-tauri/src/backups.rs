@@ -38,7 +38,7 @@ const SQLITE_EXTENSIONS: &[&str] = &["sqlite", "sqlite3", "db"];
 const SQLITE_SKIP: &[&str] = &["node_modules", "vendor", "storage/framework", "var/cache"];
 
 /// SQLite databases in the projects, as "<project>/<path>" with forward slashes.
-fn sqlite_databases(layout: &Layout) -> Vec<String> {
+pub(crate) fn sqlite_databases(layout: &Layout) -> Vec<String> {
     fn walk(dir: &Path, rel: &str, depth: u8, out: &mut Vec<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
         for entry in entries.flatten() {

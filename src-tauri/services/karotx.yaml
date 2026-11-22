@@ -23,27 +23,24 @@ dirs: ["{{data}}"]
 run:
   program: "{{home}}/karotx{{exe}}"
   # Only this computer (it listens everywhere by default), and LampRabit opens it.
-  args: [--host, 127.0.0.1, --port, "{{port.http}}", --state, "{{data}}/workspace.kxs", --no-open]
+  args: [--host, 127.0.0.1, --port, "{{port.http}}", --state, "{{data}}/workspace.kxs", --services, "{{data}}/karotx-services.json", --no-open]
 health: { http: { path: /api/session } }
 config: "{{data}}"
 ui: { domain: karotx, port: http }
 connection:
   url: "http://127.0.0.1:{{port.http}}"
-# Every local database LampRabit runs shows up in KarotX's list, named "<database> (LampRabit)".
+# Every local database (installed services, running or stopped, and the projects' SQLite
+# files) is in KarotX's LampRabit group: LampRabit keeps this file, KarotX watches it.
 connects:
-  drivers: { mariadb: mysql, mysql: mysql, postgresql: postgres, mongodb: mongodb, redis: redis }
-  list: "http://127.0.0.1:{{port.http}}/api/connections"
-  create: "http://127.0.0.1:{{port.http}}/api/connections"
-  update: "http://127.0.0.1:{{port.http}}/api/connections/{{id}}"
-  name: "{{db.title}} (LampRabit)"
-  body:
-    connection:
-      name: "{{db.name}}"
-      driver: "{{db.driver}}"
-      preset: "{{db.service}}"
-      host: "{{db.host}}"
-      port: "{{db.port}}"
-      user: "{{db.user}}"
-      database: "{{db.database}}"
-      tls: { mode: "off" }
+  file: "{{data}}/karotx-services.json"
+  sqlite: sqlite
+  databases:
+    mariadb: { type: mariadb }
+    mysql: { type: mysql }
+    postgres: { type: postgres }
+    mongodb: { type: mongodb }
+    redis: { type: redis, database: "0" }
+    memcached: { type: memcached }
+    clickhouse: { type: clickhouse, port: tcp, user: default }
+    neo4j: { type: neo4j, port: bolt, user: neo4j }
 keywords: [database client, sql, gui, mysql, postgres, mongodb, redis]

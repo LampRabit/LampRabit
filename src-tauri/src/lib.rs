@@ -642,6 +642,31 @@ pub fn run() {
             spawn_crash_restarts(app.handle());
             spawn_process_restarts(app.handle());
 
+            // Database clients' services files (KarotX): every local database, running or
+            // stopped. Each second; the projects' SQLite files are looked for every 15.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut sqlite = Vec::new();
+                let mut tick: u32 = 0;
+                loop {
+                    tick = tick.wrapping_add(1);
+                    let state = handle.state::<AppState>();
+                    let (settings, layout) = state.snapshot().await;
+                    if ServiceKind::all().into_iter().any(|k| k.manifest().connects.is_some() && settings.versions.get(&k.manifest().id).is_some()) {
+                        let running = state.supervisor.running_kinds().await;
+                        let found = if tick % 15 == 1 { Some(layout.clone()) } else { None };
+                        sqlite = tauri::async_runtime::spawn_blocking(move || {
+                            let sqlite = found.map(|l| backups::sqlite_databases(&l)).unwrap_or(sqlite);
+                            clients::refresh(&settings, &layout, &running, &sqlite);
+                            sqlite
+                        })
+                        .await
+                        .unwrap_or_default();
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            });
+
             tauri::async_runtime::spawn(watch_ports(app.handle().clone()));
 
             let handle = app.handle().clone();

@@ -1451,7 +1451,7 @@ impl Manifest {
         }
 
         if let Some(c) = &self.connects {
-            crate::clients::check(c, &names.iter().map(|n| n.to_string()).collect::<Vec<_>>())?;
+            crate::clients::check(c)?;
         }
 
         // Placeholders.

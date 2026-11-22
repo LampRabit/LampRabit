@@ -1,212 +1,258 @@
-//! Database clients (`connects` in a manifest, KarotX for one): after such a service starts,
-//! LampRabit adds a connection to it for every local database that's installed, through the
-//! client's own HTTP API, and updates the ones it added before. It finds its own by name, so
-//! connections the user made are never touched. Format reference: docs/services.md.
+//! Database clients (`connects` in a manifest, KarotX for one). LampRabit keeps a services
+//! file listing every local database (the installed database services and the projects'
+//! SQLite files), and the client watches it: databases appear, change and disappear in it
+//! on their own. The file's format is KarotX's (version 1). Format reference: docs/services.md.
+
+use std::{collections::HashSet, path::Path};
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 
 use crate::{
     config::Settings,
-    error::{Error, Result},
     layout::Layout,
-    manifest::{self, Manifest, Ordered},
+    manifest::{self, Ordered},
     services::ServiceKind,
 };
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Connects {
-    /// The URL schemes LampRabit's databases publish (`connection.url`) and the client's
-    /// name for each one's driver: `{ mariadb: mysql, postgresql: postgres }`.
-    pub drivers: Ordered<String>,
-    /// Lists the client's connections (GET, a JSON list).
-    pub list: String,
-    /// Adds one (POST).
-    pub create: String,
-    /// Changes one (PUT); `{{id}}` is its id.
-    pub update: String,
-    /// Where a listed connection keeps its id and its name.
-    #[serde(default = "id_field")]
-    pub id_field: String,
-    #[serde(default = "name_field")]
-    pub name_field: String,
-    /// The name LampRabit gives each connection, which is how it finds its own again.
-    pub name: String,
-    /// What's sent for each database. `{{db.name}}`, `{{db.title}}` (the service's name),
-    /// `{{db.service}}`, `{{db.driver}}`, `{{db.host}}`, `{{db.port}}`, `{{db.user}}` and
-    /// `{{db.database}}` fill it in; a value that is exactly `{{db.port}}` is sent as a number.
-    pub body: Value,
+    /// The services file, inside the client's data folder; its `run` passes the path on.
+    pub file: String,
+    /// The client's name for LampRabit's group of databases.
+    #[serde(default = "source")]
+    pub source: String,
+    /// Which services are databases to the client: service id → its type and, when it isn't
+    /// the service's main port, the port drivers connect to.
+    pub databases: Ordered<Listed>,
+    /// The client's type for the projects' SQLite files; none leaves them out.
+    #[serde(default)]
+    pub sqlite: Option<String>,
 }
 
-fn id_field() -> String {
-    "id".into()
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Listed {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub port: Option<String>,
+    /// When the service's connection URL doesn't say (ClickHouse's `default`).
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub database: Option<String>,
 }
 
-fn name_field() -> String {
-    "name".into()
+fn source() -> String {
+    "LampRabit".into()
 }
 
-const DB: &[&str] = &["name", "title", "service", "driver", "host", "port", "user", "database"];
-
-/// The client's API is on this machine, and its texts name only what `sync` fills in.
-pub fn check(c: &Connects, ports: &[String]) -> std::result::Result<(), String> {
-    for (what, url) in [("list", &c.list), ("create", &c.create), ("update", &c.update)] {
-        if !url.starts_with("http://127.0.0.1:") && !url.starts_with("http://localhost:") {
-            return Err(format!("connects.{what} must be an address on this computer (http://127.0.0.1:…)"));
-        }
+/// The file stays in the client's data folder, and something is listed.
+pub fn check(c: &Connects) -> std::result::Result<(), String> {
+    if !c.file.starts_with("{{data}}/") || c.file.contains("..") {
+        return Err("connects.file must be inside its data folder ({{data}}/…)".into());
     }
-    if c.drivers.0.is_empty() {
-        return Err("connects.drivers lists no databases".into());
-    }
-    let mut texts: Vec<&str> = vec![&c.list, &c.create, &c.update, &c.name];
-    fn strings<'a>(v: &'a Value, out: &mut Vec<&'a str>) {
-        match v {
-            Value::String(s) => out.push(s),
-            Value::Array(a) => a.iter().for_each(|x| strings(x, out)),
-            Value::Object(o) => o.values().for_each(|x| strings(x, out)),
-            _ => {}
-        }
-    }
-    strings(&c.body, &mut texts);
-    for text in texts {
-        let mut rest = text;
-        while let Some(open) = rest.find("{{") {
-            let close = rest[open..].find("}}").map(|i| open + i).ok_or_else(|| format!("connects: unclosed {{{{ in \"{text}\""))?;
-            let name = rest[open + 2..close].trim();
-            let ok = name == "id" || name.strip_prefix("db.").is_some_and(|f| DB.contains(&f)) || name.strip_prefix("port.").is_some_and(|p| ports.iter().any(|q| q == p));
-            if !ok {
-                return Err(format!("connects: unknown placeholder {{{{{name}}}}}"));
-            }
-            rest = &rest[close + 2..];
-        }
+    if c.databases.0.is_empty() {
+        return Err("connects.databases lists no services".into());
     }
     Ok(())
 }
 
-/// One installed local database, as the client will see it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Database {
-    pub service: String,
-    pub title: String,
-    pub driver: String,
-    pub host: String,
-    pub port: u16,
-    pub user: String,
-    pub database: String,
+/// The services file's content: every installed database service (running or stopped) and
+/// every SQLite file in the projects.
+pub fn services_file(c: &Connects, settings: &Settings, layout: &Layout, running: &HashSet<ServiceKind>, sqlite: &[String]) -> Value {
+    let mut databases = Vec::new();
+    for kind in ServiceKind::all() {
+        let m = kind.manifest();
+        let (Some(listed), Some(version)) = (c.databases.get(&m.id), settings.versions.get(&m.id)) else { continue };
+        // Passwords and default databases come from the address apps get (`connection.url`).
+        let url = kind.connection(settings, layout).and_then(|i| reqwest::Url::parse(&i.url).ok());
+        let port = listed.port.as_deref().and_then(|p| m.port(settings, p)).unwrap_or_else(|| kind.port_of(settings));
+        let mut db = Map::new();
+        db.insert("id".into(), json!(m.id));
+        db.insert("name".into(), json!(format!("{} {}", m.name, version.split('.').next().unwrap_or(version))));
+        db.insert("type".into(), json!(listed.kind));
+        db.insert("host".into(), json!("127.0.0.1"));
+        db.insert("port".into(), json!(port));
+        let user = listed.user.clone().or_else(|| url.as_ref().map(|u| u.username().to_string()));
+        let password = url.as_ref().and_then(|u| u.password()).map(percent_decode);
+        let database = listed.database.clone().or_else(|| url.as_ref().map(|u| u.path().trim_start_matches('/').to_string()));
+        for (k, v) in [("user", user), ("password", password), ("database", database)] {
+            if let Some(v) = v.filter(|v| !v.is_empty()) {
+                db.insert(k.into(), json!(v));
+            }
+        }
+        db.insert("status".into(), json!(if running.contains(&kind) { "running" } else { "stopped" }));
+        databases.push(Value::Object(db));
+    }
+    if let Some(kind) = &c.sqlite {
+        let mut ids = HashSet::new();
+        for rel in sqlite {
+            let id = sqlite_id(rel, &mut ids);
+            let file = layout.www().join(rel);
+            databases.push(json!({ "id": id, "name": rel, "type": kind, "file": file.to_string_lossy(), "status": "running" }));
+        }
+    }
+    json!({ "version": 1, "source": c.source, "databases": databases })
 }
 
-/// The installed services whose connection address uses a scheme the client knows.
-pub fn databases(m: &Manifest, c: &Connects, settings: &Settings, layout: &Layout) -> Vec<Database> {
-    let mut out = Vec::new();
-    for kind in ServiceKind::all() {
-        let other = kind.manifest();
-        if other.id == m.id || settings.versions.get(&other.id).is_none() {
+/// A stable id for an SQLite file: letters, digits and `_ . -`, at most 64 characters,
+/// unique in the file (a suffix when two paths clean up the same way).
+fn sqlite_id(rel: &str, taken: &mut HashSet<String>) -> String {
+    let clean: String = rel.chars().map(|ch| if ch.is_ascii_alphanumeric() || "_.-".contains(ch) { ch } else { '-' }).collect();
+    let base: String = format!("sqlite-{clean}").chars().take(60).collect();
+    let mut id = base.clone();
+    let mut n = 2;
+    while !taken.insert(id.clone()) {
+        id = format!("{base}-{n}");
+        n += 1;
+    }
+    id
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok())
+        {
+            out.push(v);
+            i += 3;
             continue;
         }
-        let Some(info) = kind.connection(settings, layout) else { continue };
-        let Ok(url) = reqwest::Url::parse(&info.url) else { continue };
-        let Some(driver) = c.drivers.get(url.scheme()) else { continue };
-        out.push(Database {
-            service: other.id.clone(),
-            title: other.name.clone(),
-            driver: driver.clone(),
-            host: url.host_str().unwrap_or("127.0.0.1").to_string(),
-            port: url.port().unwrap_or_default(),
-            user: url.username().to_string(),
-            database: url.path().trim_start_matches('/').to_string(),
-        });
+        out.push(b[i]);
+        i += 1;
     }
-    out
+    String::from_utf8_lossy(&out).into_owned()
 }
 
-/// The client's name for a database's connection, and what to send for it.
-pub fn request(m: &Manifest, c: &Connects, settings: &Settings, layout: &Layout, db: &Database) -> Result<(String, Value)> {
-    let mut ctx = manifest::Ctx::any(m, settings, layout);
-    for (k, v) in [("title", &db.title), ("service", &db.service), ("driver", &db.driver), ("host", &db.host), ("user", &db.user), ("database", &db.database)] {
-        ctx.set(format!("db.{k}"), v.clone());
+/// Rewrites every installed client's services file when its content changed. Called every
+/// second, so starts, stops, installs and removals reach the client quickly.
+pub fn refresh(settings: &Settings, layout: &Layout, running: &HashSet<ServiceKind>, sqlite: &[String]) {
+    for kind in ServiceKind::all() {
+        let m = kind.manifest();
+        let Some(c) = &m.connects else { continue };
+        if settings.versions.get(&m.id).is_none() {
+            continue;
+        }
+        let Ok(path) = manifest::Ctx::any(m, settings, layout).render(&c.file) else { continue };
+        let text = serde_json::to_string_pretty(&services_file(c, settings, layout, running, sqlite)).unwrap_or_default();
+        if let Err(e) = write_private(Path::new(&path), &text) {
+            eprintln!("couldn't write {path}: {e}");
+        }
     }
-    ctx.set("db.port", db.port.to_string());
-    let name = ctx.render(&c.name)?;
-    ctx.set("db.name", name.clone());
-    fn fill(v: &Value, ctx: &manifest::Ctx, port: u16) -> Result<Value> {
-        Ok(match v {
-            Value::String(s) if s.trim() == "{{db.port}}" => Value::from(port),
-            Value::String(s) => Value::String(ctx.render(s)?),
-            Value::Array(a) => Value::Array(a.iter().map(|x| fill(x, ctx, port)).collect::<Result<_>>()?),
-            Value::Object(o) => Value::Object(o.iter().map(|(k, x)| Ok((k.clone(), fill(x, ctx, port)?))).collect::<Result<_>>()?),
-            other => other.clone(),
-        })
-    }
-    Ok((name, fill(&c.body, &ctx, db.port)?))
 }
 
-/// Adds or updates the client's connection for every installed local database; returns
-/// how many it sent.
-pub async fn sync(client: &reqwest::Client, m: &Manifest, settings: &Settings, layout: &Layout) -> Result<usize> {
-    let Some(c) = &m.connects else { return Ok(0) };
-    let ctx = manifest::Ctx::any(m, settings, layout);
-    let list_url = ctx.render(&c.list)?;
-    let existing: Value = client.get(&list_url).send().await.and_then(|r| r.error_for_status()).map_err(|e| Error::msg(format!("{} didn't list its connections: {e}", m.name)))?.json().await.map_err(|e| Error::msg(e.to_string()))?;
-    let existing = existing.as_array().cloned().unwrap_or_default();
-    let mut sent = 0;
-    for db in databases(m, c, settings, layout) {
-        let (name, body) = request(m, c, settings, layout, &db)?;
-        let id = existing.iter().find(|e| e[c.name_field.as_str()] == name.as_str()).and_then(|e| e[c.id_field.as_str()].as_str().map(str::to_string));
-        let req = match id {
-            Some(id) => {
-                let mut ctx = manifest::Ctx::any(m, settings, layout);
-                ctx.set("id", id);
-                client.put(ctx.render(&c.update)?)
-            }
-            None => client.post(ctx.render(&c.create)?),
-        };
-        req.json(&body).send().await.and_then(|r| r.error_for_status()).map_err(|e| Error::msg(format!("{} didn't take the {} connection: {e}", m.name, db.title)))?;
-        sent += 1;
+/// Writes a file only its owner can read (it holds passwords), through a temporary file
+/// renamed over it so the client never reads half of it. Unchanged content isn't rewritten.
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    if std::fs::read_to_string(path).is_ok_and(|old| old == text) {
+        return Ok(());
     }
-    Ok(sent)
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    #[cfg(unix)]
+    {
+        use std::{io::Write, os::unix::fs::OpenOptionsExt};
+        let _ = std::fs::remove_file(&tmp);
+        std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?.write_all(text.as_bytes())?;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::fs::write(&tmp, text)?;
+        // Only the current user: no inherited entries, full control for them alone. The ACL
+        // moves with the file when it's renamed.
+        let user = std::env::var("USERNAME").unwrap_or_default();
+        let ok = std::process::Command::new("icacls")
+            .arg(&tmp)
+            .args(["/inheritance:r", "/grant:r", &format!("{user}:F")])
+            .creation_flags(crate::procgroup::CREATE_NO_WINDOW)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if !ok {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(std::io::Error::other("couldn't make it readable only by this user"));
+        }
+    }
+    std::fs::rename(&tmp, path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// KarotX ships as a bundled manifest (community rules, no code) and gets a connection
-    /// for each installed database, from the addresses their manifests publish.
+    /// KarotX ships as a bundled manifest and lists every installed database, running or
+    /// stopped, with the address its drivers use, plus the projects' SQLite files.
     #[test]
-    fn karotx_lists_every_installed_database() {
+    fn karotx_lists_every_local_database() {
         let kind = ServiceKind::from_id("karotx").expect("KarotX is bundled");
         let m = kind.manifest();
         assert!(manifest::is_bundled("karotx") && m.engine.is_none());
         let c = m.connects.as_ref().unwrap();
         let mut settings = Settings::default();
-        for (id, v) in [("mariadb", "11.8.5"), ("postgres", "18.1.0"), ("redis", "8.4.0"), ("mailpit", "1.34.0"), ("karotx", "0.1.0")] {
+        for (id, v) in [("mariadb", "12.3.4"), ("postgres", "18.1.0"), ("redis", "8.4.0"), ("clickhouse", "25.1.0"), ("memcached", "1.6.39"), ("neo4j", "2025.1.0"), ("mailpit", "1.34.0"), ("karotx", "0.1.0")] {
             settings.versions.set(id, Some(v.into()));
         }
         let layout = Layout::new(std::env::temp_dir().join("lr-clients-test"));
-        let dbs = databases(m, c, &settings, &layout);
-        let mut ids: Vec<&str> = dbs.iter().map(|d| d.service.as_str()).collect();
+        let running: HashSet<_> = [ServiceKind::from_id("mariadb").unwrap()].into();
+        let file = services_file(c, &settings, &layout, &running, &["blog/database/database.sqlite".into()]);
+        assert_eq!((file["version"].as_i64(), file["source"].as_str()), (Some(1), Some("LampRabit")));
+        let dbs = file["databases"].as_array().unwrap();
+        let by = |id: &str| dbs.iter().find(|d| d["id"] == id).unwrap_or_else(|| panic!("{id} listed"));
+        let mut ids: Vec<&str> = dbs.iter().map(|d| d["id"].as_str().unwrap()).collect();
         ids.sort();
-        assert_eq!(ids, ["mariadb", "postgres", "redis"], "databases only, installed only, not itself");
+        assert_eq!(ids, ["clickhouse", "mariadb", "memcached", "neo4j", "postgres", "redis", "sqlite-blog-database-database.sqlite"], "databases only, installed only, not itself");
 
-        let maria = dbs.iter().find(|d| d.service == "mariadb").unwrap();
-        let (name, body) = request(m, c, &settings, &layout, maria).unwrap();
-        assert_eq!(name, "MariaDB (LampRabit)");
-        let conn = &body["connection"];
-        assert_eq!((conn["driver"].as_str(), conn["preset"].as_str(), conn["user"].as_str()), (Some("mysql"), Some("mariadb"), Some("root")));
-        assert_eq!(conn["port"], serde_json::json!(3306), "a number, not text");
-        assert_eq!(conn["name"].as_str(), Some("MariaDB (LampRabit)"));
-
-        let pg = dbs.iter().find(|d| d.service == "postgres").unwrap();
-        let (_, body) = request(m, c, &settings, &layout, pg).unwrap();
-        assert_eq!((body["connection"]["driver"].as_str(), body["connection"]["database"].as_str()), (Some("postgres"), Some("postgres")));
+        let maria = by("mariadb");
+        assert_eq!((maria["type"].as_str(), maria["name"].as_str(), maria["user"].as_str(), maria["status"].as_str()), (Some("mariadb"), Some("MariaDB 12"), Some("root"), Some("running")));
+        assert_eq!(maria["port"], json!(3306), "a number");
+        assert!(maria.get("password").is_none(), "no empty fields");
+        assert_eq!((by("postgres")["database"].as_str(), by("postgres")["status"].as_str()), (Some("postgres"), Some("stopped")));
+        assert_eq!((by("clickhouse")["port"].as_u64(), by("clickhouse")["user"].as_str()), (Some(19000), Some("default")), "the native port");
+        assert_eq!(by("neo4j")["port"], json!(7687), "Bolt");
+        assert_eq!(by("redis")["database"].as_str(), Some("0"));
+        let lite = by("sqlite-blog-database-database.sqlite");
+        assert_eq!(lite["type"].as_str(), Some("sqlite"));
+        assert!(lite["file"].as_str().unwrap().ends_with("database.sqlite") && lite.get("host").is_none());
     }
 
     #[test]
-    fn a_client_api_must_be_on_this_computer() {
-        let c: Connects = serde_yaml_ng::from_str("drivers: { mysql: mysql }\nlist: https://example.com/c\ncreate: http://127.0.0.1:1/c\nupdate: http://127.0.0.1:1/c/{{id}}\nname: x\nbody: {}\n").unwrap();
-        assert!(check(&c, &[]).unwrap_err().contains("this computer"));
-        let c: Connects = serde_yaml_ng::from_str("drivers: { mysql: mysql }\nlist: http://127.0.0.1:1/c\ncreate: http://127.0.0.1:1/c\nupdate: http://127.0.0.1:1/c/{{id}}\nname: \"{{db.secret}}\"\nbody: {}\n").unwrap();
-        assert!(check(&c, &[]).unwrap_err().contains("unknown placeholder"));
+    fn sqlite_ids_are_clean_and_unique() {
+        let mut taken = HashSet::new();
+        let a = sqlite_id("my app/db.sqlite", &mut taken);
+        let b = sqlite_id("my-app/db.sqlite", &mut taken);
+        assert_eq!(a, "sqlite-my-app-db.sqlite");
+        assert_eq!(b, "sqlite-my-app-db.sqlite-2");
+        let long = sqlite_id(&"x".repeat(200), &mut taken);
+        assert!(long.len() <= 64);
+        assert_eq!(percent_decode("p%40ss%"), "p@ss%");
+    }
+
+    #[test]
+    fn the_file_stays_in_the_data_folder() {
+        let c: Connects = serde_yaml_ng::from_str("file: /etc/x.json\ndatabases: { mysql: { type: mysql } }\n").unwrap();
+        assert!(check(&c).unwrap_err().contains("data folder"));
+    }
+
+    #[test]
+    fn the_file_is_written_whole_and_only_on_change() {
+        let dir = std::env::temp_dir().join(format!("lr-services-file-{}", std::process::id()));
+        let path = dir.join("karotx-services.json");
+        write_private(&path, "{}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
+        assert!(!path.with_extension("json.tmp").exists());
+        write_private(&path, "{\"a\":1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"a\":1}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

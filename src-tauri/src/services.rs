@@ -828,6 +828,11 @@ impl Supervisor {
         self.problems.lock().unwrap().insert(kind, problem);
     }
 
+    /// The services running now (or starting).
+    pub async fn running_kinds(&self) -> std::collections::HashSet<ServiceKind> {
+        self.running.lock().await.keys().copied().collect()
+    }
+
     /// PIDs of everything LampRabit runs, to recognise its own ports.
     pub async fn pids(&self) -> HashMap<u32, ServiceKind> {
         self.running.lock().await.iter().filter_map(|(k, h)| Some((h.pid?, *k))).collect()
@@ -1079,24 +1084,6 @@ impl Supervisor {
                 health.lock().unwrap().insert(kind, Health { status, detail, checked_at: now_ms(), failures: if answered { 0 } else { 2 } });
                 emit_status(&app, kind, ServiceState::Running, None);
                 let _ = app.emit("service-health", kind);
-            });
-        }
-        // A database client (KarotX): once it answers, every local database is in its list.
-        if kind.manifest().connects.is_some() {
-            let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
-            tauri::async_runtime::spawn(async move {
-                let client = reqwest::Client::new();
-                for _ in 0..120 {
-                    if kind.probe_now(&settings, &client).await {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                match crate::clients::sync(&client, kind.manifest(), &settings, &layout).await {
-                    Ok(0) => {}
-                    Ok(n) => logs::system(&app, Level::Info, format!("{} lists LampRabit's {n} local database{}", kind.label(), if n == 1 { "" } else { "s" })),
-                    Err(e) => logs::system(&app, Level::Warn, format!("Couldn't add LampRabit's databases to {}: {e}", kind.label())),
-                }
             });
         }
         // Once it answers: the upgrade after a move to a newer release line, then its

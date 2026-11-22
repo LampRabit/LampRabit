@@ -401,24 +401,22 @@ ui: { domain: n8n, port: http }
 
 ### A database client: `connects`
 
-A database client (KarotX is one) can have every local database in its list without the user typing anything. After the client starts and answers its health check, LampRabit adds one connection to it per installed database, through the client's own HTTP API, and updates the ones it added before. It finds its own by name, so connections the user made are never touched.
+A database client (KarotX is one) can show every local database without the user typing anything. LampRabit keeps a services file in the client's data folder that lists every installed database service, running or stopped, and every SQLite file in the projects. It rewrites the file (atomically, readable only by the current user, since it holds passwords) within a second of a database being installed, removed, started or stopped. The client watches the file, so pass its path in `run`.
 
 ```yaml
+run:
+  args: [--services, "{{data}}/karotx-services.json"]
 connects:
-  # The scheme of each database's connection.url, and the client's name for its driver.
-  drivers: { mariadb: mysql, mysql: mysql, postgresql: postgres, mongodb: mongodb, redis: redis }
-  list: "http://127.0.0.1:{{port.http}}/api/connections"           # GET: a JSON list
-  create: "http://127.0.0.1:{{port.http}}/api/connections"         # POST
-  update: "http://127.0.0.1:{{port.http}}/api/connections/{{id}}"  # PUT
-  name: "{{db.title}} (LampRabit)"
-  body:
-    connection: { name: "{{db.name}}", driver: "{{db.driver}}", host: "{{db.host}}", port: "{{db.port}}", user: "{{db.user}}" }
+  file: "{{data}}/karotx-services.json"
+  sqlite: sqlite                     # the client's type for SQLite files; leave out to skip them
+  databases:                         # service id: the client's type for it
+    mariadb: { type: mariadb }
+    redis: { type: redis, database: "0" }
+    clickhouse: { type: clickhouse, port: tcp, user: default }   # a port other than its main one
 ```
 
-- The databases are the installed services whose `connection.url` uses a scheme in `drivers`.
-- `{{db.name}}` (the `name` above), `{{db.title}}` (the database's service name), `{{db.service}}` (its id), `{{db.driver}}`, `{{db.host}}`, `{{db.port}}`, `{{db.user}}` and `{{db.database}}` fill in the body. A value that is exactly `{{db.port}}` is sent as a number.
-- A listed connection's id and name are read from `id` and `name` (`id_field`, `name_field` to change them).
-- The API must be on this computer (`http://127.0.0.1:` or `http://localhost:`), and bodies are sent as JSON.
+- Each entry gets `id` (the service id), `name` (service name and major version), `type`, `host` (127.0.0.1), `port`, `user`, `password` and `database` (from the service's `connection.url` unless set here), and `status` (`running` or `stopped`). The file's format is KarotX's: `{ "version": 1, "source": "LampRabit", "databases": [...] }`.
+- `file` must be inside the client's data folder.
 
 ## Placeholders
 
