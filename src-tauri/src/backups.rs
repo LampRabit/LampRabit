@@ -10,15 +10,11 @@ use std::process::Stdio;
 use serde::Serialize;
 
 use crate::{
-    config::{Database, Settings},
-    configs,
+    config::Settings,
     error::{Error, Result},
     layout::{Layout, exe},
     templates::DbEngine,
 };
-
-/// System databases that are never listed for backup.
-const MYSQL_SYSTEM: &[&str] = &["mysql", "information_schema", "performance_schema", "sys"];
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,27 +30,6 @@ pub struct Backup {
 pub fn folder(layout: &Layout) -> PathBuf {
     layout.root().join("backups")
 }
-
-fn mysql_family(engine: DbEngine) -> Option<Database> {
-    match engine {
-        DbEngine::Mariadb => Some(Database::Mariadb),
-        DbEngine::Mysql => Some(Database::Mysql),
-        _ => None,
-    }
-}
-
-/// mongodump/mongorestore from the MongoDB Database Tools, pointed at LampRabit's MongoDB.
-fn mongo_tool(settings: &Settings, layout: &Layout, name: &str) -> Result<(PathBuf, Vec<String>)> {
-    let version = settings
-        .versions
-        .get("mongotools")
-        .ok_or_else(|| Error::msg("MongoDB backups use the MongoDB Database Tools: install them on the Services page (Databases → MongoDB Database Tools)."))?;
-    let program = layout.bin("mongotools", version).join("bin").join(exe(name));
-    Ok((program, vec![format!("--uri=mongodb://127.0.0.1:{}", settings.ports.service("mongodb.mongodb"))]))
-}
-
-/// MongoDB's system databases, never listed for backup.
-const MONGO_SYSTEM: &[&str] = &["admin", "config", "local"];
 
 /// File types taken for SQLite databases in projects (Laravel's database.sqlite,
 /// Symfony's var/data.db…).
@@ -143,24 +118,6 @@ fn remove_sqlite_journal(file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `pg_dump`, `psql`… from the active PostgreSQL, with the arguments that reach
-/// LampRabit's server as its superuser.
-fn postgres_tool(settings: &Settings, layout: &Layout, name: &str) -> Result<(PathBuf, Vec<String>)> {
-    let version = settings.versions.get("postgres").ok_or_else(|| Error::msg("PostgreSQL is not installed"))?;
-    let program = layout.bin("postgres", version).join("bin").join(exe(name));
-    let args = vec!["-h".into(), "127.0.0.1".into(), "-p".into(), settings.ports.service("postgres.postgres").to_string(), "-U".into(), "postgres".into()];
-    Ok((program, args))
-}
-
-/// A MariaDB/MySQL tool (`mariadb-dump`, `mysql`…) with LampRabit's client config, which
-/// has the host, port and user.
-fn mysql_tool(settings: &Settings, layout: &Layout, db: Database, mariadb: &str, mysql: &str) -> Result<(PathBuf, Vec<String>)> {
-    let name = if db == Database::Mariadb { mariadb } else { mysql };
-    let program = configs::database_home(settings, layout, db)?.join("bin").join(exe(name));
-    let cnf = configs::write_client_config(settings, layout, db)?;
-    Ok((program, vec![format!("--defaults-extra-file={}", cnf.display())]))
-}
-
 async fn output(program: &Path, args: &[String], stdin: Option<&Path>) -> Result<String> {
     let mut cmd = tokio::process::Command::new(program);
     cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -183,37 +140,41 @@ pub async fn databases(settings: &Settings, layout: &Layout, engine: DbEngine) -
     if engine == DbEngine::Sqlite {
         return Ok(sqlite_databases(layout));
     }
-    if engine == DbEngine::Mongodb {
-        let version = settings.versions.get("mongosh").ok_or_else(|| Error::msg("Install mongosh to list MongoDB's databases (Services)."))?;
-        let program = layout.bin("mongosh", version).join("bin").join(exe("mongosh"));
-        let args = vec![
-            "--quiet".into(),
-            "--port".into(),
-            settings.ports.service("mongodb.mongodb").to_string(),
-            "--eval".into(),
-            "db.adminCommand({ listDatabases: 1, nameOnly: true }).databases.forEach(d => print(d.name))".into(),
-        ];
-        let text = output(&program, &args, None).await?;
-        return Ok(text.lines().map(str::trim).filter(|d| !d.is_empty() && !MONGO_SYSTEM.contains(d)).map(str::to_string).collect());
+    let (m, hooks) = hooks(engine)?;
+    let text = run_step(m, settings, layout, &hooks.list, &[]).await?;
+    Ok(text.lines().map(str::trim).filter(|d| !d.is_empty() && !hooks.skip.iter().any(|s| s.eq_ignore_ascii_case(d))).map(str::to_string).collect())
+}
+
+/// A database service's `backup` hooks from its manifest.
+fn hooks(engine: DbEngine) -> Result<(&'static crate::manifest::Manifest, &'static crate::manifest::BackupHooks)> {
+    let m = crate::manifest::get(engine.id()).ok_or_else(|| Error::msg(format!("{} has no manifest", engine.id())))?;
+    let hooks = m.backup.as_ref().ok_or_else(|| Error::msg(format!("{} can't be backed up", m.name)))?;
+    Ok((m, hooks))
+}
+
+/// Runs one backup step with `{{database}}`, `{{file}}`, `{{original}}` and
+/// `{{runtime.<id>.home}}` (another installed runtime, MongoDB's tools) filled in.
+async fn run_step(m: &crate::manifest::Manifest, settings: &Settings, layout: &Layout, step: &crate::manifest::BackupStep, values: &[(&str, String)]) -> Result<String> {
+    let mut ctx = crate::manifest::Ctx::new(m, settings, layout)?;
+    for (k, v) in values {
+        ctx.set(*k, v.clone());
     }
-    let text = match mysql_family(engine) {
-        Some(db) => {
-            let (program, mut args) = mysql_tool(settings, layout, db, "mariadb", "mysql")?;
-            args.extend(["-N".into(), "-e".into(), "SHOW DATABASES".into()]);
-            output(&program, &args, None).await?
+    for text in std::iter::once(step.program.as_str()).chain(step.args.iter().flat_map(crate::manifest::Arg::all)) {
+        let mut rest = text;
+        while let Some(at) = rest.find("{{runtime.") {
+            let id = rest[at + 10..].split('.').next().unwrap_or_default().to_string();
+            let version = settings.versions.get(&id).ok_or_else(|| {
+                let label = crate::catalog::catalog().runtimes.into_iter().find(|r| r.id == id).map_or(id.clone(), |r| r.label.to_string());
+                Error::msg(format!("{}'s backups use {label}: install it on the Services page.", m.name))
+            })?;
+            ctx.set(format!("runtime.{id}.home"), layout.bin(&id, version).to_string_lossy());
+            rest = &rest[at + 10..];
         }
-        None => {
-            let (program, mut args) = postgres_tool(settings, layout, "psql")?;
-            args.extend(["-d".into(), "postgres".into(), "-tAc".into(), "SELECT datname FROM pg_database WHERE NOT datistemplate AND datname <> 'postgres' ORDER BY 1".into()]);
-            output(&program, &args, None).await?
-        }
-    };
-    Ok(text
-        .lines()
-        .map(str::trim)
-        .filter(|d| !d.is_empty() && !MYSQL_SYSTEM.contains(&d.to_lowercase().as_str()))
-        .map(str::to_string)
-        .collect())
+    }
+    let program = PathBuf::from(ctx.render(&step.program)?);
+    let args = ctx.args(&step.args)?;
+    let stdin = step.stdin.as_ref().map(|s| ctx.render(s).map(PathBuf::from)).transpose()?;
+    output(&program, &args, stdin.as_deref()).await
 }
 
 /// A database name that is safe in a file name and in the quoted SQL below.
@@ -230,9 +191,9 @@ pub async fn create(settings: &Settings, layout: &Layout, engine: DbEngine, data
     let dir = folder(layout).join(engine.id());
     std::fs::create_dir_all(&dir)?;
     let stamp = chrono_stamp();
-    let result = match mysql_family(engine) {
+    let result = match engine {
         // "shop/database/database.sqlite" → shop~database~database.sqlite-<stamp>.sqlite
-        None if engine == DbEngine::Sqlite => {
+        DbEngine::Sqlite => {
             let source = sqlite_file(layout, database)?;
             let path = dir.join(format!("{}-{stamp}.sqlite", database.replace('/', "~")));
             match sqlite_shell(settings, layout) {
@@ -246,33 +207,17 @@ pub async fn create(settings: &Settings, layout: &Layout, engine: DbEngine, data
                 None => std::fs::copy(&source, &path).map(|_| path).map_err(Error::from),
             }
         }
-        // A gzipped archive of the one database: mongorestore can rename it on the way back.
-        None if engine == DbEngine::Mongodb => {
-            let path = dir.join(format!("{database}-{stamp}.archive.gz"));
-            let (program, mut args) = mongo_tool(settings, layout, "mongodump")?;
-            args.extend([format!("--db={database}"), format!("--archive={}", path.display()), "--gzip".into()]);
-            output(&program, &args, None).await.map(|_| path)
-        }
-        Some(db) => {
-            let path = dir.join(format!("{database}-{stamp}.sql"));
-            let (program, mut args) = mysql_tool(settings, layout, db, "mariadb-dump", "mysqldump")?;
-            // Without --databases, so it can be restored under another name too.
-            args.extend([
-                "--single-transaction".into(),
-                "--routines".into(),
-                "--triggers".into(),
-                "--events".into(),
-                format!("--result-file={}", path.display()),
-                database.into(),
-            ]);
-            output(&program, &args, None).await.map(|_| path)
-        }
-        None => {
-            // pg_dump's custom format: compressed, and pg_restore can clean what it replaces.
-            let path = dir.join(format!("{database}-{stamp}.dump"));
-            let (program, mut args) = postgres_tool(settings, layout, "pg_dump")?;
-            args.extend(["-F".into(), "c".into(), "-f".into(), path.display().to_string(), "-d".into(), database.into()]);
-            output(&program, &args, None).await.map(|_| path)
+        _ => {
+            let (m, hooks) = hooks(engine)?;
+            let path = dir.join(format!("{database}-{stamp}.{}", hooks.extension));
+            let values = [("database", database.to_string()), ("file", path.display().to_string())];
+            async {
+                for step in &hooks.dump {
+                    run_step(m, settings, layout, step, &values).await?;
+                }
+                Ok::<_, Error>(path)
+            }
+            .await
         }
     };
     let path = result.map_err(|e| Error::msg(format!("Backing up {database} failed: {e}")))?;
@@ -288,9 +233,9 @@ pub async fn restore(settings: &Settings, layout: &Layout, engine: DbEngine, fil
     if !file.starts_with(folder(layout)) || !file.is_file() {
         return Err(Error::msg("Pick a backup from LampRabit's backups folder."));
     }
-    match mysql_family(engine) {
+    match engine {
         // The file is replaced as a whole, as the other engines replace the tables.
-        None if engine == DbEngine::Sqlite => {
+        DbEngine::Sqlite => {
             let target = sqlite_file(layout, database)?;
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -299,39 +244,14 @@ pub async fn restore(settings: &Settings, layout: &Layout, engine: DbEngine, fil
             std::fs::copy(file, &target)
                 .map_err(|e| Error::msg(format!("Couldn't write {}: {e}. Stop the app that uses it, then try again.", target.display())))?;
         }
-        None if engine == DbEngine::Mongodb => {
+        _ => {
+            let (m, hooks) = hooks(engine)?;
             let original = describe(engine, file).map(|b| b.database).unwrap_or_else(|| database.to_string());
-            let (program, mut args) = mongo_tool(settings, layout, "mongorestore")?;
-            args.extend([
-                format!("--archive={}", file.display()),
-                "--gzip".into(),
-                "--drop".into(),
-                format!("--nsFrom={original}.*"),
-                format!("--nsTo={database}.*"),
-            ]);
-            output(&program, &args, None).await?;
-        }
-        Some(db) => {
-            let (program, base) = mysql_tool(settings, layout, db, "mariadb", "mysql")?;
-            let mut create = base.clone();
-            create.extend(["-e".into(), format!("CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")]);
-            output(&program, &create, None).await?;
-            let mut load = base;
-            load.push(database.into());
-            output(&program, &load, Some(file)).await?;
-        }
-        None => {
-            let (createdb, base) = postgres_tool(settings, layout, "createdb")?;
-            let exists = databases(settings, layout, engine).await?.iter().any(|d| d == database);
-            if !exists {
-                let mut args = base.clone();
-                args.extend(["-E".into(), "UTF8".into(), "-T".into(), "template0".into(), database.into()]);
-                output(&createdb, &args, None).await?;
+            let values = [("database", database.to_string()), ("file", file.display().to_string()), ("original", original)];
+            let listed = databases(settings, layout, engine).await?.iter().any(|d| d == database);
+            for step in hooks.restore.iter().filter(|s| !(s.if_missing && listed)) {
+                run_step(m, settings, layout, step, &values).await?;
             }
-            let (pg_restore, mut args) = postgres_tool(settings, layout, "pg_restore")?;
-            // --no-owner: the backup may come from another user's server.
-            args.extend(["--clean".into(), "--if-exists".into(), "--no-owner".into(), "-d".into(), database.into(), file.display().to_string()]);
-            output(&pg_restore, &args, None).await?;
         }
     }
     Ok(())

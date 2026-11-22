@@ -70,3 +70,20 @@ docs: https://www.postgresql.org/docs/
 config_files:
   - { path: "{{data}}/postgresql.conf" }
   - { path: "{{data}}/pg_hba.conf", label: "pg_hba.conf (who may connect)" }
+# The Backups panel: pg_dump's custom format (compressed; pg_restore can clean what it
+# replaces), restored into a database created when it doesn't exist.
+backup:
+  extension: dump
+  list:
+    program: "{{home}}/bin/psql{{exe}}"
+    args: [-h, 127.0.0.1, -p, "{{port.postgres}}", -U, postgres, -d, postgres, -tAc, "SELECT datname FROM pg_database WHERE NOT datistemplate AND datname <> 'postgres' ORDER BY 1"]
+  dump:
+    - program: "{{home}}/bin/pg_dump{{exe}}"
+      args: [-h, 127.0.0.1, -p, "{{port.postgres}}", -U, postgres, -F, c, -f, "{{file}}", -d, "{{database}}"]
+  restore:
+    - program: "{{home}}/bin/createdb{{exe}}"
+      args: [-h, 127.0.0.1, -p, "{{port.postgres}}", -U, postgres, -E, UTF8, -T, template0, "{{database}}"]
+      if_missing: true
+    # --no-owner: the backup may come from another user's server.
+    - program: "{{home}}/bin/pg_restore{{exe}}"
+      args: [-h, 127.0.0.1, -p, "{{port.postgres}}", -U, postgres, --clean, --if-exists, --no-owner, -d, "{{database}}", "{{file}}"]

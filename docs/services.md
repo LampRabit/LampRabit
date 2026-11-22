@@ -302,6 +302,26 @@ A command may have `path` (folders put in front of PATH) and `cwd`. A single-fil
 
 LampRabit's own manifests may also use `external` (a copy installed by the software's own installer, used while LampRabit has none; `paths` may read `{{env.<VAR>}}`) and `run.elevated` (Windows with administrator rights: LampRabit starts the service with these arguments and stands in for it, as PostgreSQL needs).
 
+### Backups: `backup`
+
+A database lists, backs up and restores its databases for the Backups panel with its own tools:
+
+```yaml
+backup:
+  extension: dump                      # backups/<id>/<database>-<date>.dump
+  list:                                # one database per line of output
+    program: "{{home}}/bin/psql{{exe}}"
+    args: [-h, 127.0.0.1, -p, "{{port.postgres}}", -U, postgres, -tAc, "SELECT datname FROM pg_database"]
+  skip: [template0, template1]         # never offered
+  dump:
+    - { program: "{{home}}/bin/pg_dump{{exe}}", args: [-F, c, -f, "{{file}}", -d, "{{database}}"] }
+  restore:
+    - { program: "{{home}}/bin/createdb{{exe}}", args: ["{{database}}"], if_missing: true }
+    - { program: "{{home}}/bin/pg_restore{{exe}}", args: [--clean, -d, "{{database}}", "{{file}}"] }
+```
+
+`{{database}}` is the database (letters, digits, `-` and `_` only), `{{file}}` the backup file, `{{original}}` the database a backup was made from (restoring under another name), and `{{runtime.<id>.home}}` another installed runtime's folder (MongoDB's tools; the panel says to install it when it's missing). A step can feed a file to the program's input (`stdin: "{{file}}"`) and run only when the database doesn't exist yet (`if_missing: true`).
+
 ### Values that depend on the version: `vars` with `if`
 
 `vars` (see the sources section) also work while the service runs, as `{{var.<name>}}` in files, arguments and the environment. A case can have an `if:` with a setting (`setting.<name>`) or a version comparison (`version>=10.11`, `version<9`; compared by prefix, so `version<9` holds for 8.4.7):

@@ -24,6 +24,7 @@ use crate::{
     layout::Layout,
     runtimes::{self, Release, Runtime},
     services::{ServiceKind, ServiceState},
+    templates::DbEngine,
 };
 
 const PORT_SHIFT: u64 = 20_000;
@@ -218,6 +219,15 @@ pub async fn run(app: AppHandle, options: Options) -> i32 {
         let outcome = lifecycle(&app, kind).await;
         report.add(format!("service {}", kind.id()), started, outcome);
     }
+    // Backups come back: a row written, backed up, dropped, restored and read again.
+    for (kind, engine) in [(ServiceKind::Mariadb, DbEngine::Mariadb), (ServiceKind::Mysql, DbEngine::Mysql), (ServiceKind::Postgres, DbEngine::Postgres)] {
+        if kinds.contains(&kind) {
+            let started = Instant::now();
+            let outcome = backup_round_trip(&app, kind, engine).await;
+            let _ = crate::stop_service(app.clone(), app.state::<AppState>(), kind).await;
+            report.add(format!("backup and restore ({})", kind.id()), started, outcome);
+        }
+    }
     // The crash check on a quick, light service, when one was tested.
     let light = [ServiceKind::Redis, ServiceKind::Memcached, ServiceKind::Mailpit, ServiceKind::Meilisearch];
     if let Some(&kind) = light.iter().find(|k| kinds.contains(k)) {
@@ -383,6 +393,56 @@ async fn lifecycle(app: &AppHandle, kind: ServiceKind) -> std::result::Result<St
         return Err(Outcome::Failed(format!("port {port} is still taken after Stop")));
     }
     Ok(format!("{took}, second start ignored, stopped, port {port} free"))
+}
+
+/// A database's backup brings its data back: a table with a row, backed up and dropped,
+/// then restored and read again, through the same code as the Backups panel.
+async fn backup_round_trip(app: &AppHandle, kind: ServiceKind, engine: DbEngine) -> std::result::Result<String, Outcome> {
+    if let Err(e) = crate::start_service(app.clone(), app.state::<AppState>(), kind).await {
+        return Err(why(app, kind, "start failed", Some(e.to_string())).await);
+    }
+    wait_healthy(app, kind).await?;
+    let (settings, layout) = app.state::<AppState>().snapshot().await;
+    let db = "lr_smoke_backup";
+    sql(&settings, &layout, engine, None, &format!("CREATE DATABASE {db}")).await?;
+    sql(&settings, &layout, engine, Some(db), "CREATE TABLE kept (x INT); INSERT INTO kept VALUES (42);").await?;
+    let backup = crate::backups::create(&settings, &layout, engine, db).await?;
+    sql(&settings, &layout, engine, None, &format!("DROP DATABASE {db}")).await?;
+    crate::backups::restore(&settings, &layout, engine, &backup.path, db).await?;
+    let back = sql(&settings, &layout, engine, Some(db), "SELECT x FROM kept").await?;
+    if !back.lines().any(|l| l.trim() == "42") {
+        return Err(Outcome::Failed(format!("the restored table reads {back:?}, not 42")));
+    }
+    let _ = std::fs::remove_file(&backup.path);
+    Ok(format!("{} bytes, restored", backup.size))
+}
+
+/// Runs SQL against LampRabit's server of that engine with its own client, as root.
+async fn sql(settings: &Settings, layout: &Layout, engine: DbEngine, db: Option<&str>, statement: &str) -> Result<String> {
+    let (program, mut args) = match engine {
+        DbEngine::Mariadb | DbEngine::Mysql => {
+            let family = if engine == DbEngine::Mariadb { crate::config::Database::Mariadb } else { crate::config::Database::Mysql };
+            let cnf = crate::configs::write_client_config(settings, layout, family)?;
+            (crate::configs::database_client(settings, layout, family)?, vec![format!("--defaults-extra-file={}", cnf.display()), "-N".into(), "-e".into(), statement.into()])
+        }
+        _ => {
+            let version = settings.versions.get("postgres").ok_or_else(|| Error::msg("PostgreSQL isn't installed"))?;
+            let psql = layout.bin("postgres", version).join("bin").join(crate::layout::exe("psql"));
+            let port = settings.ports.service("postgres.postgres").to_string();
+            (psql, vec!["-h".into(), "127.0.0.1".into(), "-p".into(), port, "-U".into(), "postgres".into(), "-d".into(), db.unwrap_or("postgres").into(), "-tAc".into(), statement.into()])
+        }
+    };
+    if let (Some(db), DbEngine::Mariadb | DbEngine::Mysql) = (db, engine) {
+        args.push(db.into());
+    }
+    let mut cmd = tokio::process::Command::new(&program);
+    cmd.args(&args);
+    crate::procgroup::prepare(&mut cmd);
+    let out = cmd.output().await.map_err(|e| Error::msg(format!("{}: {e}", program.display())))?;
+    if !out.status.success() {
+        return Err(Error::msg(format!("{statement}: {}", String::from_utf8_lossy(&out.stderr).trim())));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// What a domain answers through the web server's HTTP port.

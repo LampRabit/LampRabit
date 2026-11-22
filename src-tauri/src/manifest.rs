@@ -154,6 +154,9 @@ pub struct Manifest {
     /// Its documentation, linked from its card.
     #[serde(default)]
     pub docs: Option<String>,
+    /// How its databases are listed, backed up and restored (the Backups panel).
+    #[serde(default)]
+    pub backup: Option<BackupHooks>,
     /// The site engine it's built around (the web servers, Tomcat); built-in manifests only.
     #[serde(default)]
     pub engine: Option<Engine>,
@@ -492,7 +495,7 @@ impl Arg {
         }
     }
 
-    fn all(&self) -> Vec<&str> {
+    pub(crate) fn all(&self) -> Vec<&str> {
         match self {
             Arg::Plain(s) => vec![s],
             Arg::Cond(c) => c.value.iter().chain(&c.values).map(String::as_str).collect(),
@@ -950,6 +953,35 @@ pub struct Connection {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct BackupHooks {
+    /// What a backup file ends with: `sql`, `dump`, `archive.gz`.
+    pub extension: String,
+    /// Lists the databases, one per line of its output; `skip` leaves system ones out.
+    pub list: BackupStep,
+    #[serde(default)]
+    pub skip: Vec<String>,
+    /// Writes `{{file}}` from `{{database}}`.
+    pub dump: Vec<BackupStep>,
+    /// Loads `{{file}}` into `{{database}}` (`{{original}}`: the database it was made from).
+    pub restore: Vec<BackupStep>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackupStep {
+    pub program: String,
+    #[serde(default)]
+    pub args: Vec<Arg>,
+    /// A file fed to its standard input.
+    #[serde(default)]
+    pub stdin: Option<String>,
+    /// Only when the database isn't listed yet (creating it).
+    #[serde(default)]
+    pub if_missing: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigFile {
     pub path: String,
     #[serde(default)]
@@ -1292,6 +1324,16 @@ impl Manifest {
             }
         for f in &self.config_files {
             inside(&f.path).map_err(|e| format!("config_files: {e}"))?;
+        }
+        if let Some(b) = &self.backup {
+            if b.extension.is_empty() || !b.extension.chars().all(|c| c.is_ascii_alphanumeric() || c == '.') {
+                return Err("backup.extension must be letters, digits and dots (sql, archive.gz)".into());
+            }
+            for step in std::iter::once(&b.list).chain(&b.dump).chain(&b.restore) {
+                if !["{{home}}", "{{needs.", "{{runtime."].iter().any(|p| step.program.starts_with(p)) {
+                    return Err(format!("backup program \"{}\" must be inside the install or another runtime's", step.program));
+                }
+            }
         }
         if let Some(docs) = &self.docs
             && !docs.starts_with("https://") {

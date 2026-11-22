@@ -72,3 +72,17 @@ connection:
     MONGODB_URI: "mongodb://127.0.0.1:{{port.mongodb}}"
 keywords: [nosql, document, database]
 docs: https://www.mongodb.com/docs/manual/
+# The Backups panel, with mongosh (listing) and the MongoDB Database Tools: a gzipped
+# archive of one database, which mongorestore can rename on the way back.
+backup:
+  extension: archive.gz
+  list:
+    program: "{{runtime.mongosh.home}}/bin/mongosh{{exe}}"
+    args: [--quiet, --port, "{{port.mongodb}}", --eval, "db.adminCommand({ listDatabases: 1, nameOnly: true }).databases.forEach(d => print(d.name))"]
+  skip: [admin, config, local]
+  dump:
+    - program: "{{runtime.mongotools.home}}/bin/mongodump{{exe}}"
+      args: ["--uri=mongodb://127.0.0.1:{{port.mongodb}}", "--db={{database}}", "--archive={{file}}", --gzip]
+  restore:
+    - program: "{{runtime.mongotools.home}}/bin/mongorestore{{exe}}"
+      args: ["--uri=mongodb://127.0.0.1:{{port.mongodb}}", "--archive={{file}}", --gzip, --drop, "--nsFrom={{original}}.*", "--nsTo={{database}}.*"]
