@@ -34,8 +34,8 @@ export default function Sparkline({
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <div className="flex gap-0.5">
-        <span className="text-[10px] font-bold tracking-wider text-muted uppercase">{label}</span>
-        <span className="font-mono text-[10px] text-fg tabular-nums ml-auto">{shown === undefined ? "—" : format(shown)}</span>
+        <span className="text-xs font-medium text-muted">{label}</span>
+        <span className="font-mono text-[11px] text-fg tabular-nums ml-auto">{shown === undefined ? "—" : format(shown)}</span>
       </div>
       <div className="border-slate-200 border">
         <svg

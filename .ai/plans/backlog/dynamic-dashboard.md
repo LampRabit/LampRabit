@@ -14,8 +14,8 @@ Feasible. "Adaptive" = compute what to show from state already in the frontend s
 
 ## Plan
 
-1. Status strip (services, tunnels, devices, "All good" / "3 issues").
-2. "Needs attention" (only when non-empty), each with a one-click fix: crashed service, port conflict, doctor failure, missing runtime for a project, failed cron run, certificate near expiry, update available.
+1. **Built 2026-11-23** (the user picked this over a live stack map): status strip (`components/HomeStatus.tsx`): status light + "All good"/"N issues", services running/installed, projects (running, shared), memory with CPU and a per-service share bar.
+2. **Built 2026-11-23, first part:** "Needs attention" (only when non-empty) with fixes for a service that stopped answering (Restart, Logs), a failed start (Show fixes opens the row, Try again), a port another program holds (Stop it with a second click, Change port) and a shared URL that went down. Still to add: doctor failure, missing runtime for a project, failed cron run, certificate near expiry. Screenshot: `home-issues`.
 3. Projects: running and recent first; card content by endpoints/kinds (URL/Open/Share; Run/Test/Build for CLI/packages; up/down + restarts for workers).
 4. Contextual cards only when relevant (tunnel active → URL + QR + Stop; new Mailpit mail; next scheduled job).
 5. Resources (existing sparklines), then quick actions and pinned tools ranked by use.

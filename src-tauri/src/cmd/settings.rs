@@ -65,6 +65,11 @@ pub(crate) async fn save_settings(app: AppHandle, state: State<'_, AppState>, mu
     let was_on_path = state.settings.read().await.add_to_path;
     if settings.add_to_path != was_on_path {
         shims::set_on_path(&layout, settings.add_to_path)?;
+        // Put first in the system PATH earlier (another stack's php came first): out of it too.
+        if !settings.add_to_path
+            && let Err(e) = overrides::system_path_first(&layout, &shims::dir(&layout), false).await {
+            logs::system(&app, logs::Level::Warn, format!("{e} Remove {} from the system PATH by hand.", shims::dir(&layout).display()));
+        }
         let what = if settings.add_to_path { "added to" } else { "removed from" };
         logs::system(&app, logs::Level::Info, format!("{} {what} your PATH", shims::dir(&layout).display()));
     }

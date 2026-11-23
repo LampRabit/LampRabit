@@ -413,6 +413,8 @@ export interface PortOwner {
   name: string;
   note: string | null;
   stoppable: boolean;
+  /** The Windows service it runs as: stopping the process isn't enough. */
+  service?: string | null;
 }
 
 export interface Problem {
@@ -1191,6 +1193,14 @@ export const api = {
   checkPort: (port: number) => invoke<boolean>("check_port", { port }),
   portStatus: () => invoke<PortStatus[]>("port_status"),
   stopProcess: (pid: number) => invoke<void>("stop_process", { pid }),
+  /** Stops another stack's Windows service and sets it to start by hand (UAC prompt). */
+  stopWindowsService: (name: string) => invoke<void>("stop_windows_service", { name }),
+  /** Commands another install answers before LampRabit's (system PATH, Windows). */
+  pathShadows: () => invoke<{ command: string; path: string }[]>("path_shadows"),
+  /** LampRabit's commands first in the system PATH (UAC prompt). */
+  putCommandsFirst: () => invoke<void>("put_commands_first"),
+  /** The LampRabit folder and Composer's cache out of Windows Security scans (UAC prompt). */
+  excludeFromDefender: () => invoke<void>("exclude_from_defender"),
   clearProblem: (kind: ServiceKind) => invoke<void>("clear_problem", { kind }),
   diagnostics: (redact: boolean) => invoke<string>("diagnostics", { redact }),
   saveText: (path: string, contents: string) => invoke<void>("save_text", { path, contents }),

@@ -24,7 +24,9 @@ import {
   ServerCog,
   Settings2,
   Share2,
-  Sparkles,
+  ArrowDownToLine,
+  Compass,
+  ShieldCheck,
   Stethoscope,
   Sun,
   SquareTerminal,
@@ -65,7 +67,7 @@ const sections = [
   { id: "logs", label: "Logs", icon: ScrollText },
   { id: "sharing", label: "Sharing", icon: Share2 },
   { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "updates", label: "Updates", icon: Sparkles },
+  { id: "updates", label: "Updates", icon: ArrowDownToLine },
   { id: "help", label: "Troubleshooting", icon: LifeBuoy },
 ] as const;
 
@@ -148,7 +150,7 @@ export default function Settings() {
 
   usePageToolbar("settings", {
     title: "Settings",
-    subtitle: "Configure your local environment.",
+    subtitle: "Your local environment",
     actions: dirty ? (
       <span className="flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-warn" role="status">
         <span className="size-2 rounded-full bg-warn" /> Unsaved
@@ -217,7 +219,7 @@ export default function Settings() {
                   aria-current={current === s.id ? "true" : undefined}
                   className={clsx(
                     "flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-sm",
-                    current === s.id ? "bg-accent-soft font-semibold text-accent-text" : "text-muted hover:bg-surface-2 hover:text-fg",
+                    current === s.id ? "bg-accent-soft font-medium text-accent-text" : "text-muted hover:bg-surface-2 hover:text-fg",
                   )}
                 >
                   <s.icon size={15} aria-hidden /> {s.label}
@@ -255,12 +257,9 @@ export default function Settings() {
                 </Button>
               </div>
             </Row>
-            <Row label="Your name" hint="Home greets you with it.">
-              <input className={inputClass} value={draft.developerName ?? ""} maxLength={40} placeholder="developer" onChange={(e) => set({ developerName: e.target.value })} aria-label="Your name" />
-            </Row>
             <Row label="Setup guide" hint="Install the recommended services for what you build (PHP, Laravel, WordPress, JavaScript, Python, Java, Go…) in one go.">
               <Button onClick={() => openSetupGuide("guide")}>
-                <Sparkles size={15} /> Open the setup guide
+                <Compass size={15} /> Open the setup guide
               </Button>
             </Row>
             <Row label="Import projects" hint="Copy projects from Laragon, XAMPP, AMPPS, MAMP, Herd, Valet, FlyEnv, EnvKit, WampServer, ServBay, Local or any folder into www. The originals stay where they are.">
@@ -489,7 +488,7 @@ export default function Settings() {
                 .map(({ key, label, hint }) => (
                   <div key={key} className="flex items-center gap-4 border-b border-line px-5 py-3 sm:odd:border-r">
                     <div className="min-w-0 flex-1">
-                      <label htmlFor={`port-${key}`} className="block text-sm font-semibold">
+                      <label htmlFor={`port-${key}`} className="block text-sm font-medium">
                         {label}
                       </label>
                       <PortState port={draft.ports[key]} saved={settings.data?.ports[key]} status={ports.data?.find((p) => p.key === key)} hint={hint} />
@@ -508,7 +507,7 @@ export default function Settings() {
               {servicePorts.map(({ key, label, hint }) => (
                 <div key={key} className="flex items-center gap-4 border-b border-line px-5 py-3 sm:odd:border-r">
                   <div className="min-w-0 flex-1">
-                    <label htmlFor={`port-${key}`} className="block text-sm font-semibold">
+                    <label htmlFor={`port-${key}`} className="block text-sm font-medium">
                       {label}
                     </label>
                     <PortState port={draft.ports.services[key]} saved={settings.data?.ports.services[key]} status={ports.data?.find((p) => p.key === key)} hint={hint} />
@@ -683,6 +682,16 @@ export default function Settings() {
                 <Stethoscope size={15} /> Run diagnostics
               </Button>
             </Row>
+            {os === "windows" && (
+              <Row
+                label="Windows Security scanning"
+                hint="Windows Security scans every file Composer and npm write, so installs and Composer's autoload step can stall for minutes. Excluding the LampRabit folder and Composer's cache stops that. Asks for administrator approval; removing LampRabit takes the exclusion away."
+              >
+                <Button onClick={() => api.excludeFromDefender().then(() => notify("info", "Windows Security no longer scans the LampRabit folder and Composer's cache"), notifyError)}>
+                  <ShieldCheck size={15} /> Exclude LampRabit
+                </Button>
+              </Row>
+            )}
             <Row
               label="Remove LampRabit from this computer"
               hint="Deletes runtimes, configs, logs, certificates, hosts entries and settings. Your projects (www) and databases (data) are kept."
@@ -727,7 +736,7 @@ function Section({ id, title, subtitle, children }: { id: string; title: string;
   }, [query, id, report]);
   return (
     <section ref={ref} hidden={!hit} id={`settings-${id}`} aria-labelledby={`settings-${id}-title`} className="scroll-mt-4">
-      <h2 id={`settings-${id}-title`} className="text-base font-bold tracking-tight">
+      <h2 id={`settings-${id}-title`} className="text-base font-medium">
         {title}
       </h2>
       {subtitle && <p className="mt-0.5 text-sm text-muted">{subtitle}</p>}
@@ -741,7 +750,7 @@ function Row({ label, hint, wide = false, children }: { label: ReactNode; hint?:
   return (
     <div className={clsx("px-5 py-3.5", wide ? "space-y-2.5" : "flex flex-wrap items-center justify-between gap-x-6 gap-y-2")}>
       <div className="min-w-0 flex-1 basis-64">
-        <div className="text-sm font-semibold">{label}</div>
+        <div className="text-sm font-medium">{label}</div>
         {hint && <p className="mt-0.5 text-xs leading-relaxed text-muted">{hint}</p>}
       </div>
       {children && <div className={clsx(wide ? "" : "flex w-full shrink-0 sm:w-auto sm:min-w-64 sm:max-w-md sm:justify-end")}>{children}</div>}
@@ -753,7 +762,7 @@ function ToggleRow({ label, hint, checked, onChange }: { label: string; hint: st
   return (
     <div className="flex items-center justify-between gap-6 px-5 py-3.5">
       <div className="min-w-0">
-        <div className="text-sm font-semibold">{label}</div>
+        <div className="text-sm font-medium">{label}</div>
         <p className="mt-0.5 text-xs leading-relaxed text-muted">{hint}</p>
       </div>
       <Switch checked={checked} onChange={onChange} label={label} />
@@ -864,7 +873,7 @@ function UpdatesSection({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: 
   };
 
   const status = available ? (
-    <span className="font-semibold text-accent-text">
+    <span className="font-medium text-accent-text">
       Version {available.version} is available.{" "}
       <button
         className="inline-flex items-center gap-1 font-normal hover:underline"

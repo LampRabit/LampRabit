@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Cpu, Pencil, Play, Plus, RotateCw, Sparkles, Square, SquareTerminal, Trash2 } from "lucide-react";
+import { ChevronDown, Cpu, Pencil, Play, Plus, RotateCw, Square, SquareTerminal, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { api, type ProjectProcess, type RestartPolicy, type Settings, type Site } from "../lib/api";
 import { notifyError } from "../lib/store";
@@ -53,7 +53,7 @@ const envFrom = (text: string) =>
   );
 
 const narrow = (width: string) => clsx(inputClass.replace("w-full", ""), width);
-const fieldLabel = "mb-1 block text-xs font-semibold text-muted";
+const fieldLabel = "mb-1 block text-xs font-medium text-muted";
 
 /** When a process starts by itself; stored as withApp, atLaunch and schedule. */
 type Start = "manual" | "project" | "launch" | "schedule";
@@ -364,7 +364,7 @@ export default function ProjectProcesses({ site, settings, offer, onOfferTaken, 
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3">
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-bold">Keep running</h3>
+          <h3 className="text-sm font-medium">Keep running</h3>
           <p className="text-xs text-muted">Queue workers, schedulers, Vite, an API: restarted if they crash.</p>
         </div>
         {saved.length > 0 && (
@@ -393,7 +393,7 @@ export default function ProjectProcesses({ site, settings, offer, onOfferTaken, 
                   <AppState status={status} className="shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="text-sm font-semibold">{p.name}</span>
+                      <span className="text-sm font-medium">{p.name}</span>
                       {p.port != null && <span className="font-mono text-[11px] text-muted">:{p.port}</span>}
                       {startLabel(p) && (
                         <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted" title={next ? `Next run ${new Date(next).toLocaleString()}` : undefined}>
@@ -436,7 +436,7 @@ export default function ProjectProcesses({ site, settings, offer, onOfferTaken, 
                   >
                     <SquareTerminal size={15} />
                     {!!unread[key] && (
-                      <span className="absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-accent px-1 text-center text-[9px] leading-4 font-bold text-accent-fg">{unread[key] > 99 ? "99+" : unread[key]}</span>
+                      <span className="absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-accent px-1 text-center text-[11px] leading-4 font-medium text-accent-fg">{unread[key] > 99 ? "99+" : unread[key]}</span>
                     )}
                   </button>
                 </div>
@@ -448,8 +448,8 @@ export default function ProjectProcesses({ site, settings, offer, onOfferTaken, 
 
       {offers.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-2">
-          <span className="flex items-center gap-1.5 text-xs font-semibold text-muted">
-            <Sparkles size={13} aria-hidden /> Suggested
+          <span className="flex items-center gap-1.5 text-xs font-medium text-muted">
+            Suggested
           </span>
           {offers.map((o) => (
             <Button key={o.name} size="sm" variant="ghost" onClick={() => setEditing(o)} title={o.command}>

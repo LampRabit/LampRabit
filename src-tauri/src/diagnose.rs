@@ -17,6 +17,9 @@ pub struct PortOwner {
     pub note: Option<String>,
     /// Whether LampRabit may offer to stop it (never system processes).
     pub stoppable: bool,
+    /// The Windows service it runs as (another stack's Apache or MySQL, IIS): stopping the
+    /// process isn't enough, Windows would start it again.
+    pub service: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -66,6 +69,7 @@ pub async fn port_owner(port: u16) -> Option<PortOwner> {
     Some(PortOwner {
         note: owner_note(pid, &lower),
         stoppable: !system,
+        service: crate::overrides::service_for(pid).await,
         pid,
         name,
     })

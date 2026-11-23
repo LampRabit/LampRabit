@@ -14,9 +14,9 @@ import { Button } from "./ui";
  */
 
 const tone = {
-  error: { icon: AlertCircle, text: "text-danger-text", ring: "border-danger/25 bg-danger-soft/40" },
-  warning: { icon: AlertTriangle, text: "text-warn", ring: "border-warn/30 bg-warn/10" },
-  info: { icon: Info, text: "text-accent-text", ring: "border-line bg-surface-2/40" },
+  error: { icon: AlertCircle, text: "text-danger-text", ring: "border-line bg-surface" },
+  warning: { icon: AlertTriangle, text: "text-warn", ring: "border-line bg-surface" },
+  info: { icon: Info, text: "text-accent-text", ring: "border-line bg-surface" },
 };
 
 const runtimeName: Partial<Record<Site["language"], string>> = { php: "PHP", node: "Node.js", python: "Python", java: "Java", go: "Go", rust: "Rust" };
@@ -63,7 +63,7 @@ export default function ProjectDoctor({ site, onCommands }: { site: Site; onComm
     <section aria-label="Project health" className="rounded-xl border border-line bg-surface">
       <div className="flex items-center gap-2 border-b border-line/70 px-4 py-2.5">
         <Stethoscope size={15} className="text-muted" aria-hidden />
-        <h3 className="text-sm font-semibold text-fg">Health</h3>
+        <h3 className="text-sm font-medium text-fg">Health</h3>
         <span className={clsx("text-xs", issues.length === 0 ? "text-ok" : errors ? "text-danger-text" : "text-warn")} aria-live="polite">
           {doctor.isLoading ? "Checking…" : issues.length === 0 ? "Everything checks out" : `${issues.length} ${issues.length === 1 ? "thing" : "things"} to look at`}
         </span>

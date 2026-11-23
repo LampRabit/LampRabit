@@ -21,7 +21,6 @@ import {
   Layers,
   Layers3,
   Mail,
-  Moon,
   Pencil,
   Play,
   RotateCcw,
@@ -42,8 +41,6 @@ import {
   Flame,
   Cpu,
   Square,
-  Sun,
-  SunMedium,
   Table2,
   TerminalSquare,
   Trash2,
@@ -66,9 +63,8 @@ import {
 } from "../lib/api";
 import { readPref, useAppStore, writePref, type Activity, notifyError } from "../lib/store";
 import { toolUrl } from "../lib/tools";
-import { runtimeTiles, tileFor } from "../components/runtimes";
+import { TILE, runtimeTiles, tileFor } from "../components/runtimes";
 import { formatClock, formatUptime, useNow } from "../lib/time";
-import { randomQuote } from "../lib/quotes";
 import { connection, copyText, envText } from "../lib/connections";
 import { formatBytes, formatCpu, useUsage, useUsageSampler } from "../lib/usage";
 import { isServer, primaryServer, serverEnabled, startAllHint, useStack } from "../lib/stack";
@@ -76,43 +72,38 @@ import { useHotkeys } from "../lib/shortcuts";
 import { Button, Card, Pill, Segmented } from "../components/ui";
 import Menu from "../components/Menu";
 import ProblemPanel from "../components/ProblemPanel";
+import { NeedsAttention, StatusStrip, conflictFor, useIssues } from "../components/HomeStatus";
+import { useTunnels } from "../components/Tunnels";
 import ProfilesDialog, { ProfilesTransfer } from "../components/ProfilesDialog";
 import Sparkline from "../components/Sparkline";
 import { Kbd } from "../components/Dialog";
 import { infoFor, serviceLink, useCatalog } from "../lib/catalog";
 
-const greetings = [
-  { until: 5, text: "Good evening", icon: Moon },
-  { until: 12, text: "Good morning", icon: Sun },
-  { until: 17, text: "Good afternoon", icon: SunMedium },
-  { until: 24, text: "Good evening", icon: Moon },
-];
-
 const serviceMeta: Record<ServiceKind, { icon: typeof Feather; tile: string; blurb: string }> = {
-  apache: { icon: Feather, tile: "bg-rose-500/10 text-rose-500", blurb: "Web server for your local sites" },
-  nginx: { icon: ServerIcon, tile: "bg-emerald-600/10 text-emerald-600", blurb: "Fast web server for your local sites" },
-  caddy: { icon: ShieldCheck, tile: runtimeTiles.caddy.className, blurb: "Web server with a short config file" },
-  frankenphp: { icon: Flame, tile: runtimeTiles.frankenphp.className, blurb: "Web server with PHP built in" },
-  tomcat: { icon: Cpu, tile: runtimeTiles.tomcat.className, blurb: "Runs your Java web apps" },
-  mariadb: { icon: Database, tile: "bg-amber-600/12 text-amber-600", blurb: "Database server for your local sites" },
-  postgres: { icon: Database, tile: runtimeTiles.postgres.className, blurb: "PostgreSQL database server" },
-  pgadmin: { icon: Gauge, tile: runtimeTiles.pgadmin.className, blurb: "PostgreSQL admin in the browser" },
-  mongodb: { icon: Leaf, tile: runtimeTiles.mongodb.className, blurb: "Document database" },
-  clickhouse: { icon: BarChart3, tile: runtimeTiles.clickhouse.className, blurb: "Analytics database" },
-  neo4j: { icon: Network, tile: runtimeTiles.neo4j.className, blurb: "Graph database" },
-  meilisearch: { icon: Search, tile: runtimeTiles.meilisearch.className, blurb: "Search engine" },
-  typesense: { icon: Search, tile: runtimeTiles.typesense.className, blurb: "Search engine" },
-  rustfs: { icon: HardDrive, tile: runtimeTiles.rustfs.className, blurb: "S3 object storage" },
-  ollama: { icon: Bot, tile: runtimeTiles.ollama.className, blurb: "Local AI models" },
-  minio: { icon: HardDrive, tile: runtimeTiles.minio.className, blurb: "S3 object storage (unmaintained upstream)" },
-  elasticsearch: { icon: Search, tile: runtimeTiles.elasticsearch.className, blurb: "Search engine" },
-  opensearch: { icon: Search, tile: runtimeTiles.opensearch.className, blurb: "Search engine" },
-  n8n: { icon: Workflow, tile: runtimeTiles.n8n.className, blurb: "Workflow automation" },
-  rabbitmq: { icon: Inbox, tile: runtimeTiles.rabbitmq.className, blurb: "Message queue" },
-  mysql: { icon: DatabaseZap, tile: runtimeTiles.mysql.className, blurb: "Oracle MySQL, next to MariaDB" },
-  mailpit: { icon: Mail, tile: "bg-sky-500/10 text-sky-500", blurb: "Catches mail sent by your apps" },
-  redis: { icon: Zap, tile: "bg-red-500/10 text-red-500", blurb: "Cache, sessions and queues" },
-  memcached: { icon: Layers3, tile: "bg-teal-500/10 text-teal-600", blurb: "Memory cache for sessions and queries" },
+  apache: { icon: Feather, tile: TILE, blurb: "Web server for your local sites" },
+  nginx: { icon: ServerIcon, tile: TILE, blurb: "Fast web server for your local sites" },
+  caddy: { icon: ShieldCheck, tile: TILE, blurb: "Web server with a short config file" },
+  frankenphp: { icon: Flame, tile: TILE, blurb: "Web server with PHP built in" },
+  tomcat: { icon: Cpu, tile: TILE, blurb: "Runs your Java web apps" },
+  mariadb: { icon: Database, tile: TILE, blurb: "Database server for your local sites" },
+  postgres: { icon: Database, tile: TILE, blurb: "PostgreSQL database server" },
+  pgadmin: { icon: Gauge, tile: TILE, blurb: "PostgreSQL admin in the browser" },
+  mongodb: { icon: Leaf, tile: TILE, blurb: "Document database" },
+  clickhouse: { icon: BarChart3, tile: TILE, blurb: "Analytics database" },
+  neo4j: { icon: Network, tile: TILE, blurb: "Graph database" },
+  meilisearch: { icon: Search, tile: TILE, blurb: "Search engine" },
+  typesense: { icon: Search, tile: TILE, blurb: "Search engine" },
+  rustfs: { icon: HardDrive, tile: TILE, blurb: "S3 object storage" },
+  ollama: { icon: Bot, tile: TILE, blurb: "Local AI models" },
+  minio: { icon: HardDrive, tile: TILE, blurb: "S3 object storage (unmaintained upstream)" },
+  elasticsearch: { icon: Search, tile: TILE, blurb: "Search engine" },
+  opensearch: { icon: Search, tile: TILE, blurb: "Search engine" },
+  n8n: { icon: Workflow, tile: TILE, blurb: "Workflow automation" },
+  rabbitmq: { icon: Inbox, tile: TILE, blurb: "Message queue" },
+  mysql: { icon: DatabaseZap, tile: TILE, blurb: "Oracle MySQL, next to MariaDB" },
+  mailpit: { icon: Mail, tile: TILE, blurb: "Catches mail sent by your apps" },
+  redis: { icon: Zap, tile: TILE, blurb: "Cache, sessions and queues" },
+  memcached: { icon: Layers3, tile: TILE, blurb: "Memory cache for sessions and queries" },
 };
 
 /** Services listed only once installed; the core stack is always listed, with an Install button. */
@@ -147,13 +138,17 @@ export default function Overview() {
   const [selected, setSelected] = useState<Set<ServiceKind>>(new Set());
   const [focus, setFocus] = useState(0);
   const [profilesDialog, setProfilesDialog] = useState<{ initial?: ServiceKind[]; profile?: Settings["profiles"][number] } | null>(null);
-  const [quote] = useState(randomQuote);
   const rows = useRef<(HTMLElement | null)[]>([]);
   useUsageSampler(stack.running.length > 0);
 
-  const hour = new Date(now).getHours();
-  const greeting = greetings.find((g) => hour < g.until)!;
-  const troubled = list.filter((s) => s.problem || (s.state === "running" && s.health?.status === "degraded"));
+  const tunnels = useTunnels();
+  // "Show fixes" in Needs attention opens that service's row and brings it into view.
+  const [revealed, setRevealed] = useState<{ kind: ServiceKind; at: number } | null>(null);
+  const shadows = useQuery({ queryKey: ["path-shadows"], queryFn: api.pathShadows, refetchInterval: active ? 60_000 : false });
+  const issues = useIssues(list, ports.data, tunnels.data, shadows.data, (kind) => {
+    setRevealed({ kind, at: Date.now() });
+    rows.current[list.findIndex((s) => s.kind === kind)]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
   const installedCount = stack.usable.length;
 
   useEffect(() => {
@@ -224,36 +219,23 @@ export default function Overview() {
   return (
     <>
       <div className="motion-stagger space-y-6">
-        <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
-        <div>
-          <h1 className="flex items-center gap-3 text-3xl font-extrabold tracking-tight">
-            {greeting.text}, {settings.data?.developerName?.trim() || "developer"}
-            <greeting.icon size={28} strokeWidth={1.75} className="text-accent-text" aria-hidden />
-          </h1>
-          {/* The service list shows counts; the header only speaks up when something needs doing. */}
-          <p className="mt-2 text-muted empty:hidden" aria-live="polite">
-            {installedCount === 0 ? (
-              "Install Apache, PHP and MariaDB from Services to get started."
-            ) : (
-              troubled.length > 0 && (
-                <span className="font-medium text-danger-text">
-                  {troubled.map((s) => s.label).join(" and ")} {troubled.length === 1 ? "needs" : "need"} attention
-                </span>
-              )
-            )}
-          </p>
-          {installedCount > 0 && troubled.length === 0 && (
-            <figure className="mt-2 max-w-2xl">
-              <blockquote className="text-muted italic">“{quote.text}”</blockquote>
-              <figcaption className="mt-0.5 text-xs text-muted/80">— {quote.author}</figcaption>
-            </figure>
-          )}
-        </div>
+        <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
+        <h1 className="text-3xl font-medium tracking-tight">Home</h1>
         <div className="flex flex-wrap items-center gap-2">
           {installedCount === 0 ? (
             <Button variant="primary" onClick={() => navigate("services")}>
               Set up your stack
             </Button>
+          ) : chosen.length > 0 ? (
+            // Ticked services: the buttons act on them, not on the whole stack.
+            <>
+              <Button variant="primary" onClick={() => stack.start(chosen)} disabled={stack.busy || stack.isUp(chosen)} title="S">
+                <Play size={14} /> Start {chosen.length} selected
+              </Button>
+              <Button onClick={() => stack.stop(chosen)} disabled={stack.busy || !chosen.some((k) => stack.stoppable.some((s) => s.kind === k))} title="X">
+                <Square size={12} className="fill-current" /> Stop {chosen.length} selected
+              </Button>
+            </>
           ) : (
             <>
               {stack.up ? (
@@ -272,6 +254,11 @@ export default function Overview() {
           )}
         </div>
       </header>
+
+      <div className="space-y-4" aria-live="polite">
+        <StatusStrip services={services.data ?? []} sites={sites.data} tunnels={tunnels.data} issues={issues.length} />
+        <NeedsAttention issues={issues} />
+      </div>
 
       <VcRuntimeBanner />
 
@@ -301,8 +288,7 @@ export default function Overview() {
           </div>
           <div className="mb-3 px-1">
             <div className="flex items-center gap-3">
-              <h2 id="services-heading" className="text-base font-bold">Services</h2>
-              <span className="text-sm text-muted">{stack.running.length} of {installedCount} running</span>
+              <h2 id="services-heading" className="text-base font-medium">Services</h2>
             </div>
             <div className="flex flex-wrap items-center gap-2.5">
               <label className="flex cursor-pointer items-center gap-2 text-sm text-muted select-none">
@@ -347,6 +333,7 @@ export default function Overview() {
                   inProfile={!!stack.profile?.services.includes(s.kind)}
                   profileActive={!!stack.profile}
                   onCopy={copy}
+                  revealAt={revealed?.kind === s.kind ? revealed.at : undefined}
                 />
               </li>
             ))}
@@ -412,7 +399,7 @@ function ProfileTiles({
         <div>
           <button type="button" onClick={toggle} aria-expanded={open} className="flex items-center gap-1.5 rounded">
             <ChevronDown size={16} className={clsx("text-muted transition-transform", !open && "-rotate-90")} aria-hidden />
-            <h2 id="profiles-heading" className="text-base font-bold">Stack Profiles</h2>
+            <h2 id="profiles-heading" className="text-base font-medium">Stack profiles</h2>
             {!open && active && <span className="text-sm font-normal text-muted">· {active}</span>}
           </button>
           {open && <p className="text-xs text-muted">Select a profile to filter your stack, or start its services directly.</p>}
@@ -432,7 +419,7 @@ function ProfileTiles({
               key={profile.name ?? "all"}
               onClick={() => onSelect(profile.name)}
               className={clsx(
-                "group relative flex min-h-[142px] cursor-pointer flex-col justify-between rounded-2xl border p-4 shadow-card transition-all",
+                "group relative flex min-h-[142px] cursor-pointer flex-col justify-between rounded-2xl border p-4 shadow-card transition-[border-color,background-color,box-shadow]",
                 selected
                   ? "border-accent/70 bg-accent-soft/30 ring-1 ring-accent/30"
                   : "border-line bg-surface hover:border-accent/40 hover:shadow-md",
@@ -450,7 +437,7 @@ function ProfileTiles({
                     <Layers size={16} />
                   </span>
                   <div className="min-w-0">
-                    <span className="block truncate text-sm font-bold text-fg">
+                    <span className="block truncate text-sm font-medium text-fg">
                       {profile.name ?? profile.label}
                     </span>
                     <span className="block text-[11px] text-muted">
@@ -461,7 +448,7 @@ function ProfileTiles({
 
                 <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                   {up && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[11px] font-semibold text-ok">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[11px] font-medium text-ok">
                       <span className="size-1.5 rounded-full bg-ok" />
                       Running
                     </span>
@@ -506,7 +493,7 @@ function ProfileTiles({
               <div className="flex items-center justify-between border-t border-line/50 pt-2.5">
                 <span className="text-xs">
                   {selected ? (
-                    <span className="inline-flex items-center gap-1 font-semibold text-accent-text">
+                    <span className="inline-flex items-center gap-1 font-medium text-accent-text">
                       {/* "Active" read as "running" while its services were stopped. */}
                       <Check size={12} strokeWidth={2.5} /> Selected
                     </span>
@@ -544,7 +531,7 @@ function ProfileTiles({
         <button
           type="button"
           onClick={onManage}
-          className="flex min-h-[142px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line bg-surface/40 p-4 text-sm font-semibold text-muted transition-all hover:border-accent/60 hover:bg-accent-soft/30 hover:text-accent-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="flex min-h-[142px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line bg-surface/40 p-4 text-sm font-medium text-muted transition-colors hover:border-accent/60 hover:bg-accent-soft/30 hover:text-accent-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           <span className="flex size-9 items-center justify-center rounded-full border border-dashed border-current">
             <Plus size={16} />
@@ -628,13 +615,6 @@ function openAction(
   return null;
 }
 
-/** A port another program holds, found before the service is started. */
-function conflictFor(service: ServiceInfo, ports?: PortStatus[]) {
-  if (service.state === "running" || service.state === "starting") return null;
-  const taken = ports?.find((p) => p.port === service.port && !p.free && !p.usedByService);
-  return taken ?? null;
-}
-
 function ServiceRow({
   ref,
   service,
@@ -649,7 +629,10 @@ function ServiceRow({
   inProfile,
   profileActive,
   onCopy,
+  revealAt,
 }: {
+  /** Set when Needs attention asks to show this row's fixes. */
+  revealAt?: number;
   ref: (el: HTMLElement | null) => void;
   service: ServiceInfo;
   now: number;
@@ -671,6 +654,9 @@ function ServiceRow({
   const connMode = useAppStore((s) => s.connMode);
   const usage = useUsage((s) => s.series[service.kind]);
   const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (revealAt) setExpanded(true);
+  }, [revealAt]);
   // PHP's workers belong to no one service; the web servers show them, since that's
   // where a slow page's time goes.
   const php = useUsage((s) => (isServer(service.kind) ? s.latest.php : undefined));
@@ -740,8 +726,8 @@ function ServiceRow({
       onMouseDown={onFocus}
       aria-label={`${service.label}, ${status.text}${service.installed ? `, port ${service.port}` : ""}`}
       className={clsx(
-        "rounded-2xl border bg-surface transition-all duration-150 outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
-        selected ? "border-accent/50 bg-accent-soft/40 shadow-sm" : running ? "border-accent/25 shadow-card" : "border-line shadow-card",
+        "rounded-xl border bg-surface transition-[border-color,background-color,box-shadow] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+        selected ? "border-accent/50 bg-accent-soft/40" : "border-line shadow-card",
         !service.installed && "border-dashed",
         profileActive && !inProfile && "opacity-75",
       )}
@@ -765,32 +751,29 @@ function ServiceRow({
           aria-label={`Select ${service.label}`}
           tabIndex={-1}
         />
-        <div className={clsx("flex size-9 shrink-0 items-center justify-center rounded-xl", meta.tile)} aria-hidden>
+        <div className={clsx("flex size-9 shrink-0 items-center justify-center rounded-lg", meta.tile)} aria-hidden>
           <meta.icon size={18} strokeWidth={1.75} />
         </div>
-        <div className="min-w-0 flex-1 flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-3 gap-y-1">
           <button
             type="button"
             onClick={onToggle}
             disabled={!service.installed}
             tabIndex={-1}
             title={service.installed ? (selected ? `Unselect ${service.label}` : `Select ${service.label}`) : undefined}
-            className="cursor-pointer rounded text-[14px] font-bold text-fg hover:text-accent-text disabled:cursor-default disabled:hover:text-fg"
+            className="cursor-pointer rounded text-[14px] font-medium text-fg hover:text-accent-text disabled:cursor-default disabled:hover:text-fg"
           >
             {service.label}
           </button>
           <Pill tone={status.tone}>{status.text}</Pill>
           {service.installed && service.port > 0 && (
-            <span className="font-mono text-xs px-1.5 py-0.5 rounded-md bg-surface-2 border border-line text-muted">
-              :{service.port}
-            </span>
+            <span className="font-mono text-xs text-muted tabular-nums">:{service.port}</span>
           )}
-          {service.version && <span className="font-mono text-xs text-muted/80 hidden sm:inline">v{service.version}</span>}
+          {service.version && <span className="font-mono text-xs text-muted hidden sm:inline">{service.version}</span>}
           {running && lastCpu !== undefined && lastMem !== undefined ? (
-            <span className="hidden md:inline-flex items-center gap-1.5 font-mono text-[11px] text-muted bg-surface-2/60 px-2 py-0.5 rounded border border-line/50">
-              <span>CPU <strong className="text-fg font-medium">{formatCpu(lastCpu)}</strong></span>
-              <span>·</span>
-              <span>RAM <strong className="text-fg font-medium">{formatBytes(lastMem)}</strong></span>
+            <span className="hidden md:inline-flex items-center gap-3 font-mono text-xs text-muted tabular-nums">
+              <span>CPU <span className="text-fg">{formatCpu(lastCpu)}</span></span>
+              <span>RAM <span className="text-fg">{formatBytes(lastMem)}</span></span>
             </span>
           ) : (
             <span className="hidden lg:inline text-xs text-muted truncate max-w-xs">{meta.blurb}</span>
@@ -915,7 +898,7 @@ function ServiceRow({
           </div>
 
           {conflict && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-warn/30 bg-warn/10 p-3 text-sm" role="status">
+            <div className="flex items-start gap-2.5 rounded-xl border border-line bg-surface-2/40 p-3 text-sm" role="status">
               <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden />
               <div>
                 <span className="font-medium">Port {conflict.port} is in use</span>
@@ -928,7 +911,7 @@ function ServiceRow({
             </div>
           )}
           {degraded && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-warn/30 bg-warn/10 p-3 text-sm" role="status">
+            <div className="flex items-start gap-2.5 rounded-xl border border-line bg-surface-2/40 p-3 text-sm" role="status">
               <Pulse size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden />
               <div>
                 <span className="font-medium">The process is running but not answering.</span>{" "}
@@ -948,8 +931,8 @@ function ServiceRow({
 function Stat({ label, value, live }: { label: string; value: string | number; live?: boolean }) {
   return (
     <div className="flex min-w-12 flex-col gap-0.5">
-      <span className="text-[10px] font-bold tracking-wider text-muted uppercase">{label}</span>
-      <span className={clsx("font-mono text-[13px] tabular-nums", live ? "font-semibold text-accent-text" : "text-fg")}>{value}</span>
+      <span className="text-xs font-medium text-muted">{label}</span>
+      <span className={clsx("font-mono text-[13px] tabular-nums", live ? "font-medium text-accent-text" : "text-fg")}>{value}</span>
     </div>
   );
 }
@@ -995,7 +978,7 @@ function FoldCard({ id, defaultOpen, title, extra, children }: { id: string; def
   return (
     <Card className="p-4">
       <div className={clsx("flex items-center justify-between gap-2 px-1", open && "mb-2")}>
-        <button type="button" onClick={toggle} aria-expanded={open} className="flex items-center gap-1.5 rounded text-sm font-bold text-fg">
+        <button type="button" onClick={toggle} aria-expanded={open} className="flex items-center gap-1.5 rounded text-sm font-medium text-fg">
           <ChevronDown size={14} className={clsx("text-muted transition-transform", !open && "-rotate-90")} aria-hidden />
           <h2>{title}</h2>
         </button>
@@ -1032,7 +1015,7 @@ function QuickShortcuts({ sites, services, settings }: { sites?: SitesInfo; serv
       <div className="space-y-1">
         {tools.map((t) => {
           const tiles = runtimeTiles[t.tool];
-          const hint = !t.installed ? "Not installed. Click to install" : t.ready ? t.readyText : t.need;
+          const hint = !t.installed ? "Not installed" : t.ready ? t.readyText : t.need;
           return (
             <button
               key={t.tool}
@@ -1044,7 +1027,7 @@ function QuickShortcuts({ sites, services, settings }: { sites?: SitesInfo; serv
                 {tiles.icon(16)}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{t.label}</span>
+                <span className="block truncate text-sm font-medium">{t.label}</span>
                 <span className={clsx("block truncate text-xs", t.installed && t.ready ? "font-medium text-accent-text" : "text-muted")}>{hint}</span>
               </span>
               <ChevronRight size={15} className="shrink-0 text-muted" aria-hidden />
@@ -1100,7 +1083,7 @@ function ConnectPanel({ services, onCopy }: { services: ServiceInfo[]; onCopy: (
                 aria-label={`Copy ${s.label} connection`}
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block text-xs font-semibold text-muted">{s.label}</span>
+                  <span className="block text-xs font-medium text-muted">{s.label}</span>
                   <span className="block font-mono text-xs break-all whitespace-pre-wrap text-fg">{text}</span>
                 </span>
                 {copied === s.kind ? (
@@ -1134,7 +1117,7 @@ function ProjectList({ sites, onNew }: { sites: Site[]; onNew: () => void }) {
       defaultOpen={true}
       title={`Projects${sites.length ? ` · ${sites.length}` : ""}`}
       extra={
-        <button onClick={() => navigate("sites")} className="text-xs font-semibold text-accent-text hover:underline">
+        <button onClick={() => navigate("sites")} className="text-xs font-medium text-accent-text hover:underline">
           All ›
         </button>
       }
@@ -1144,11 +1127,11 @@ function ProjectList({ sites, onNew }: { sites: Site[]; onNew: () => void }) {
         {recent.map((site) => (
           <li key={site.path} className="group flex items-center gap-1 rounded-xl hover:bg-surface-2/60">
             <button type="button" onClick={() => openSite(site.path)} className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2 text-left" title={`${site.name}: open its card on Sites`}>
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-sm font-bold text-accent-text uppercase" aria-hidden>
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-sm font-medium text-muted uppercase" aria-hidden>
                 {site.name.slice(0, 1)}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{site.name}</span>
+                <span className="block truncate text-sm font-medium">{site.name}</span>
                 <span className="block truncate text-xs text-muted">
                   {site.framework ?? site.language}
                   {site.gitBranch && ` · ${site.gitBranch}`}
@@ -1190,7 +1173,7 @@ function RecentActivity() {
     <FoldCard id="home-activity" defaultOpen={false}
         title="Recent activity"
         extra={
-          <button onClick={() => navigate("logs")} className="text-xs font-semibold text-accent-text hover:underline">
+          <button onClick={() => navigate("logs")} className="text-xs font-medium text-accent-text hover:underline">
             Logs ›
           </button>
         }

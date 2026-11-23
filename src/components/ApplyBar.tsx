@@ -33,7 +33,7 @@ export default function ApplyBar({
     >
       <span className="size-2 shrink-0 rounded-full bg-warn" aria-hidden />
       <span className="min-w-0">
-        <span className="block text-sm font-semibold">Unsaved changes</span>
+        <span className="block text-sm font-medium">Unsaved changes</span>
         <span className="block truncate text-xs text-muted">{note}</span>
       </span>
       <Button size="sm" onClick={onDiscard} disabled={busy}>

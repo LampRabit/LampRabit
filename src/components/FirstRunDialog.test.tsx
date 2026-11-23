@@ -143,14 +143,13 @@ describe("importing projects", () => {
   });
 });
 
-describe("the name", () => {
-  it("is asked last and greets the developer", async () => {
+describe("the last step", () => {
+  // Home no longer greets by name (2026-11-23), so the guide doesn't ask for one.
+  it("follows the projects step without asking for a name", async () => {
     show("guide");
     await userEvent.click(await screen.findByRole("button", { name: "Skip, I'll use Services" }));
     await userEvent.click(await screen.findByRole("button", { name: "Skip" }));
-    const input = await screen.findByPlaceholderText("Your name");
-    await userEvent.type(input, "Sam{Enter}");
-    await waitFor(() => expect(settings.developerName).toBe("Sam"));
-    expect(await screen.findByText("You're all set, Sam")).toBeTruthy();
+    expect(await screen.findByText("You're all set")).toBeTruthy();
+    expect(screen.queryByPlaceholderText("Your name")).toBeNull();
   });
 });

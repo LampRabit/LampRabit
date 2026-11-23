@@ -66,6 +66,16 @@ const services = [
   service("mailpit", "Mailpit", "stopped", 8025, "1.27.10"),
   service("redis", "Redis", "stopped", 6379, "8.2.2"),
 ];
+// Home with problems: MySQL stopped answering, Redis's port is held by another program.
+if (q.get("issues")) {
+  Object.assign(services[2], { health: { status: "degraded", detail: "No answer on port 3307 for 30 s", checkedAt: Date.now(), failures: 3 } });
+}
+const portStatus = q.get("issues")
+  ? [
+      { key: "redis", port: 6379, free: false, usedByService: null, owner: { pid: 4120, name: "redis-server.exe", note: null, stoppable: true, service: null } },
+      { key: "mariadb", port: 3306, free: false, usedByService: null, owner: { pid: 3988, name: "mysqld.exe", note: null, stoppable: true, service: "wampmariadb64" } },
+    ]
+  : [];
 
 // Logs: MySQL's own ISO lines from days ago, repeats to fold, an error, project output.
 const day = (d: number, t: string) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10) + t;
@@ -220,7 +230,8 @@ const answers: Record<string, unknown> = {
   node_status: { manager: "nvm-windows", managerVersion: "1.2.2", current: "24.11.1", installed: ["24.11.1"], needsElevation: false, packageManagers: [{ id: "pnpm", enabled: true }, { id: "yarn", enabled: false }], corepack: true },
   node_available: [],
   service_usage: services.map((s) => ({ id: s.kind, cpu: s.state === "running" ? 1.2 : 0, memory: s.state === "running" ? 120_000_000 : 0, processes: 1 })),
-  port_status: [],
+  port_status: portStatus,
+  path_shadows: q.get("issues") ? [{ command: "php", path: "C:\\xampp\\php\\php.exe" }, { command: "composer", path: "C:\\ProgramData\\ComposerSetup\\bin\\composer.bat" }] : [],
   service_config_files: [{ label: "httpd.conf", path: "C:/lampRabit/etc/apache/httpd.conf", exists: true }],
   log_history: { lines: logLines, cursor: 0 },
   list_dumps: [],

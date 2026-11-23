@@ -7,7 +7,8 @@ type Variant = "primary" | "secondary" | "soft" | "danger" | "ghost";
 const variants: Record<Variant, string> = {
   primary: "bg-accent text-accent-fg shadow-card hover:bg-accent-hover",
   secondary: "border border-line bg-surface text-fg shadow-card hover:bg-surface-2",
-  soft: "bg-accent-soft text-accent-text hover:brightness-95 dark:hover:brightness-125",
+  // Row actions (Start next to Stop): quiet like secondary, so the accent stays for the one primary action.
+  soft: "border border-line bg-surface text-fg shadow-card hover:bg-surface-2",
   danger: "bg-danger text-white hover:bg-danger-hover",
   ghost: "text-muted hover:bg-surface-2 hover:text-fg",
 };
@@ -51,7 +52,7 @@ export function PageHeader({
   return (
     <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+        <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
         {subtitle && <p className="mt-1 text-muted">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
@@ -69,18 +70,16 @@ export function Pill({ tone, children }: { tone: "ok" | "warn" | "muted" | "dang
   return (
     <span
       className={clsx(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
-        tone === "ok" && "bg-accent-soft text-accent-text",
-        tone === "warn" && "bg-warn/15 text-warn",
-        tone === "muted" && "bg-surface-2 text-muted",
-        tone === "danger" && "bg-danger-soft text-danger-text",
+        // The status light: a dot carries the colour, the word stays quiet.
+        "inline-flex items-center gap-1.5 text-xs font-medium",
+        tone === "danger" ? "text-danger-text" : tone === "muted" ? "text-muted" : "text-fg",
       )}
     >
       <span
         className={clsx(
           "size-1.5 rounded-full",
           tone === "ok" && "bg-ok",
-          tone === "warn" && "animate-pulse bg-warn",
+          tone === "warn" && "bg-warn",
           tone === "muted" && "bg-muted/60",
           tone === "danger" && "bg-danger",
         )}
@@ -152,7 +151,7 @@ export function Segmented<T extends string>({
           onClick={() => onChange(o.value)}
           className={clsx(
             "flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors",
-            value === o.value ? "bg-accent text-accent-fg shadow-card" : "text-muted hover:text-fg",
+            value === o.value ? "bg-surface-2 text-fg shadow-card" : "text-muted hover:text-fg",
           )}
         >
           {o.icon}
@@ -187,9 +186,9 @@ export function SectionCard({
   return (
     <Card className={clsx("p-6", className)}>
       <div className="mb-5 flex items-start gap-4">
-        <IconTile className="bg-accent-soft text-accent-text">{icon}</IconTile>
+        <IconTile className="bg-surface-2 text-muted">{icon}</IconTile>
         <div className="min-w-0 flex-1">
-          <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+          <h2 className="text-lg font-medium tracking-tight">{title}</h2>
           {subtitle && <p className="text-sm text-muted">{subtitle}</p>}
         </div>
         {actions}

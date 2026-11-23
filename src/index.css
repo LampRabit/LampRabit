@@ -174,8 +174,9 @@ body {
  * <html data-motion> is "full", "reduced" (fades only, no movement) or "off"; see lib/motion.ts.
  * Movement lives in the .motion-* classes so "reduced" can swap it for a plain fade. */
 :root {
-  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Kept as a name for older classes; no overshoot, so it's the same curve. */
+  --ease-spring: var(--ease-out);
 }
 @keyframes fade-in {
   from {

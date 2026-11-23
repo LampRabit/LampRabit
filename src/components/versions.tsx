@@ -12,11 +12,11 @@ import { Button } from "./ui";
 export type RunState = "running" | "stopped" | "starting" | "stopping" | "error";
 
 const runBadges: Record<RunState, { text: string; className: string; dot: string }> = {
-  running: { text: "Running", className: "border-ok/20 bg-ok/10 text-ok", dot: "bg-ok" },
-  starting: { text: "Starting", className: "border-warn/20 bg-warn/10 text-warn", dot: "bg-warn animate-pulse" },
-  stopping: { text: "Stopping", className: "border-warn/20 bg-warn/10 text-warn", dot: "bg-warn animate-pulse" },
-  stopped: { text: "Stopped", className: "border-line bg-surface-2 text-muted", dot: "bg-muted" },
-  error: { text: "Failed", className: "border-danger/20 bg-danger-soft text-danger-text", dot: "bg-danger" },
+  running: { text: "Running", className: "text-fg", dot: "bg-ok" },
+  starting: { text: "Starting", className: "text-fg", dot: "bg-warn animate-pulse" },
+  stopping: { text: "Stopping", className: "text-fg", dot: "bg-warn animate-pulse" },
+  stopped: { text: "Stopped", className: "text-muted", dot: "bg-muted" },
+  error: { text: "Failed", className: "text-danger-text", dot: "bg-danger" },
 };
 
 /**
@@ -29,20 +29,20 @@ export function ActiveTile({ version, state, details, children }: { version: str
   return (
     <div className="flex flex-col rounded-2xl border border-line bg-surface p-5 shadow-card">
       <div className="flex items-center justify-between gap-3 border-b border-line pb-3">
-        <h4 className="text-xs font-bold tracking-wider text-muted uppercase" title="The version LampRabit runs and its commands use">
+        <h4 className="text-xs font-medium text-muted" title="The version LampRabit runs and its commands use">
           Version in use
         </h4>
         {badge ? (
-          <span className={clsx("inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold", badge.className)}>
+          <span className={clsx("inline-flex items-center gap-1.5 text-xs font-medium", badge.className)}>
             <span className={clsx("size-1.5 rounded-full", badge.dot)} aria-hidden /> {badge.text}
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-ok/20 bg-ok/10 px-2 py-1 text-xs font-semibold text-ok" title="Installed and selected; it isn't a service that runs on its own">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-ok/20 bg-ok/10 px-2 py-1 text-xs font-medium text-ok" title="Installed and selected; it isn't a service that runs on its own">
             <Check size={12} aria-hidden /> In use
           </span>
         )}
       </div>
-      <div className="mt-4 font-mono text-3xl font-bold tracking-tight text-fg">{version}</div>
+      <div className="mt-4 font-mono text-3xl font-medium tracking-tight text-fg">{version}</div>
       {details && <div className="mt-2 space-y-1 text-xs text-muted">{details}</div>}
       {children && <div className="mt-auto flex flex-wrap justify-end gap-2 pt-5">{children}</div>}
     </div>
@@ -52,7 +52,7 @@ export function ActiveTile({ version, state, details, children }: { version: str
 export function NoActiveTile({ text }: { text: string }) {
   return (
     <div className="flex flex-col justify-center rounded-2xl border border-dashed border-line p-4 text-sm text-muted">
-      <div className="font-semibold text-fg">Not installed</div>
+      <div className="font-medium text-fg">Not installed</div>
       {text}
     </div>
   );
@@ -101,7 +101,7 @@ export function InstalledTile({
             <Trash2 size={13} />
           </button>
           <div>
-            <div className="font-mono text-lg font-semibold">{version}</div>
+            <div className="font-mono text-lg font-medium">{version}</div>
             {label && <div className="text-[11px] text-muted">{label}</div>}
           </div>
           <Button size="sm" variant="soft" onClick={onUse} disabled={busy} aria-label={`Use ${name}`}>
@@ -116,7 +116,7 @@ export function InstalledTile({
 export function InstalledTiles({ children }: { children: ReactNode }) {
   return (
     <section>
-      <h4 className="mb-2 text-xs font-bold tracking-wider text-muted uppercase">Also installed</h4>
+      <h4 className="mb-2 text-xs font-medium text-muted">Also installed</h4>
       <ul className="flex flex-wrap gap-3">{children}</ul>
     </section>
   );
@@ -155,14 +155,14 @@ export function AvailableList({
   const shown = limit && !all ? items.slice(0, limit) : items;
   return (
     <section>
-      <h4 className="mb-2 text-xs font-bold tracking-wider text-muted uppercase">{title}</h4>
+      <h4 className="mb-2 text-xs font-medium text-muted">{title}</h4>
       {loading && <p className="text-sm text-muted">Fetching versions…</p>}
       {!!error && <p className="text-sm text-danger-text">{String(error)}</p>}
       {!loading && !error && items.length === 0 && (
         title === "Available to download" ? (
           <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border-2 border-dashed border-line bg-surface px-5 py-7 text-center">
             <span className="mb-3 flex size-10 items-center justify-center rounded-full bg-accent-soft text-accent-text"><Check size={20} /></span>
-            <p className="font-semibold text-fg">All versions downloaded</p>
+            <p className="font-medium text-fg">All versions downloaded</p>
             <p className="mt-1 max-w-xs text-sm text-muted">You have every available version of {name} installed.</p>
           </div>
         ) : (
@@ -173,7 +173,7 @@ export function AvailableList({
         <ul className="divide-y divide-line rounded-xl border border-line">
           {shown.map((r) => (
             <li key={r.version} className="flex items-center gap-3 px-3 py-2">
-              <span className="w-24 shrink-0 font-mono text-sm font-semibold">{r.version}</span>
+              <span className="w-24 shrink-0 font-mono text-sm font-medium">{r.version}</span>
               <span className="min-w-0 flex-1 truncate text-xs text-muted">{r.label ?? ""}</span>
               {r.progress !== undefined ? (
                 <div className="flex w-40 items-center gap-2" role="progressbar" aria-valuenow={r.progress ?? undefined} aria-label={`Installing ${name} ${r.version}`}>
@@ -195,7 +195,7 @@ export function AvailableList({
         </ul>
       )}
       {limit && items.length > limit && (
-        <button onClick={() => setAll((a) => !a)} className="mt-2 text-xs font-semibold text-accent-text hover:underline">
+        <button onClick={() => setAll((a) => !a)} className="mt-2 text-xs font-medium text-accent-text hover:underline">
           {all ? "Show fewer" : `Show all ${items.length} versions`}
         </button>
       )}

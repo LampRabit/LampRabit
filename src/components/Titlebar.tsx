@@ -56,12 +56,12 @@ export default function Titlebar() {
       <Logo animated className="pointer-events-none size-8 shrink-0" />
       {page === "overview" ? (
         <div className="pointer-events-none hidden min-w-0 leading-tight lg:block">
-          <div className="truncate font-bold tracking-tight">Lamp<span className="text-accent-text">Rabit</span></div>
+          <div className="truncate font-medium tracking-tight">Lamp<span className="text-accent-text">Rabit</span></div>
           <div className="hidden text-xs text-muted xl:block">Local dev environment</div>
         </div>
       ) : (
         <div className="pointer-events-none min-w-0 leading-tight">
-          <h1 className="truncate text-sm font-bold tracking-tight">{pageToolbar?.title ?? pageLabel(page)}</h1>
+          <h1 className="truncate text-sm font-medium">{pageToolbar?.title ?? pageLabel(page)}</h1>
           {pageToolbar?.subtitle && <div className="hidden max-w-96 truncate text-[11px] text-muted xl:block">{pageToolbar.subtitle}</div>}
         </div>
       )}
@@ -89,7 +89,7 @@ export default function Titlebar() {
         {update && (
           <button
             onClick={() => navigate("settings")}
-            className="rounded-full bg-accent-soft px-2 py-1 text-xs font-semibold text-accent-text hover:brightness-95 sm:px-3"
+            className="rounded-full bg-accent-soft px-2 py-1 text-xs font-medium text-accent-text hover:brightness-95 sm:px-3"
             aria-label={`Update ${update.version} available`}
           >
             <span className="hidden 2xl:inline">Update {update.version} available</span><Download size={14} className="2xl:hidden" />

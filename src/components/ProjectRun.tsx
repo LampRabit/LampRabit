@@ -358,7 +358,7 @@ export function CommandsPanel({
         {groups.map(([group, commands]) => (
           <section key={group}>
             {!compact && (
-              <h4 className="mb-1.5 text-[11px] font-bold tracking-wider text-muted uppercase">
+              <h4 className="mb-1.5 text-xs font-medium text-muted">
                 {group} <span className="font-normal">· {commands.length}</span>
               </h4>
             )}
@@ -463,7 +463,7 @@ export function OutputPanel({ name, height = "max-h-96 min-h-40", title, footer 
   return (
     <div className="min-w-0 overflow-hidden rounded-xl border border-white/10 bg-terminal">
       <div className="flex items-center gap-2 border-b border-white/10 px-3 py-1.5">
-        {title ?? <span className="flex-1 text-xs font-semibold text-slate-300">Output</span>}
+        {title ?? <span className="flex-1 text-xs font-medium text-slate-300">Output</span>}
         <button type="button" onClick={() => setLines([])} disabled={lines.length === 0} className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-white/10 hover:text-slate-200 disabled:opacity-40" title="Clear this view (the log file keeps it)">
           Clear
         </button>

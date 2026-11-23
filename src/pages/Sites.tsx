@@ -45,31 +45,6 @@ import { Button, Card, Switch, inputClass } from "../components/ui";
 import { ShareButton, TunnelRow, useProjectTunnel } from "../components/Tunnels";
 import { AppControls, CommandPrompt, CommandsPanel, OutputPanel, Row, ServeSettings, appCommand, isActive, stateStyle, useAppActions, useAppInfo, useAppStatuses, useUnreadOutput } from "../components/ProjectRun";
 
-/** Avatar colors per framework; anything else gets the accent. */
-const frameworkStyle: Record<string, string> = {
-  Laravel: "bg-red-500/12 text-red-600 dark:text-red-400",
-  WordPress: "bg-sky-600/12 text-sky-700 dark:text-sky-400",
-  Symfony: "bg-zinc-500/15 text-fg",
-  Drupal: "bg-blue-500/12 text-blue-600 dark:text-blue-400",
-  CodeIgniter: "bg-orange-500/12 text-orange-600 dark:text-orange-400",
-  CakePHP: "bg-rose-500/12 text-rose-600 dark:text-rose-400",
-  Yii: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-400",
-  Slim: "bg-teal-500/12 text-teal-700 dark:text-teal-400",
-  Statamic: "bg-pink-500/12 text-pink-600 dark:text-pink-400",
-  Magento: "bg-orange-600/12 text-orange-700 dark:text-orange-400",
-  PHP: "bg-indigo-500/12 text-indigo-600 dark:text-indigo-400",
-  Vite: "bg-violet-500/12 text-violet-600 dark:text-violet-400",
-  "Next.js": "bg-zinc-500/15 text-fg",
-  Nuxt: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-400",
-  Astro: "bg-orange-500/12 text-orange-600 dark:text-orange-400",
-  SvelteKit: "bg-orange-600/12 text-orange-700 dark:text-orange-400",
-  NestJS: "bg-rose-500/12 text-rose-600 dark:text-rose-400",
-  Remix: "bg-zinc-500/15 text-fg",
-  Express: "bg-zinc-500/15 text-fg",
-  Node: "bg-green-600/12 text-green-700 dark:text-green-400",
-  Static: "bg-surface-2 text-muted",
-};
-
 const languageLabel: Record<Language, string> = { php: "PHP", node: "Node.js", java: "Java", python: "Python", go: "Go", rust: "Rust", static: "Static" };
 
 type Sort = "recent" | "name";
@@ -237,7 +212,7 @@ export default function Sites() {
             <div className="flex size-14 items-center justify-center rounded-full bg-accent-soft text-accent-text">
               <Globe size={26} />
             </div>
-            <div className="text-lg font-semibold">No sites yet</div>
+            <div className="text-lg font-medium">No sites yet</div>
             <p className="max-w-md text-muted">
               Create a folder inside <span className="font-mono">www</span> with an <span className="font-mono">index.php</span> or a package.json, or start from a
               template: Laravel, WordPress, Next.js, Vite, Nuxt and more.
@@ -252,7 +227,7 @@ export default function Sites() {
           <Card className="min-w-0 overflow-hidden lg:sticky lg:top-4">
             <div className="space-y-2.5 border-b border-line p-3">
               <div className="flex items-center justify-between px-1">
-                <h2 className="text-sm font-bold">
+                <h2 className="text-sm font-medium">
                   Projects <span className="font-normal text-muted tabular-nums">{shown.length === all.length ? all.length : `${shown.length} of ${all.length}`}</span>
                 </h2>
                 <span className="flex items-center gap-2 text-xs text-muted">
@@ -340,9 +315,8 @@ function Avatar({ site, status, size = "md" }: { site: Site; status?: AppStatus;
     <span className="relative shrink-0">
       <span
         className={clsx(
-          "flex items-center justify-center font-bold",
-          size === "lg" ? "size-12 rounded-2xl text-lg" : "size-9 rounded-xl text-sm",
-          frameworkStyle[site.framework ?? ""] ?? "bg-accent-soft text-accent-text",
+          "flex items-center justify-center bg-surface-2 font-medium text-muted",
+          size === "lg" ? "size-12 rounded-xl text-lg" : "size-9 rounded-lg text-sm",
         )}
         aria-hidden
       >
@@ -350,7 +324,7 @@ function Avatar({ site, status, size = "md" }: { site: Site; status?: AppStatus;
       </span>
       {(isActive(status) || site.route) && (
         <span
-          className={clsx("absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-surface", size === "lg" ? "size-3.5" : "size-3", site.route || status?.state === "running" ? "bg-ok" : "animate-pulse bg-warn")}
+          className={clsx("absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-surface", size === "lg" ? "size-3.5" : "size-3", site.route || status?.state === "running" ? "bg-ok" : "bg-warn")}
           title={site.route ? `Served from port ${site.route.port}` : "Starting"}
         />
       )}
@@ -382,7 +356,7 @@ function ProjectRow({ site, status, selected, onSelect }: { site: Site; status?:
     >
       <Avatar site={site} status={status} />
       <span className="min-w-0 flex-1">
-        <span className={clsx("block truncate text-sm font-semibold", selected && "text-accent-text")}>{site.name}</span>
+        <span className={clsx("block truncate text-sm font-medium", selected && "text-accent-text")}>{site.name}</span>
         <span className="block truncate text-xs text-muted">
           {site.framework && site.framework !== "Static" ? site.framework : languageLabel[site.language]}
           {site.gitBranch && (
@@ -556,8 +530,8 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
           <Avatar site={site} status={status} size="lg" />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
-              <h2 className="truncate text-2xl font-bold tracking-tight text-fg">{site.name}</h2>
-              <Chip className={frameworkStyle[kindLabel]}>
+              <h2 className="truncate text-2xl font-medium tracking-tight text-fg">{site.name}</h2>
+              <Chip>
                 {kindLabel}
                 {hasFramework && facts.data?.frameworkVersion && <span className="font-mono opacity-80"> {facts.data.frameworkVersion}</span>}
               </Chip>
@@ -777,7 +751,7 @@ function Overview({
           title="Dependencies"
           action={
             facts?.dependencies?.some((d) => !d.installed || d.outdated) ? (
-              <span className="text-[11px] font-semibold text-warn">Needs install</span>
+              <span className="text-[11px] font-medium text-warn">Needs install</span>
             ) : facts?.dependencies?.length ? (
               <span className="text-[11px] font-medium text-accent-text">All ready</span>
             ) : null
@@ -790,7 +764,7 @@ function Overview({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <Package size={15} className="text-accent-text" />
-                      <span className="text-sm font-semibold text-fg">{d.manager === "Composer" ? "Composer" : `Node (${d.manager})`}</span>
+                      <span className="text-sm font-medium text-fg">{d.manager === "Composer" ? "Composer" : `Node (${d.manager})`}</span>
                     </div>
                     <p className="mt-0.5 text-xs text-muted">
                       {d.count} {d.count === 1 ? "package" : "packages"}
@@ -799,7 +773,7 @@ function Overview({
                   </div>
                   {d.installed && d.outdated ? (
                     <span className="flex shrink-0 items-center gap-2">
-                      <span className="text-xs font-semibold text-warn" title="The lock file changed since the last install (a pull or a branch switch).">
+                      <span className="text-xs font-medium text-warn" title="The lock file changed since the last install (a pull or a branch switch).">
                         Out of date
                       </span>
                       <Button size="sm" variant="primary" onClick={() => install.mutate(d.manager)} disabled={install.isPending || !!status?.task}>
@@ -807,7 +781,7 @@ function Overview({
                       </Button>
                     </span>
                   ) : d.installed ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-ok/10 px-2.5 py-1 text-xs font-semibold text-ok">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-ok/10 px-2.5 py-1 text-xs font-medium text-ok">
                       <Check size={12} /> Installed
                     </span>
                   ) : (
@@ -830,7 +804,7 @@ function Overview({
               <button
                 type="button"
                 onClick={() => api.openInEditor(`${site.path}/${facts.envFile}`).catch(notifyError)}
-                className="cursor-pointer text-xs font-semibold text-accent-text hover:underline"
+                className="cursor-pointer text-xs font-medium text-accent-text hover:underline"
               >
                 Edit {facts.envFile}
               </button>
@@ -854,7 +828,7 @@ function Overview({
 
             {facts?.env && facts.env.length > 0 ? (
               <div className="space-y-1.5 pt-1">
-                <span className="text-[11px] font-bold tracking-wider text-muted uppercase">Key Environment</span>
+                <span className="text-xs font-medium text-muted">Key environment</span>
                 <div className="grid gap-1.5 sm:grid-cols-2">
                   {facts.env.map(([key, value]) => (
                     <div key={key} className="flex items-center justify-between gap-2 rounded-lg border border-line/50 bg-surface px-2.5 py-1.5 text-xs">
@@ -965,11 +939,11 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line/60 bg-surface-2/40 p-3">
       <div className="flex min-w-0 items-center gap-2.5">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent-text">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted">
           <Database size={15} />
         </span>
         <div className="min-w-0">
-          <span className="block truncate font-mono text-sm font-bold text-fg">{database}</span>
+          <span className="block truncate font-mono text-sm font-medium text-fg">{database}</span>
           <span className="block text-xs">{note ?? <span className="text-muted">Database</span>}</span>
         </div>
       </div>
@@ -1143,7 +1117,7 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
   return (
     <Card className="p-5">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-xs font-bold tracking-wider text-muted uppercase">{title}</h3>
+        <h3 className="text-xs font-medium text-muted">{title}</h3>
         {action}
       </div>
       <div>{children}</div>
@@ -1599,7 +1573,7 @@ function DeleteProjectDialog({ site, onClose, onDeleted }: { site: Site; onClose
           </label>
         )}
         <label className="block">
-          <span className="mb-1 block text-xs font-semibold text-muted">
+          <span className="mb-1 block text-xs font-medium text-muted">
             Type <span className="font-mono text-fg">{site.name}</span> to confirm
           </span>
           <input className={clsx(inputClass, "font-mono")} value={typed} onChange={(e) => setTyped(e.target.value)} data-autofocus />
@@ -1633,7 +1607,7 @@ function CommandsTab({ site, settings, status }: { site: Site; settings?: Settin
     >
       {state && <span className={clsx("size-1.5 rounded-full", stateStyle[state].dot)} aria-hidden />}
       {label}
-      {!!unread[key] && shown !== key && <span className="rounded-full bg-accent px-1.5 text-[9px] leading-4 font-bold text-accent-fg">{unread[key] > 99 ? "99+" : unread[key]}</span>}
+      {!!unread[key] && shown !== key && <span className="rounded-full bg-accent px-1.5 text-[11px] leading-4 font-medium text-accent-fg">{unread[key] > 99 ? "99+" : unread[key]}</span>}
     </button>
   );
 
@@ -1688,7 +1662,7 @@ function RecentRuns({ site, status, onShow }: { site: Site; status?: AppStatus; 
   return (
     <Card className="overflow-hidden">
       <div className="border-b border-line px-5 py-3">
-        <h3 className="text-sm font-bold">Recent runs</h3>
+        <h3 className="text-sm font-medium">Recent runs</h3>
         <p className="text-xs text-muted">How the last commands ended, kept after the output is cleared.</p>
       </div>
       {runs.length === 0 ? (

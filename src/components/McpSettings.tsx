@@ -114,7 +114,7 @@ function HttpConfig({ status }: { status: McpStatus }) {
   return (
     <div className="space-y-2">
       <p className="flex items-center gap-2 text-xs text-ok">
-        <span className="size-2 animate-pulse rounded-full bg-ok" aria-hidden /> Running at <code className="font-mono text-fg">{status.url}</code>
+        <span className="size-2 rounded-full bg-ok" aria-hidden /> Running at <code className="font-mono text-fg">{status.url}</code>
       </p>
       <p className="text-xs text-muted">Claude Code:</p>
       <CopyBlock text={claudeCode} what="the command" />

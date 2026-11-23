@@ -237,7 +237,7 @@ export default function BottomNav() {
           return (
             <div
               key={`${edge}-${align}`}
-              className={clsx("absolute rounded-2xl border-2 border-dashed transition-all duration-200", on ? "border-accent bg-accent-soft/60 opacity-100" : "border-line opacity-30")}
+              className={clsx("absolute rounded-2xl border-2 border-dashed transition-[border-color,background-color,opacity] duration-200", on ? "border-accent bg-accent-soft/60 opacity-100" : "border-line opacity-30")}
               style={style}
             />
           );
@@ -303,7 +303,7 @@ export default function BottomNav() {
             className={clsx(
               "group relative flex shrink-0 flex-col items-center rounded-xl text-xs transition-colors",
               isVertical ? "w-[4.5rem] gap-0.5 py-1.5" : "w-[5.25rem] gap-1 py-2",
-              page === id ? "font-semibold text-accent-text" : "text-muted hover:bg-surface-2/60 hover:text-fg",
+              page === id ? "font-medium text-accent-text" : "text-muted hover:bg-surface-2/60 hover:text-fg",
             )}
           >
             <span className="relative transition-transform duration-200 ease-(--ease-spring) group-hover:-translate-y-0.5 group-active:scale-90 still:translate-none still:scale-100">

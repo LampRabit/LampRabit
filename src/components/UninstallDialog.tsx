@@ -61,7 +61,7 @@ export default function UninstallDialog({ onClose }: { onClose: () => void }) {
           {done.kept.length > 0 && <PathList title="Kept" paths={done.kept} />}
           {done.problems.length > 0 ? (
             <div className="rounded-xl border border-danger/30 bg-danger-soft p-3">
-              <p className="font-semibold text-danger-text">Some things need doing by hand</p>
+              <p className="font-medium text-danger-text">Some things need doing by hand</p>
               <ul className="mt-1.5 list-disc space-y-1 pl-5 text-danger-text">
                 {done.problems.map((p) => (
                   <li key={p}>{p}</li>
@@ -84,7 +84,7 @@ export default function UninstallDialog({ onClose }: { onClose: () => void }) {
             <>
               <PathList title="Deleted" paths={plan.data.remove} />
               <div>
-                <h3 className="text-xs font-bold tracking-wider text-muted uppercase">Also undone</h3>
+                <h3 className="text-xs font-medium text-muted">Also undone</h3>
                 <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-muted">
                   <li>The .test entries in the hosts file</li>
                   <li>The trusted "lampRabit Local CA" certificate</li>
@@ -110,7 +110,7 @@ export default function UninstallDialog({ onClose }: { onClose: () => void }) {
 function PathList({ title, paths, icon }: { title: string; paths: string[]; icon?: boolean }) {
   return (
     <div>
-      <h3 className="text-xs font-bold tracking-wider text-muted uppercase">{title}</h3>
+      <h3 className="text-xs font-medium text-muted">{title}</h3>
       {paths.length === 0 ? (
         <p className="mt-1.5 text-muted">Nothing.</p>
       ) : (

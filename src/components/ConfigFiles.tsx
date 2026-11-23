@@ -18,7 +18,7 @@ export default function ConfigFiles({ kind, docs }: { kind: ServiceKind; docs: s
   return (
     <Card className="mt-4 overflow-hidden">
       <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
-        <h3 className="text-sm font-bold">Config files</h3>
+        <h3 className="text-sm font-medium">Config files</h3>
         {docs && (
           <Button size="sm" variant="ghost" onClick={() => openUrl(docs).catch(notifyError)}>
             <BookOpen size={14} /> Documentation

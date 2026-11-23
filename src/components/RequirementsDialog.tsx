@@ -55,7 +55,7 @@ export default function RequirementsDialog({
                 <CheckCircle2 size={16} className={ok ? "mt-0.5 shrink-0 text-accent-text" : "mt-0.5 shrink-0 text-muted"} aria-hidden />
               )}
               <div className="min-w-0">
-                <div className="text-sm font-semibold">{needName(r)}</div>
+                <div className="text-sm font-medium">{needName(r)}</div>
                 <div className="text-xs text-muted">{r.why}</div>
                 <div className={bad ? "mt-1 text-xs text-danger-text" : "mt-1 text-xs"}>{plan(r)}</div>
               </div>

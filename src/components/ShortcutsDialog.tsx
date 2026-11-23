@@ -13,7 +13,7 @@ export default function ShortcutsDialog() {
       <div className="grid gap-8 sm:grid-cols-2">
         {SHORTCUTS.map((group) => (
           <section key={group.group}>
-            <h3 className="mb-2 text-xs font-bold tracking-wider text-muted uppercase">{group.group}</h3>
+            <h3 className="mb-2 text-xs font-medium text-muted">{group.group}</h3>
             <dl className="divide-y divide-line">
               {group.items.map((item) => (
                 <div key={item.label} className="flex items-center justify-between gap-4 py-2 text-sm">

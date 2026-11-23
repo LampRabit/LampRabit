@@ -26,7 +26,7 @@ function Row({ label, hint, children }: { label: ReactNode; hint?: ReactNode; ch
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line px-5 py-3 last:border-b-0">
       <div className="min-w-0 flex-1 basis-60">
-        <div className="text-sm font-semibold">{label}</div>
+        <div className="text-sm font-medium">{label}</div>
         {hint && <div className="text-xs text-muted">{hint}</div>}
       </div>
       {children}
@@ -98,7 +98,7 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
   return (
     <Card className="mt-4 overflow-hidden">
       <div className="border-b border-line px-5 py-3">
-        <h3 className="text-sm font-bold">Settings</h3>
+        <h3 className="text-sm font-medium">Settings</h3>
         <p className="text-xs text-muted">Also in Settings. Running services restart when you apply a change.</p>
       </div>
       {server && (
@@ -117,7 +117,7 @@ export default function ServiceSettings({ runtime }: { runtime: Runtime }) {
               hint={primary ? "It has the main ports, localhost and the developer tools (phpMyAdmin, Adminer…)." : "The primary server has the main ports, localhost and the developer tools."}
             >
               {primary ? (
-                <span className="flex items-center gap-1.5 text-sm font-semibold text-accent-text">
+                <span className="flex items-center gap-1.5 text-sm font-medium text-accent-text">
                   <Star size={14} /> Primary
                 </span>
               ) : (

@@ -74,7 +74,7 @@ export default function ProjectDependencies({ site, status }: { site: Site; stat
           <p className="text-sm text-danger-text">{String(list.error)}</p>
         ) : ecosystems.length === 0 ? (
           <Card className="p-5">
-            <h3 className="font-semibold">No dependencies yet</h3>
+            <h3 className="font-medium">No dependencies yet</h3>
             <p className="mt-1 text-sm text-muted">
               This tab lists the packages from composer.json, package.json, deno.json, pyproject.toml, requirements.txt, Cargo.toml, go.mod, pom.xml or build.gradle once the project has
               one.
@@ -85,7 +85,7 @@ export default function ProjectDependencies({ site, status }: { site: Site; stat
         )}
       </div>
       <div className="min-w-0 lg:sticky lg:top-4">
-        <OutputPanel name={site.name} height="h-[26rem]" title={<span className="flex-1 text-xs font-semibold text-slate-300">{running ? `${running}…` : "Output"}</span>} />
+        <OutputPanel name={site.name} height="h-[26rem]" title={<span className="flex-1 text-xs font-medium text-slate-300">{running ? `${running}…` : "Output"}</span>} />
       </div>
 
       {pending && (
@@ -142,7 +142,7 @@ function EcosystemCard({ site, eco, running, onAsk }: { site: Site; eco: Depende
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3">
         {/* The title keeps its width; the buttons wrap under it when the card is narrow. */}
         <div className="min-w-0 flex-1 basis-56">
-          <h3 className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold">
+          <h3 className="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium">
             {eco.label}
             <span className="font-mono text-xs font-normal text-muted">
               {eco.manifest}
@@ -208,7 +208,7 @@ function EcosystemCard({ site, eco, running, onAsk }: { site: Site; eco: Depende
                         <span className="truncate font-mono text-[13px]" title={p.name}>
                           {p.name}
                         </span>
-                        {p.dev && <span className="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] font-semibold text-muted uppercase">dev</span>}
+                        {p.dev && <span className="shrink-0 rounded bg-surface-2 px-1.5 text-xs font-medium text-muted">dev</span>}
                       </span>
                     </td>
                     <td className="px-2 py-1.5 font-mono text-xs whitespace-nowrap text-muted">{p.wanted ?? "any"}</td>

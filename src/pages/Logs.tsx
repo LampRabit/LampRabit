@@ -14,25 +14,8 @@ import Menu from "../components/Menu";
 import { usePageToolbar } from "../components/PageToolbar";
 import { useHotkeys } from "../lib/shortcuts";
 
-/** Badge colours for the sources that have one; the rest share a neutral one. */
-const badgeColors: Record<string, string> = {
-  apache: "bg-rose-500/20 text-rose-300",
-  nginx: "bg-emerald-500/20 text-emerald-300",
-  caddy: "bg-cyan-500/20 text-cyan-300",
-  frankenphp: "bg-violet-500/20 text-violet-300",
-  tomcat: "bg-yellow-500/20 text-yellow-300",
-  php: "bg-indigo-500/25 text-indigo-300",
-  mariadb: "bg-amber-500/20 text-amber-300",
-  mysql: "bg-blue-500/20 text-blue-300",
-  postgres: "bg-sky-500/20 text-sky-300",
-  mongodb: "bg-green-500/20 text-green-300",
-  redis: "bg-red-500/20 text-red-300",
-  mailpit: "bg-sky-500/20 text-sky-300",
-  system: "bg-emerald-500/15 text-emerald-300",
-  dumps: "bg-fuchsia-500/20 text-fuchsia-300",
-};
-const neutralBadge = "bg-slate-500/25 text-slate-200";
-const projectBadge = "bg-violet-500/20 text-violet-300";
+/** Sources are plain names: the level carries the colour in the log. */
+const sourceBadge = "text-slate-300";
 
 /** Sources that aren't services. */
 const ownSources: Record<string, string> = { php: "PHP", system: "System", dumps: "Dumps" };
@@ -45,8 +28,8 @@ const levels: Record<Level, { dot: string; text: string }> = {
   error: { dot: "bg-red-400", text: "text-red-400" },
   warn: { dot: "bg-amber-400", text: "text-amber-300" },
   notice: { dot: "bg-yellow-300", text: "text-yellow-200" },
-  info: { dot: "bg-sky-400", text: "text-sky-300" },
-  access: { dot: "bg-sky-400", text: "text-sky-300" },
+  info: { dot: "bg-slate-400", text: "text-slate-300" },
+  access: { dot: "bg-slate-500", text: "text-slate-400" },
   debug: { dot: "bg-slate-500", text: "text-slate-400" },
 };
 const levelOrder: Level[] = ["error", "warn", "notice", "info", "access", "debug"];
@@ -323,7 +306,7 @@ export default function Logs() {
   );
   usePageToolbar("logs", {
     title: "Logs",
-    subtitle: "Live output from your services and projects, and what your code dumps.",
+    subtitle: "Live output from your services and projects, and what your code dumps",
     actions: (
       <>
         <Button size="sm" variant="ghost" onClick={() => copyText(asText(), `${matched.length} log ${matched.length === 1 ? "line" : "lines"}`)} aria-label={`Copy ${matched.length} matching log lines`} title={`Copy ${matched.length} matching lines`}>
@@ -394,15 +377,15 @@ export default function Logs() {
               <ChevronDown size={14} className="text-muted transition-transform group-open:rotate-180" />
             </summary>
             <div className="absolute top-full left-0 z-30 mt-1.5 max-h-96 w-64 overflow-y-auto rounded-xl border border-line bg-surface p-1.5 shadow-float">
-              <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold hover:bg-surface-2">
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium hover:bg-surface-2">
                 <input type="checkbox" className="size-4 accent-(--accent)" checked={hidden.size === 0} onChange={() => setHidden(hidden.size === 0 ? new Set(allSources) : new Set())} />
                 All sources
               </label>
-              <div className="mt-1 px-2.5 pt-1.5 pb-0.5 text-[11px] font-bold tracking-wider text-muted uppercase">Services</div>
+              <div className="mt-1 px-2.5 pt-1.5 pb-0.5 text-xs font-medium text-muted">Services</div>
               {serviceSources.map((s) => sourceCheckbox(s, sourceLabel(s)))}
               {projects.length > 0 && (
                 <>
-                  <div className="mt-1 px-2.5 pt-1.5 pb-0.5 text-[11px] font-bold tracking-wider text-muted uppercase">Projects</div>
+                  <div className="mt-1 px-2.5 pt-1.5 pb-0.5 text-xs font-medium text-muted">Projects</div>
                   {projects.map((p) => sourceCheckbox(`project:${p}`, p))}
                 </>
               )}
@@ -496,7 +479,7 @@ export default function Logs() {
 
         {!showFilters && filtered && (
           <div className="flex flex-wrap items-center gap-2 border-t border-line pt-2.5 text-xs text-muted" aria-live="polite">
-            <span className="font-semibold">Showing</span>
+            <span className="font-medium">Showing</span>
             {filterSummary.map((f) => (
               <span key={f} className="rounded-full bg-surface-2 px-2 py-0.5 text-fg">
                 {f}
@@ -524,7 +507,7 @@ export default function Logs() {
             </button>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-muted">Severity</span>
+            <span className="text-xs font-medium text-muted">Severity</span>
             <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-line bg-bg p-1" role="group" aria-label="Filter by severity">
               {levelOrder.map((level) => (
                 <button key={level} onClick={() => toggleIn(setShownLevels, level)} aria-pressed={shownLevels.has(level)} className={clsx(toggleChip(shownLevels.has(level)), "capitalize")}>
@@ -535,7 +518,7 @@ export default function Logs() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-muted">Stream</span>
+            <span className="text-xs font-medium text-muted">Stream</span>
             <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-line bg-bg p-1" role="group" aria-label="Filter by stream">
               {streams.map((s) => (
                 <button key={s.id} onClick={() => toggleIn(setShownStreams, s.id)} aria-pressed={shownStreams.has(s.id)} title={s.hint} className={toggleChip(shownStreams.has(s.id))}>
@@ -544,7 +527,7 @@ export default function Logs() {
               ))}
             </div>
           </div>
-          <label className="flex items-center gap-2 text-xs font-semibold text-muted" title="Show consecutive lines that differ only in numbers (times, ids) as one line with a count">
+          <label className="flex items-center gap-2 text-xs font-medium text-muted" title="Show consecutive lines that differ only in numbers (times, ids) as one line with a count">
             <Switch checked={foldRepeats} onChange={setFoldRepeats} label="Fold repeated lines" />
             Fold repeats
           </label>
@@ -564,7 +547,7 @@ export default function Logs() {
         {/* Sources, with their line counts: click to show only one, the box to switch one off. */}
         <Card className="hidden w-60 shrink-0 flex-col overflow-hidden lg:flex">
           <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2.5">
-            <span className="text-xs font-bold tracking-wider text-muted uppercase">Sources</span>
+            <span className="text-xs font-medium text-muted">Sources</span>
             <button type="button" onClick={() => setHidden(new Set())} disabled={hidden.size === 0} className="text-xs font-medium text-accent-text hover:underline disabled:opacity-0">
               Show all
             </button>
@@ -583,7 +566,7 @@ export default function Logs() {
                 )}
               </SourceRow>
             ))}
-            {projects.length > 0 && <div className="mt-2 px-2 pt-1 pb-0.5 text-[11px] font-bold tracking-wider text-muted uppercase">Projects</div>}
+            {projects.length > 0 && <div className="mt-2 px-2 pt-1 pb-0.5 text-xs font-medium text-muted">Projects</div>}
             {projects.map((p) => {
               const id = `project:${p}`;
               return <SourceRow key={id} id={id} label={p} count={counts.get(id) ?? 0} on={!hidden.has(id)} onToggle={() => toggleIn(setHidden, id)} onSolo={() => solo(id)} onClear={() => clear(id)} />;
@@ -593,7 +576,7 @@ export default function Logs() {
 
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-terminal text-slate-200 shadow-float" aria-label="Log output">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-terminal-2 px-4 py-2.5 text-xs">
-            <span className="font-semibold text-slate-200">Log output</span>
+            <span className="font-medium text-slate-200">Log output</span>
             <span className="flex items-center gap-3 text-slate-400">
               {problems.errors > 0 && (
                 <button type="button" onClick={() => showLevels(["error"])} className="flex items-center gap-1.5 text-red-300 hover:underline" title="Show only errors">
@@ -621,7 +604,7 @@ export default function Logs() {
             </div>
           )}
           <div ref={scroller} className="selectable scrollbar-none min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3 font-mono text-[12px] leading-6">
-            <div className={clsx("sticky top-0 z-10 grid border-b border-white/10 bg-terminal-2 px-4 py-2 text-[11px] font-semibold tracking-wide text-slate-400 uppercase", columns)}>
+            <div className={clsx("sticky top-0 z-10 grid border-b border-white/10 bg-terminal-2 px-4 py-2 text-xs font-medium text-slate-400", columns)}>
               <span>Timestamp</span>
               <span>Source</span>
               <span>Level</span>
@@ -656,24 +639,24 @@ export default function Logs() {
                       style={{ transform: `translateY(${item.start}px)` }}
                     >
                       <span
-                        className={clsx("whitespace-nowrap pr-3", l.timed ? "text-slate-400" : "text-slate-500 italic")}
+                        className={clsx("whitespace-nowrap pr-3", l.timed ? "text-slate-400" : "text-slate-500")}
                         title={l.timed ? undefined : "This line has no time of its own: it shows the time of the line next to it in the same log"}
                       >
                         {stamp(l.time)}
                       </span>
                       <span className="min-w-0 pr-3">
-                        <span className={clsx("inline-flex max-w-full truncate rounded-md px-1 text-[10px]", l.service === "project" ? projectBadge : (badgeColors[l.service] ?? neutralBadge))} title={sourceLabel(src)}>
+                        <span className={clsx("inline-flex max-w-full truncate text-xs", sourceBadge)} title={sourceLabel(src)}>
                           {sourceLabel(src)}
                         </span>
                       </span>
-                      <span className={clsx("whitespace-nowrap pr-3 text-[10px] capitalize", levels[l.level].text)}>
+                      <span className={clsx("whitespace-nowrap pr-3 text-[11px] capitalize", levels[l.level].text)}>
                         <span className={clsx("mr-2 inline-block size-1.5 rounded-full align-middle", levels[l.level].dot)} />
                         {l.level}
                       </span>
                       <span className={clsx("min-w-0", wrapLines ? "wrap-break-word whitespace-pre-wrap" : "truncate whitespace-pre", l.stream === "command" && "text-violet-200", l.service === "dumps" && "text-fuchsia-200")}>
                         {l.message}
                         {(repeats.get(l.id) ?? 1) > 1 && (
-                          <span className="ml-2 rounded bg-white/10 px-1.5 font-sans text-[10px] text-slate-300" title="Consecutive lines like this one, folded">
+                          <span className="ml-2 rounded bg-white/10 px-1.5 font-sans text-[11px] text-slate-300" title="Consecutive lines like this one, folded">
                             ×{repeats.get(l.id)}
                           </span>
                         )}
@@ -698,7 +681,7 @@ export default function Logs() {
 
           <div className="sticky bottom-0 z-10 flex shrink-0 flex-wrap items-center gap-3 border-t border-white/10 bg-terminal-2 px-4 py-2.5 text-xs text-slate-300">
             <span className={clsx("size-2 rounded-full", frozen ? "bg-slate-400" : "animate-pulse bg-emerald-400")} />
-            <span className={clsx("font-semibold", frozen ? "text-slate-300" : "text-emerald-300")}>{frozen ? "Paused" : "Live"}</span>
+            <span className={clsx("font-medium", frozen ? "text-slate-300" : "text-emerald-300")}>{frozen ? "Paused" : "Live"}</span>
             <span className="text-slate-500">·</span>
             <span>
               {visible.length} matching {visible.length === 1 ? "line" : "lines"}
@@ -776,7 +759,7 @@ function LineDetails({ line, lines, dumps, onClose, onCopy, onOpenFile }: {
     <div className="flex max-h-[50%] min-h-32 shrink-0 flex-col border-t border-white/10 bg-terminal-2">
       <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-2 text-xs">
         <span className="text-slate-400">{stamp(line.time)}{!line.timed && " (no time of its own in the log)"}</span>
-        <span className={clsx("rounded-md px-1 text-[10px]", line.service === "project" ? projectBadge : (badgeColors[line.service] ?? neutralBadge))}>{sourceLabel(src)}</span>
+        <span className={clsx("text-xs", sourceBadge)}>{sourceLabel(src)}</span>
         <span className={clsx("capitalize", levels[line.level].text)}>{line.level}</span>
         <span className="flex-1" />
         {dump?.file && (
@@ -808,7 +791,7 @@ function LineDetails({ line, lines, dumps, onClose, onCopy, onOpenFile }: {
         )}
         {line.service !== "dumps" && around.length > 1 && (
           <div>
-            <div className="mb-1 font-sans text-[11px] font-semibold tracking-wide text-slate-500 uppercase">Around it in {sourceLabel(src)}</div>
+            <div className="mb-1 font-sans text-xs font-medium text-slate-500">Around it in {sourceLabel(src)}</div>
             {around.map((l) => (
               <div key={l.id} className={clsx("truncate", l.id === line.id ? "text-slate-100" : "text-slate-500")} title={l.message}>
                 <span className="mr-3">{stamp(l.time).slice(11)}</span>

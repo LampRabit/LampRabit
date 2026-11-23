@@ -210,11 +210,13 @@ pub(crate) async fn install_runtime(app: AppHandle, state: State<'_, AppState>, 
             }
         })
         .await?;
-    // A new tool brings a domain and, for Mailpit, PHP mail settings: the primary web
-    // server picks both up on restart.
+    // A new tool brings a domain and, for Mailpit, PHP mail settings: the running web
+    // servers pick both up on restart, and the hosts file gets the domain even when none
+    // runs (phpMyAdmin answered "unavailable" until something else refreshed them). The
+    // pages then reload their site list, which holds the tool's address.
     if activated && is_tool(release.runtime) {
-        let primary = server_kind(state.snapshot().await.0.primary_server());
-        restart_if_running(&app, &state, primary).await?;
+        crate::cmd::sites::sync_sites(&app, &state).await?;
+        let _ = tauri::Emitter::emit(&app, "routes-changed", Vec::<String>::new());
     }
     Ok(())
 }

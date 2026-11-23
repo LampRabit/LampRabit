@@ -59,7 +59,7 @@ export default function Diagnostics() {
         <div className="flex items-center gap-3 border-b border-line px-6 py-4">
           <Stethoscope size={20} className="text-accent-text" />
           <div className="flex-1">
-            <h2 className="text-lg font-bold tracking-tight">Diagnostics</h2>
+            <h2 className="text-lg font-medium tracking-tight">Diagnostics</h2>
             <p className="text-sm text-muted">Versions, services, ports, config checks and recent errors.</p>
           </div>
           <button aria-label="Close" onClick={() => setOpen(false)} className="rounded-lg p-1.5 text-muted hover:bg-surface-2">

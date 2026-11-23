@@ -117,7 +117,7 @@ export default function Services() {
   const icon = (item: ServiceSelection) =>
     item === "node" ? <Hexagon size={16} strokeWidth={1.75} /> : item === "tunnels" ? <Share2 size={16} strokeWidth={1.75} /> : tileFor(item).icon(16);
   const iconClass = (item: ServiceSelection) =>
-    item === "node" ? "bg-lime-600/10 text-lime-600" : item === "tunnels" ? "bg-violet-500/10 text-violet-600" : tileFor(item).className;
+    tileFor(item).className;
   const itemLabel = (item: ServiceSelection) => (item === "tunnels" ? "Active tunnels" : labelFor(catalog.data, item));
 
   const queryClient = useQueryClient();
@@ -148,7 +148,7 @@ export default function Services() {
 
   usePageToolbar("services", {
     title: "Services",
-    subtitle: "Choose a service to manage its versions, settings, and tools.",
+    subtitle: "Versions, settings and tools for each service",
     actions: (
       <Button size="sm" variant="ghost" onClick={chooseServiceFile} title="Add a service from its service.yaml file">
         <FilePlus2 size={14} /> Add a service
@@ -198,7 +198,7 @@ export default function Services() {
           <div className="space-y-6">
             {groups.map((group) => (
               <section key={group.id} aria-labelledby={`service-group-${group.id}`}>
-                <h2 id={`service-group-${group.id}`} className="px-3 pb-2 text-xs font-bold tracking-wider text-muted uppercase">{group.title}</h2>
+                <h2 id={`service-group-${group.id}`} className="px-3 pb-2 text-xs font-medium text-muted">{group.title}</h2>
                 <ul className="space-y-0.5">
                   {(group.items as ServiceSelection[]).map((item) => (
                     <li key={item}>
@@ -227,7 +227,7 @@ export default function Services() {
 
         <section aria-label="Service details" className="min-w-0">
           <div className="mb-4 lg:hidden">
-            <label className="block text-xs font-bold text-muted uppercase" htmlFor="service-picker">Service</label>
+            <label className="block text-xs font-medium text-muted" htmlFor="service-picker">Service</label>
             <select id="service-picker" value={selected} onChange={(e) => setSelected(e.target.value as ServiceSelection)} className="mt-1 h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm">
               {allGroups.map((group) => <optgroup key={group.id} label={group.title}>{(group.items as ServiceSelection[]).map((item) => <option key={item} value={item}>{itemLabel(item)}</option>)}</optgroup>)}
             </select>
@@ -415,7 +415,7 @@ function RuntimeCard({
       <div className="flex flex-wrap items-center gap-4 border-b border-line px-5 py-4">
         <IconTile className={tileFor(runtime).className}>{tileFor(runtime).icon(22)}</IconTile>
         <div className="min-w-0 flex-1 basis-60">
-          <h3 className="text-lg font-bold tracking-tight">{label}</h3>
+          <h3 className="text-lg font-medium tracking-tight">{label}</h3>
           <p className="text-sm text-muted">
             {info ? `${info.blurb} · ${info.source}` : null}
           </p>
@@ -427,9 +427,9 @@ function RuntimeCard({
           {service && service.installed && (
             service.state === "running" ? (
               <div className="flex items-center gap-1.5">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-xs font-semibold text-accent-text">
+                <span className="mr-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-fg">
                   <span className="size-1.5 rounded-full bg-ok" />
-                  Running{service.port ? ` :${service.port}` : ""}
+                  Running{service.port ? <span className="font-mono text-muted tabular-nums">:{service.port}</span> : null}
                 </span>
                 <Button size="sm" onClick={() => stopService.mutate()} disabled={serviceBusy} aria-label={`Stop ${label}`} title="Stop service">
                   <Square size={11} className="fill-current" /> Stop
@@ -495,7 +495,7 @@ function RuntimeCard({
                   {update(active) && !progressOf(update(active)!.release.version) && (
                     <button
                       onClick={() => checkAndInstall.mutate(update(active)!.release)}
-                      className="text-left font-semibold text-accent-text hover:underline"
+                      className="text-left font-medium text-accent-text hover:underline"
                       title="Installs alongside; switch to it when you're ready"
                     >
                       ↑ {update(active)!.release.version} available, install it
@@ -581,7 +581,7 @@ function SystemOllamaCard({ path }: { path: string }) {
       <div className="flex flex-wrap items-center gap-4 px-5 py-4">
         <IconTile className={runtimeTiles.ollama.className}>{runtimeTiles.ollama.icon(22)}</IconTile>
         <div className="min-w-0 flex-1 basis-60">
-          <h3 className="text-lg font-bold tracking-tight">Ollama</h3>
+          <h3 className="text-lg font-medium tracking-tight">Ollama</h3>
           <p className="text-sm text-muted">Using the Ollama installed on this computer, with the models you already have.</p>
           <p className="mt-1 truncate font-mono text-xs text-muted" title={path}>
             {path}

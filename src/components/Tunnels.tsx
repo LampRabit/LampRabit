@@ -161,7 +161,7 @@ export function TunnelsPanel() {
     <Card className="mb-5 p-5">
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <Share2 size={18} className="text-violet-500" />
-        <h2 className="flex-1 font-bold tracking-tight">Public URLs</h2>
+        <h2 className="flex-1 font-medium">Public URLs</h2>
         {anyProvider && (
           <div className="flex items-center gap-2">
             <select

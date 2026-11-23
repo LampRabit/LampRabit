@@ -53,7 +53,7 @@ export default function NodeCard() {
           <Hexagon size={22} strokeWidth={1.75} />
         </IconTile>
         <div className="min-w-0 flex-1 basis-60">
-          <h3 className="text-lg font-bold tracking-tight">Node.js</h3>
+          <h3 className="text-lg font-medium tracking-tight">Node.js</h3>
           <p className="text-sm text-muted">
             JavaScript runtime ·{" "}
             {data?.manager
@@ -76,7 +76,7 @@ export default function NodeCard() {
       ) : !data?.manager ? (
         <VersionsLayout active={<NoActiveTile text="Node versions are installed through NVM, which LampRabit sets up when you ask." />}>
           <section className="space-y-3">
-            <h4 className="text-xs font-bold tracking-wider text-muted uppercase">Set up NVM</h4>
+            <h4 className="text-xs font-medium text-muted">Set up NVM</h4>
             <p className="text-sm text-muted">
               {os === "windows"
                 ? "Installs nvm-windows with its official installer. Windows asks for administrator approval once. Switching Node versions later needs admin rights unless Developer Mode is on."
@@ -122,7 +122,7 @@ export default function NodeCard() {
           )}
           {data.current && (
             <section className="space-y-2">
-              <h4 className="text-xs font-bold tracking-wider text-muted uppercase">pnpm and Yarn</h4>
+              <h4 className="text-xs font-medium text-muted">pnpm and Yarn</h4>
               {pmsOn ? (
                 <p className="text-sm text-muted">On for Node {data.current} through corepack. Each project gets the version its package.json asks for.</p>
               ) : (

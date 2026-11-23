@@ -65,7 +65,7 @@ export default function BackupsPanel({ engine }: { engine: DbEngine }) {
     <Card className="mt-4 overflow-hidden">
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3">
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-bold">Backups</h3>
+          <h3 className="text-sm font-medium">Backups</h3>
           <p className="text-xs text-muted">Kept in the backups folder, which uninstalling LampRabit keeps too.</p>
         </div>
         {folder && mine.length > 0 && (
@@ -161,7 +161,7 @@ export default function BackupsPanel({ engine }: { engine: DbEngine }) {
               : `The backup from ${when(restoring.created)} goes into this ${label} database. It's created if it doesn't exist; tables that are in the backup are replaced.`}
           </p>
           <label className="mt-4 block">
-            <span className="mb-1.5 block text-sm font-semibold">{files ? "File in www" : "Database"}</span>
+            <span className="mb-1.5 block text-sm font-medium">{files ? "File in www" : "Database"}</span>
             <input data-autofocus className={`${inputClass} font-mono`} value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Database to restore into" />
           </label>
         </Dialog>

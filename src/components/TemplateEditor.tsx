@@ -221,13 +221,13 @@ function Editor({ initialYaml, onClose }: { initialYaml?: string; onClose: (save
 }
 
 type Part = { form: Form; update: (patch: Partial<Form>) => void };
-const label = "mb-1 block text-xs font-semibold text-muted";
+const label = "mb-1 block text-xs font-medium text-muted";
 const narrow = (extra: string) => clsx(inputClass.replace("w-full", ""), extra);
 
 function Section({ id, title, hint, children }: { id: string; title: string; hint?: string; children: ReactNode }) {
   return (
     <section data-section={id} aria-label={title} className="scroll-mt-2">
-      <h3 className="text-base font-bold tracking-tight">{title}</h3>
+      <h3 className="text-base font-medium">{title}</h3>
       {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
       <div className="mt-3">{children}</div>
     </section>
@@ -311,7 +311,7 @@ function Languages({ form, update, toggle }: Part & { toggle: (l: Lang) => void 
                 <span className={clsx("flex size-5 shrink-0 items-center justify-center rounded border", on ? "border-accent bg-accent text-accent-fg" : "border-line")} aria-hidden>
                   {on && <Check size={12} strokeWidth={3} />}
                 </span>
-                <span className="font-semibold">{l.label}</span>
+                <span className="font-medium">{l.label}</span>
               </button>
               <p className="mt-1 pl-7 text-xs text-muted">{l.hint}</p>
               {on && l.id !== "node" && (
@@ -444,12 +444,12 @@ function Setup({ form, update }: Part) {
                 {p.label}
                 {p.hint && <span className="block text-xs text-muted">{p.hint}</span>}
               </span>
-              <span className="ml-auto shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted uppercase">{p.lang === "any" ? "all" : langs.find((l) => l.id === p.lang)?.label}</span>
+              <span className="ml-auto shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-xs font-medium text-muted">{p.lang === "any" ? "all" : langs.find((l) => l.id === p.lang)?.label}</span>
             </label>
           );
         })}
       </div>
-      <h4 className="mt-5 mb-2 text-xs font-semibold text-muted">Your own steps</h4>
+      <h4 className="mt-5 mb-2 text-xs font-medium text-muted">Your own steps</h4>
       <Rows
         items={form.steps}
         blank={blankStep}
@@ -660,7 +660,7 @@ function Running({ form, update }: Part) {
           </div>
         )}
       />
-      <h4 className="mt-5 mb-2 text-xs font-semibold text-muted">Subdomains</h4>
+      <h4 className="mt-5 mb-2 text-xs font-medium text-muted">Subdomains</h4>
       <Rows
         items={form.domains}
         blank={{ name: "", root: "" }}

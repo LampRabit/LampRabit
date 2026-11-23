@@ -121,9 +121,9 @@ export default function ExtensionsDialog({
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-sm font-semibold">{e.name}</span>
+            <span className="font-mono text-sm font-medium">{e.name}</span>
             {e.kind === "extra" && e.installed && (
-              <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">
+              <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">
                 installed
               </span>
             )}
@@ -184,7 +184,7 @@ export default function ExtensionsDialog({
         <div className="flex items-center gap-3 border-b border-line px-6 py-4">
           <Puzzle size={20} className="text-indigo-500" />
           <div className="flex-1">
-            <h2 className="text-lg font-bold tracking-tight">PHP extensions</h2>
+            <h2 className="text-lg font-medium tracking-tight">PHP extensions</h2>
             <p className="text-sm text-muted">
               Changes restart PHP for your sites automatically.
             </p>
@@ -232,7 +232,7 @@ export default function ExtensionsDialog({
             </p>
           ) : (
             <>
-              <h3 className="px-6 pt-4 pb-1 text-xs font-medium tracking-wide text-muted uppercase">
+              <h3 className="px-6 pt-4 pb-1 text-xs font-medium text-muted">
                 Popular extras
               </h3>
               <ul
@@ -243,7 +243,7 @@ export default function ExtensionsDialog({
               >
                 {extras.map(row)}
               </ul>
-              <h3 className="px-6 pt-5 pb-1 text-xs font-medium tracking-wide text-muted uppercase">
+              <h3 className="px-6 pt-5 pb-1 text-xs font-medium text-muted">
                 Included with PHP {php} (
                 {bundled.filter((e) => e.enabled).length} enabled)
               </h3>

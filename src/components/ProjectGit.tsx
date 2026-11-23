@@ -62,7 +62,7 @@ export default function ProjectGit({ site }: { site: Site }) {
   if (!version.data) {
     return (
       <div className="text-sm">
-        <p className="font-semibold text-fg">Git isn't installed</p>
+        <p className="font-medium text-fg">Git isn't installed</p>
         <p className="mt-1 text-muted">
           LampRabit uses the Git on your computer, with your credentials and SSH keys. On Windows it can install one for you (MinGit); on Linux use your package manager (sudo apt install git), on
           macOS run xcode-select --install.
@@ -79,7 +79,7 @@ export default function ProjectGit({ site }: { site: Site }) {
     return (
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm">
-          <p className="font-semibold text-fg">This project isn't a Git repository</p>
+          <p className="font-medium text-fg">This project isn't a Git repository</p>
           <p className="text-muted">Start one to track changes, branch and push to GitHub, GitLab or any remote.</p>
         </div>
         <Button variant="primary" onClick={() => init.mutate()} disabled={init.isPending}>
@@ -119,7 +119,7 @@ export default function ProjectGit({ site }: { site: Site }) {
       <div className="flex flex-wrap items-center gap-1">
         <div role="tablist" aria-label="Git" className="flex flex-wrap gap-0.5 rounded-lg border border-line bg-surface-2/60 p-1">
           {views.map(([id, label, extra]) => (
-            <button key={id} role="tab" aria-selected={view === id} onClick={() => setView(id)} className={clsx("rounded-md px-2.5 py-1 text-sm", view === id ? "bg-surface font-semibold text-fg shadow-card" : "text-muted hover:text-fg")}>
+            <button key={id} role="tab" aria-selected={view === id} onClick={() => setView(id)} className={clsx("rounded-md px-2.5 py-1 text-sm", view === id ? "bg-surface font-medium text-fg shadow-card" : "text-muted hover:text-fg")}>
               {label}
               {extra}
             </button>
@@ -287,7 +287,7 @@ function Changes({
   });
   const stashList = (stashes.data ?? []).length > 0 && (
     <section>
-      <div className="sticky top-0 z-[1] border-b border-line bg-surface px-3 py-1.5 text-[11px] font-semibold tracking-wide text-muted uppercase">
+      <div className="sticky top-0 z-[1] border-b border-line bg-surface px-3 py-1.5 text-xs font-medium text-muted">
         Stashes <span className="tabular-nums">{stashes.data!.length}</span>
       </div>
       <ul>
@@ -321,7 +321,7 @@ function Changes({
     list.length > 0 && (
       <section>
         <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-line bg-surface px-3 py-1.5">
-          <span className="text-[11px] font-semibold tracking-wide text-muted uppercase">
+          <span className="text-xs font-medium text-muted">
             {title} <span className="tabular-nums">{list.length}</span>
           </span>
           {action}
@@ -334,7 +334,7 @@ function Changes({
             return (
               <li key={`${kind}:${f.path}`} className={clsx("group flex items-center gap-1 pr-1.5 pl-3", active ? "bg-accent-soft/50" : "hover:bg-surface-2")}>
                 <button type="button" onClick={() => setSelected({ path: f.path, staged: isStaged })} className="flex min-w-0 flex-1 items-baseline gap-2 py-1 text-left" title={f.from ? `${f.from} → ${f.path}` : f.path}>
-                  <span className={clsx("w-3 shrink-0 font-mono text-[11px] font-bold", letterColor(code))} title={letters[code] ?? code} aria-label={letters[code] ?? code}>
+                  <span className={clsx("w-3 shrink-0 font-mono text-[11px] font-medium", letterColor(code))} title={letters[code] ?? code} aria-label={letters[code] ?? code}>
                     {code === "?" ? "U" : code}
                   </span>
                   <FileName path={f.path} />
@@ -617,7 +617,7 @@ function DiffView({ text, loading, error, hunkAction }: { text?: string; loading
               </div>
             ))(++hunkIndex)
           ) : row.kind === "note" ? (
-            <div key={i} className="px-3 py-0.5 text-[11px] text-muted italic">
+            <div key={i} className="px-3 py-0.5 text-[11px] text-muted">
               {row.text}
             </div>
           ) : (
@@ -696,7 +696,7 @@ function Refs({ refs }: { refs: string }) {
   return (
     <span className="mt-1 flex flex-wrap gap-1">
       {names.map((r) => (
-        <span key={r} className={clsx("rounded px-1.5 font-mono text-[10px]", r.startsWith("tag: ") ? "bg-warn/15 text-warn" : r.includes("/") ? "bg-surface-2 text-muted" : "bg-accent-soft text-accent-text")}>
+        <span key={r} className={clsx("rounded px-1.5 font-mono text-[11px]", r.startsWith("tag: ") ? "bg-warn/15 text-warn" : r.includes("/") ? "bg-surface-2 text-muted" : "bg-accent-soft text-accent-text")}>
           {r.replace(/^tag: /, "tag ")}
         </span>
       ))}
@@ -778,7 +778,7 @@ function CommitView({ site, hash, onOpen }: { site: Site; hash: string; onOpen: 
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="space-y-3 border-b border-line p-4">
         <div className="flex items-start gap-3">
-          <h4 className="min-w-0 flex-1 text-base font-semibold text-fg">{d.subject}</h4>
+          <h4 className="min-w-0 flex-1 text-base font-medium text-fg">{d.subject}</h4>
           {confirm === "revert" ? (
             <span className="flex shrink-0 items-center gap-2">
               <span className="text-xs text-muted">Add a commit that undoes it?</span>
@@ -836,7 +836,7 @@ function CommitView({ site, hash, onOpen }: { site: Site; hash: string; onOpen: 
         </dl>
       </div>
       <div className="flex items-center gap-3 px-4 pt-3 pb-1 text-xs text-muted">
-        <span className="font-semibold text-fg">
+        <span className="font-medium text-fg">
           {d.files.length} {d.files.length === 1 ? "file" : "files"} changed
         </span>
         <LineCounts add={totals.add} del={totals.del} />
@@ -846,7 +846,7 @@ function CommitView({ site, hash, onOpen }: { site: Site; hash: string; onOpen: 
         {d.files.map((f) => (
           <li key={f.path}>
             <button type="button" onClick={() => setFile(f.path)} className="flex w-full items-baseline gap-2 px-4 py-1 text-left hover:bg-surface-2" title={f.from ? `${f.from} → ${f.path}: show the changes` : `${f.path}: show the changes`}>
-              <span className={clsx("w-3 shrink-0 font-mono text-[11px] font-bold", letterColor(f.status))} title={letters[f.status]}>
+              <span className={clsx("w-3 shrink-0 font-mono text-[11px] font-medium", letterColor(f.status))} title={letters[f.status]}>
                 {f.status}
               </span>
               <span className="flex min-w-0 flex-1 items-baseline gap-2">
@@ -933,7 +933,7 @@ function Branches({ site, current, upstream, onChanged }: { site: Site; current:
           </form>
         ) : (
           <>
-            <span className={clsx("flex items-center gap-1.5 truncate font-mono text-sm text-fg", b.current && "font-bold")}>
+            <span className={clsx("flex items-center gap-1.5 truncate font-mono text-sm text-fg", b.current && "font-medium")}>
               {b.current && <Check size={12} className="text-ok" aria-label="Current branch" />}
               {b.name}
               {b.upstream && <span className="truncate font-sans text-[11px] font-normal text-muted">→ {b.upstream}</span>}
@@ -1007,13 +1007,13 @@ function Branches({ site, current, upstream, onChanged }: { site: Site; current:
       {list.isLoading && <p className="text-sm text-muted">Loading branches…</p>}
       {local.length > 0 && (
         <section>
-          <h4 className="px-1 pb-1 text-[11px] font-bold tracking-wider text-muted uppercase">Local</h4>
+          <h4 className="px-1 pb-1 text-xs font-medium text-muted">Local</h4>
           <ul className="overflow-hidden rounded-lg border border-line bg-surface">{local.map(row)}</ul>
         </section>
       )}
       {remote.length > 0 && (
         <section>
-          <h4 className="px-1 pb-1 text-[11px] font-bold tracking-wider text-muted uppercase">Only on the remote</h4>
+          <h4 className="px-1 pb-1 text-xs font-medium text-muted">Only on the remote</h4>
           <ul className="overflow-hidden rounded-lg border border-line bg-surface">{remote.map(row)}</ul>
         </section>
       )}
@@ -1066,7 +1066,7 @@ function Tags({ site, onChanged }: { site: Site; onChanged: () => void }) {
   });
   return (
     <section className="space-y-2">
-      <h4 className="px-1 text-[11px] font-bold tracking-wider text-muted uppercase">Tags</h4>
+      <h4 className="px-1 text-xs font-medium text-muted">Tags</h4>
       <form
         className="flex flex-wrap gap-2"
         onSubmit={(e) => {
@@ -1133,7 +1133,7 @@ function RemotesAndSettings({ site, status, onChanged }: { site: Site; status: G
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <section className="space-y-3 rounded-lg border border-line bg-surface p-4">
-        <h4 className="text-sm font-semibold text-fg">Remotes</h4>
+        <h4 className="text-sm font-medium text-fg">Remotes</h4>
         {remotes.length === 0 && <p className="text-xs text-muted">No remote yet. Add one to push this project to GitHub, GitLab, Bitbucket or your own server.</p>}
         <ul className="space-y-2">
           {remotes.map((r) => (
@@ -1147,7 +1147,7 @@ function RemotesAndSettings({ site, status, onChanged }: { site: Site; status: G
       <div className="space-y-4">
         <RepoSettingsCard site={site} onChanged={onChanged} />
         <section className="space-y-3 rounded-lg border border-line bg-surface p-4">
-          <h4 className="flex items-center gap-2 text-sm font-semibold text-fg">
+          <h4 className="flex items-center gap-2 text-sm font-medium text-fg">
             <UserRound size={15} /> Identity for this repository
           </h4>
           <p className="text-xs text-muted">
@@ -1246,9 +1246,9 @@ function RemoteRow({ remote: r, busy, onAction }: { remote: GitStatus["remotes"]
     <li className="rounded-lg border border-line p-3">
       <div className="flex items-start gap-1">
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2 text-sm font-semibold text-fg">
+          <span className="flex items-center gap-2 text-sm font-medium text-fg">
             {r.name}
-            <span className="rounded bg-surface-2 px-1.5 text-[10px] font-medium text-muted">{isSsh(r.url) ? "SSH" : "HTTPS"}</span>
+            <span className="rounded bg-surface-2 px-1.5 text-[11px] font-medium text-muted">{isSsh(r.url) ? "SSH" : "HTTPS"}</span>
           </span>
           <span className="block truncate font-mono text-xs text-muted" title={r.url}>
             {r.url}
@@ -1312,7 +1312,7 @@ function AddRemote({ taken, busy, onAdd }: { taken: string[]; busy: boolean; onA
       }}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-semibold text-fg">Add a remote</span>
+        <span className="text-xs font-medium text-fg">Add a remote</span>
         {taken.includes("origin") && (
           <p className="basis-full text-[11px] text-muted">
             origin is already configured. Enter a different name, such as upstream, to add another remote.
@@ -1378,7 +1378,7 @@ function RepoSettingsCard({ site, onChanged }: { site: Site; onChanged: () => vo
   const s = settings.data;
   return (
     <section className="space-y-3 rounded-lg border border-line bg-surface p-4">
-      <h4 className="text-sm font-semibold text-fg">Sync settings</h4>
+      <h4 className="text-sm font-medium text-fg">Sync settings</h4>
       {!s ? (
         <p className="text-xs text-muted">Loading…</p>
       ) : (

@@ -70,14 +70,14 @@ export default function RelatedPanel({ runtime, installed, onSelect }: { runtime
     <Card className="mt-4 overflow-hidden">
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3">
         <Link2 size={16} className="text-muted" aria-hidden />
-        <h3 className="min-w-0 flex-1 text-sm font-bold">Related services</h3>
+        <h3 className="min-w-0 flex-1 text-sm font-medium">Related services</h3>
         <Button size="sm" variant="soft" disabled={install.isPending || blocked} onClick={() => install.mutate({ needs, suggests })}>
           <Download size={14} /> {install.isPending ? "Installing…" : `Install all (${needs.length + suggests.length})`}
         </Button>
       </div>
       {needs.length > 0 && (
         <div className="px-5 py-3">
-          <div className="mb-2 text-xs font-bold tracking-wider text-muted uppercase">Needs</div>
+          <div className="mb-2 text-xs font-medium text-muted">Needs</div>
           <p className="mb-3 text-xs text-muted">
             {labelFor(catalog.data, runtime)} can't run without {needs.length === 1 ? "this" : "these"}, in the versions that fit it.
           </p>
@@ -88,7 +88,7 @@ export default function RelatedPanel({ runtime, installed, onSelect }: { runtime
       )}
       {suggests.length > 0 && (
         <div className="px-5 py-3">
-          <div className="mb-2 text-xs font-bold tracking-wider text-muted uppercase">Goes well with</div>
+          <div className="mb-2 text-xs font-medium text-muted">Goes well with</div>
           <p className="mb-3 text-xs text-muted">Tools to look at its data and work with it.</p>
           <ul className="flex flex-wrap gap-2">
             {suggests.map((r) => item(r, labelFor(catalog.data, r), undefined, () => install.mutate({ needs: [], suggests: [r] })))}

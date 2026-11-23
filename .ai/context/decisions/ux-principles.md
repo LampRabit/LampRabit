@@ -27,6 +27,17 @@ Every feature lives in exactly one:
 6. **Docs are part of the product:** every panel has a "?" to a task-titled docs page ("Where is php.ini in LampRabit"); the palette finds docs too.
 7. **Telemetry only opt-in**, anonymous and documented (most useful signal: palette searches with no result).
 
+## Visual style (the user's choices, 2026-11-23)
+
+The UI was polished to stop looking AI-built (an "unslop" pass), keeping the brand (charcoal and mint from the logo), Inter with JetBrains Mono, the layouts and every feature.
+
+- **Home's title is "Home"** with a status line ("2 of 5 services running · 3 projects", or what needs attention). The time-of-day greeting, the random quote and the "Your name" setting (and the setup guide's name step) are gone. `developerName` stays in settings.toml, unused.
+- **Service, runtime and project icons are neutral** (`TILE` in `components/runtimes.tsx`: `bg-surface-2 text-muted`). Colour means status: the **status light** (a dot: mint running, gray stopped, amber degraded, red failed) is the one signature detail; `Pill` in `ui.tsx` is that dot plus a quiet word, no tinted capsule.
+- The accent marks the one primary action, the selection and the update notice. Row actions (Start next to Stop) are quiet (`soft` now looks like `secondary`).
+- Sentence case everywhere (no uppercase tracked labels), weights 400–500, text no smaller than 11px, ports and figures as plain mono text without boxes, no sparkle icons, no `transition-all`, no overshoot easing, pulses only on things in transition (starting, stopping, live streams).
+- Logs: error and warning keep their colour; sources and info lines are neutral. Doctor findings: the icon carries the colour, the row stays neutral.
+- Template `color:` still tints a template's tile (it's the user's choice in the template editor).
+
 ## Definition of done for a new feature
 
 1. It has one home. 2. Its actions are in the palette with keywords (and CLI/MCP where sensible). 3. Its config files are reachable with Open/Reveal/Copy path. 4. Its errors have a fix or a docs link. 5. It has an empty state or first-run hint. 6. It has a task-titled docs page.

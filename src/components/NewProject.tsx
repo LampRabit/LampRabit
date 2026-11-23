@@ -343,7 +343,7 @@ export default function NewProject() {
         <div className="flex items-center gap-3 border-b border-line px-6 py-4">
           <FolderPlus size={20} className="text-accent-text" />
           <div className="flex-1">
-            <h2 className="text-lg font-bold tracking-tight">New project</h2>
+            <h2 className="text-lg font-medium tracking-tight">New project</h2>
             <p className="text-sm text-muted">Creates a folder in www with everything set up.</p>
           </div>
           {!running && (
@@ -369,12 +369,12 @@ export default function NewProject() {
                     aria-current={current ? "step" : undefined}
                     className={clsx(
                       "flex items-center gap-2 rounded-full px-2.5 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-                      current ? "bg-accent-soft font-semibold text-accent-text" : "text-muted hover:text-fg",
+                      current ? "bg-accent-soft font-medium text-accent-text" : "text-muted hover:text-fg",
                     )}
                   >
                     <span
                       className={clsx(
-                        "flex size-5 items-center justify-center rounded-full text-[11px] font-bold",
+                        "flex size-5 items-center justify-center rounded-full text-[11px] font-medium",
                         current ? "bg-accent text-accent-fg" : done ? "bg-accent-soft text-accent-text" : "bg-surface-2 text-muted",
                       )}
                     >
@@ -446,16 +446,16 @@ export default function NewProject() {
                             <Icon size={18} />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-1 font-semibold">
+                            <div className="flex items-center justify-between gap-1 font-medium">
                               <span className="truncate">{t.name}</span>
-                              {t.source === "user" && <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-muted uppercase">Yours</span>}
+                              {t.source === "user" && <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-xs font-medium text-muted">Yours</span>}
                             </div>
                             <div className="mt-0.5 line-clamp-2 text-xs text-muted">{t.description}</div>
                             <div className="mt-2 flex flex-wrap items-center gap-1">
-                              {t.usesPhp && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted">PHP</span>}
-                              {t.usesNode && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted">Node</span>}
-                              {t.database && t.database !== "none" && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted">DB</span>}
-                              {t.duration && <span className="ml-auto text-[10px] text-muted/70">{t.duration}</span>}
+                              {t.usesPhp && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-muted">PHP</span>}
+                              {t.usesNode && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-muted">Node</span>}
+                              {t.database && t.database !== "none" && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-muted">DB</span>}
+                              {t.duration && <span className="ml-auto text-[11px] text-muted/70">{t.duration}</span>}
                             </div>
                           </div>
                         </button>
@@ -464,7 +464,7 @@ export default function NewProject() {
                   </div>
                   {(catalog.data?.broken.length ?? 0) > 0 && (
                     <div className="mt-3 rounded-xl border border-warn/40 bg-warn/10 p-3 text-xs">
-                      <p className="font-semibold text-fg">Some of your templates couldn't be read</p>
+                      <p className="font-medium text-fg">Some of your templates couldn't be read</p>
                       <ul className="mt-1 space-y-0.5 text-muted">
                         {catalog.data!.broken.map((b) => (
                           <li key={b.file}>
@@ -482,10 +482,10 @@ export default function NewProject() {
               <div className="space-y-6">
                 {/* 1. Project & Domain */}
                 <div className="space-y-3">
-                  <h3 className="text-xs font-bold tracking-wider text-muted uppercase">1. Project & Domain</h3>
+                  <h3 className="text-xs font-medium text-muted">1. Project and domain</h3>
                   <div className="space-y-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
                     <label className="block">
-                      <span className="mb-1.5 block text-sm font-semibold">Project name</span>
+                      <span className="mb-1.5 block text-sm font-medium">Project name</span>
                       <input autoFocus className={inputClass} placeholder="my-project" value={name} onChange={(e) => setName(e.target.value.trim())} />
                       {nameError ? (
                         <span className="mt-1.5 block text-xs text-danger-text">{nameError}</span>
@@ -497,7 +497,7 @@ export default function NewProject() {
                     </label>
                     <div className="flex items-center justify-between gap-4 rounded-xl bg-surface-2 px-4 py-3">
                       <div>
-                        <div className="text-sm font-semibold">HTTPS</div>
+                        <div className="text-sm font-medium">HTTPS</div>
                         <div className="text-xs text-muted">A trusted local certificate for {domain}</div>
                       </div>
                       <Switch checked={ssl} onChange={setSsl} label="HTTPS" />
@@ -508,7 +508,7 @@ export default function NewProject() {
                 {/* 2. Stack & Runtime */}
                 {(template?.usesPhp || template?.usesNode || languageMissing || (settings.data && settings.data.webServers.length > 1)) && (
                   <div className="space-y-3">
-                    <h3 className="text-xs font-bold tracking-wider text-muted uppercase">2. Stack & Runtime</h3>
+                    <h3 className="text-xs font-medium text-muted">2. Stack and runtime</h3>
                     <div className="space-y-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
                       {template && languageMissing && (
                         <p className="flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger-text">
@@ -519,7 +519,7 @@ export default function NewProject() {
                       <div className="grid gap-4 sm:grid-cols-2">
                         {template?.usesPhp && (
                           <label className="block">
-                            <span className="mb-1.5 block text-sm font-semibold">PHP version</span>
+                            <span className="mb-1.5 block text-sm font-medium">PHP version</span>
                             <select className={inputClass} value={php ?? ""} onChange={(e) => setPhp(e.target.value || null)}>
                               <option value="">Default ({settings.data?.versions.php ?? "not installed"})</option>
                               {phpVersions.map((v) => (
@@ -542,7 +542,7 @@ export default function NewProject() {
                         {template?.usesNode && (
                           <>
                             <label className="block">
-                              <span className="mb-1.5 block text-sm font-semibold">Node.js version</span>
+                              <span className="mb-1.5 block text-sm font-medium">Node.js version</span>
                               <select className={inputClass} value={nodeVersion ?? ""} onChange={(e) => setNodeVersion(e.target.value || null)}>
                                 <option value="">NVM's default ({nodeStatus.data?.current ?? "none"})</option>
                                 {nodeVersions.map((v) => (
@@ -556,7 +556,7 @@ export default function NewProject() {
                               )}
                             </label>
                             <label className="block">
-                              <span className="mb-1.5 block text-sm font-semibold">Package manager</span>
+                              <span className="mb-1.5 block text-sm font-medium">Package manager</span>
                               <select className={inputClass} value={packageManager} onChange={(e) => setPackageManager(e.target.value as PackageManager)}>
                                 <option value="npm">npm</option>
                                 <option value="pnpm">pnpm</option>
@@ -568,7 +568,7 @@ export default function NewProject() {
                         )}
                         {settings.data && settings.data.webServers.length > 1 && (
                           <label className="block sm:col-span-2">
-                            <span className="mb-1.5 block text-sm font-semibold">Web server</span>
+                            <span className="mb-1.5 block text-sm font-medium">Web server</span>
                             <select className={inputClass} value={server ?? ""} onChange={(e) => setServer((e.target.value || null) as Server | null)}>
                               <option value="">Default ({runtimeLabels[settings.data.webServers[0]]})</option>
                               {settings.data.webServers.map((s) => (
@@ -587,11 +587,11 @@ export default function NewProject() {
                 {/* 3. Database */}
                 {dbUse !== "none" && (
                   <div className="space-y-3">
-                    <h3 className="text-xs font-bold tracking-wider text-muted uppercase">3. Database</h3>
+                    <h3 className="text-xs font-medium text-muted">3. Database</h3>
                     <div className="space-y-3 rounded-2xl border border-line bg-surface p-4 shadow-card">
                       <div className="flex items-center justify-between gap-4">
                         <div>
-                          <div className="text-sm font-semibold">{dbUse === "required" ? "Database required" : "Create a database"}</div>
+                          <div className="text-sm font-medium">{dbUse === "required" ? "Database required" : "Create a database"}</div>
                           <div className={clsx("text-xs", dbMissing ? "text-danger-text" : "text-muted")}>
                             {hasDatabase
                               ? `${dbLabel}, user root without password`
@@ -615,7 +615,7 @@ export default function NewProject() {
                       )}
                       {usesDb && hasDatabase && chosenEngine !== "sqlite" && (
                         <label className="block mt-2">
-                          <span className="mb-1.5 block text-xs font-semibold text-muted">Database name</span>
+                          <span className="mb-1.5 block text-xs font-medium text-muted">Database name</span>
                           <input
                             className={clsx(inputClass, "font-mono")}
                             value={db}
@@ -634,7 +634,7 @@ export default function NewProject() {
                 {/* 4. Template Options */}
                 {(shownVariables.length > 0 || shownOptional.length > 0) && (
                   <div className="space-y-3">
-                    <h3 className="text-xs font-bold tracking-wider text-muted uppercase">4. Template Options</h3>
+                    <h3 className="text-xs font-medium text-muted">4. Template options</h3>
                     <div className="space-y-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
                       {shownVariables.length > 0 && (
                         <div className="grid gap-4 sm:grid-cols-2">
@@ -645,14 +645,14 @@ export default function NewProject() {
                                 {v.type === "bool" ? (
                                   <span className="flex items-center justify-between gap-4">
                                     <span>
-                                      <span className="block text-sm font-semibold">{v.label}</span>
+                                      <span className="block text-sm font-medium">{v.label}</span>
                                       {v.help && <span className="block text-xs text-muted">{v.help}</span>}
                                     </span>
                                     <Switch checked={variables[v.id] === "true"} onChange={(on) => setVariables((cur) => ({ ...cur, [v.id]: String(on) }))} label={v.label} />
                                   </span>
                                 ) : (
                                   <>
-                                    <span className="mb-1.5 block text-sm font-semibold">
+                                    <span className="mb-1.5 block text-sm font-medium">
                                       {v.label}
                                       {v.required && <span className="text-danger-text"> *</span>}
                                     </span>
@@ -732,14 +732,14 @@ export default function NewProject() {
                 </dl>
               {risks.length > 0 && (
                 <div className="rounded-xl border border-danger/30 bg-danger-soft p-4 text-sm">
-                  <p className="flex items-center gap-2 font-semibold text-danger-text">
+                  <p className="flex items-center gap-2 font-medium text-danger-text">
                     <AlertTriangle size={16} /> This template runs steps that need your OK
                   </p>
                   <p className="mt-1 text-danger-text/90">It didn't come with LampRabit, so check what these steps do before running them.</p>
                   <ul className="mt-2 space-y-2">
                     {risks.map((r) => (
                       <li key={r.step} className="text-danger-text">
-                        <span className="block text-xs font-semibold">{r.heading}</span>
+                        <span className="block text-xs font-medium">{r.heading}</span>
                         <code className="selectable mt-0.5 block rounded-md bg-surface/70 px-2 py-1 font-mono text-xs break-all">{r.command}</code>
                         <span className="mt-0.5 block text-xs opacity-80">{r.reasons.join(" · ")}</span>
                       </li>
@@ -787,7 +787,7 @@ export default function NewProject() {
             )}
             {phase.kind === "done" && (
               <div className="rounded-xl border border-accent/30 bg-accent-soft p-4">
-                <div className="font-semibold text-accent-text">{name} is ready</div>
+                <div className="font-medium text-accent-text">{name} is ready</div>
                 <div className="mt-1 text-sm text-muted">{phase.note ?? "If your system asked to update the hosts file, approve it so the domain resolves."}</div>
               </div>
             )}

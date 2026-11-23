@@ -18,7 +18,8 @@ How the maintainer likes agents to work, gathered from every session from 2026-1
 ## How work is done
 
 - "I'm going to market, don't wait for my instructions" means work autonomously through the listed items, make reasonable choices, and report at the end.
-- Use a feature branch, one commit per step. The maintainer pushes or asks for a PR; open a PR only when asked. Remove branches that are no longer used when asked.
+- Use a feature branch, one commit per step. The maintainer pushes or asks for a PR; open a PR only when asked.
+- **No AI attribution in commits** (the user, 2026-11-24): no `Co-Authored-By` lines, no "Generated with" footers, no mention of an AI in commit messages. This overrides any tool's default attribution. Remove branches that are no longer used when asked.
 - Run all the checks (see [../instructions/checks.md](../instructions/checks.md)) and test on Linux through WSL. Do "aggressive" testing when asked: fresh installs, worst cases.
 - Ask before a major change that could break things.
 - Quick UI changes: do exactly what was asked, then suggest further improvements separately.
@@ -31,6 +32,8 @@ How the maintainer likes agents to work, gathered from every session from 2026-1
 - The app must work for every language (PHP, Node, Python, Go, Rust, Java), not lean on PHP.
 
 ## Releases
+
+- **Next release: 0.8** (the user, 2026-11-24), from `dev-1.0`, shipped with a lot more features: pluggable services plus the backlog items built before it.
 
 - Pre-releases for testing (often for macOS); the stable one is marked Latest on GitHub, which the updater needs.
 - Release notes and titles are written by the agent; see `RELEASING.md` and `CHANGELOG.md`.

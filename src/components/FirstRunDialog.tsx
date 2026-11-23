@@ -26,8 +26,6 @@ import {
   Play,
   Plus,
   RotateCw,
-  Sparkles,
-  Sun,
   Terminal,
   X,
 } from "lucide-react";
@@ -47,8 +45,7 @@ import { Button } from "./ui";
  * it), then what they build: each usage brings its recommended components, listed by the
  * Services page's categories with sizes and platform notes, and any other can be added.
  * They install one by one with progress and a retry each; then projects can be copied over
- * from other tools (Laragon, XAMPP, Herd…), the developer gives their name for Home's
- * greeting, and a first project is offered. Settings → General opens it again (without the
+ * from other tools (Laragon, XAMPP, Herd…), and a first project is offered. Settings → General opens it again (without the
  * welcome and folder steps), or only its import step.
  */
 
@@ -68,8 +65,8 @@ export const usages: { id: UsageId; title: string; blurb: string; icon: typeof G
 /** Services-page entries that aren't components to add here. */
 const notOffered = new Set(["tunnels", "sqlite"]);
 
-type Step = "welcome" | "folder" | "stack" | "install" | "import" | "name" | "done";
-const stepLabels: Record<Step, string> = { welcome: "Welcome", folder: "Storage folder", stack: "Your stack", install: "Install", import: "Your projects", name: "About you", done: "Ready" };
+type Step = "welcome" | "folder" | "stack" | "install" | "import" | "done";
+const stepLabels: Record<Step, string> = { welcome: "Welcome", folder: "Storage folder", stack: "Your stack", install: "Install", import: "Your projects", done: "Ready" };
 
 export default function FirstRunDialog() {
   const queryClient = useQueryClient();
@@ -86,12 +83,7 @@ export default function FirstRunDialog() {
 function Flow({ settings, firstRun = false, only, onDone }: { settings: Settings; firstRun?: boolean; only?: "import"; onDone: () => void }) {
   const queryClient = useQueryClient();
   const catalog = useCatalog();
-  // Decided once, so saving the name doesn't take its step away mid-flow.
-  const [steps] = useState<Step[]>(() => {
-    if (only) return ["import"];
-    const askName = firstRun || !settings.developerName?.trim();
-    return [...(firstRun ? (["welcome", "folder"] as Step[]) : []), "stack", "install", "import", ...(askName ? (["name"] as Step[]) : []), "done"];
-  });
+  const [steps] = useState<Step[]>(() => (only ? ["import"] : [...(firstRun ? (["welcome", "folder"] as Step[]) : []), "stack", "install", "import", "done"]));
   const [step, setStep] = useState<Step>(steps[0]);
   const [picked, setPicked] = useState<UsageId[]>(["php"]);
   const [extra, setExtra] = useState<string[]>([]);
@@ -161,8 +153,6 @@ function Flow({ settings, firstRun = false, only, onDone }: { settings: Settings
       );
     case "import":
       return <ImportPane nav={nav} nextLabel={only ? "Done" : "Continue"} onImported={setImported} onNext={() => next("import")} />;
-    case "name":
-      return <NameStep nav={nav} initial={settings.developerName ?? ""} onBack={() => setStep("import")} onNext={() => next("name")} />;
     default:
       return <DoneStep nav={nav} wanted={wanted} picked={picked} installed={installed} imported={imported} onClose={close} />;
   }
@@ -217,7 +207,7 @@ function Shell({
           <div className="flex items-center gap-2.5">
             <Logo className="size-9" />
             <div className="leading-tight">
-              <div className="font-bold tracking-tight">
+              <div className="font-medium">
                 Lamp<span className="text-accent-text">Rabit</span>
               </div>
               <div className="text-xs text-muted">Setup</div>
@@ -230,7 +220,7 @@ function Shell({
                 <li key={s} aria-current={state === "current" ? "step" : undefined} className={clsx("flex items-center gap-3 rounded-lg px-2 py-1.5 text-sm", state === "current" && "bg-accent-soft/60")}>
                   <span
                     className={clsx(
-                      "flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+                      "flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium",
                       state === "done" && "bg-accent text-accent-fg",
                       state === "current" && "border-2 border-accent text-accent-text",
                       state === "next" && "border border-line text-muted",
@@ -238,7 +228,7 @@ function Shell({
                   >
                     {state === "done" ? <Check size={13} strokeWidth={3} /> : i + 1}
                   </span>
-                  <span className={clsx(state === "current" ? "font-semibold text-fg" : state === "done" ? "text-fg" : "text-muted")}>{stepLabels[s]}</span>
+                  <span className={clsx(state === "current" ? "font-medium text-fg" : state === "done" ? "text-fg" : "text-muted")}>{stepLabels[s]}</span>
                 </li>
               );
             })}
@@ -273,11 +263,11 @@ function Shell({
               </div>
             )}
             {!single && (
-              <p className="text-xs font-semibold tracking-wider text-accent-text uppercase">
+              <p className="text-xs font-medium text-accent-text">
                 Step {index + 1} of {nav.steps.length}
               </p>
             )}
-            <h1 tabIndex={-1} className="mt-1 text-3xl font-extrabold tracking-tight outline-none sm:text-4xl">
+            <h1 tabIndex={-1} className="mt-1 text-3xl font-medium tracking-tight outline-none sm:text-4xl">
               {title}
             </h1>
             {lead && <div className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">{lead}</div>}
@@ -327,10 +317,10 @@ function WelcomeStep({ nav, onNext }: { nav: Nav; onNext: () => void }) {
       <div className="motion-stagger grid gap-3 sm:grid-cols-3">
         {points.map((p) => (
           <div key={p.title} className="rounded-2xl border border-line bg-surface p-5 shadow-card">
-            <span className="flex size-10 items-center justify-center rounded-xl bg-accent-soft text-accent-text">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-surface-2 text-muted">
               <p.icon size={20} aria-hidden />
             </span>
-            <h2 className="mt-4 font-semibold">{p.title}</h2>
+            <h2 className="mt-4 font-medium">{p.title}</h2>
             <p className="mt-1 text-sm text-muted">{p.text}</p>
           </div>
         ))}
@@ -377,7 +367,7 @@ function FolderStep({ nav, root, busy, onBack, onNext }: { nav: Nav; root: strin
       )}
       <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
         <div className="flex items-center gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent-text">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-muted">
             <HardDrive size={20} aria-hidden />
           </span>
           <p className="min-w-0 font-mono text-[15px] break-all text-fg">{root}</p>
@@ -385,7 +375,7 @@ function FolderStep({ nav, root, busy, onBack, onNext }: { nav: Nav; root: strin
         <ul className="mt-5 grid gap-2 sm:grid-cols-3">
           {inside.map((f) => (
             <li key={f.name} className="rounded-xl bg-surface-2/60 px-3 py-2.5">
-              <span className="flex items-center gap-1.5 font-mono text-sm font-semibold text-fg">
+              <span className="flex items-center gap-1.5 font-mono text-sm font-medium text-fg">
                 <FolderOpen size={14} className="text-muted" aria-hidden /> {f.name}
               </span>
               <span className="mt-0.5 block text-xs text-muted">{f.text}</span>
@@ -499,11 +489,11 @@ function StackStep({
                   on ? "border-accent ring-2 ring-accent/25" : "border-line hover:border-accent/50",
                 )}
               >
-                <span className={clsx("flex size-11 shrink-0 items-center justify-center rounded-xl transition-colors", on ? "bg-accent text-accent-fg" : "bg-accent-soft text-accent-text")}>
+                <span className={clsx("flex size-11 shrink-0 items-center justify-center rounded-xl transition-colors", on ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted")}>
                   <u.icon size={21} aria-hidden />
                 </span>
                 <span className="min-w-0 flex-1 pr-6">
-                  <span className="block font-semibold text-fg">{u.title}</span>
+                  <span className="block font-medium text-fg">{u.title}</span>
                   <span className="mt-0.5 block text-sm text-muted">{u.blurb}</span>
                 </span>
                 <span
@@ -519,7 +509,7 @@ function StackStep({
 
         <aside className="min-w-0 self-start rounded-2xl border border-line bg-surface shadow-card lg:sticky lg:top-0">
           <div className="flex items-baseline justify-between border-b border-line px-4 py-3">
-            <h2 className="font-semibold">Your stack</h2>
+            <h2 className="font-medium">Your stack</h2>
             <span className="text-xs text-muted">{chosen.length - [...skipped].filter((s) => chosen.includes(s)).length} components</span>
           </div>
           <div className="space-y-4 px-4 py-3">
@@ -529,7 +519,7 @@ function StackStep({
               .filter((s) => s.rows.length > 0)
               .map((s) => (
                 <section key={s.id} aria-label={s.title}>
-                  <h3 className="mb-1 text-[11px] font-semibold tracking-wider text-muted uppercase">{s.title}</h3>
+                  <h3 className="mb-1 text-xs font-medium text-muted">{s.title}</h3>
                   <ul className="space-y-0.5">
                     {s.rows.map((id) => {
                       const off = skipped.has(id);
@@ -568,7 +558,7 @@ function StackStep({
                   .filter((s) => s.more.length > 0)
                   .map((s) => (
                     <div key={s.id}>
-                      <div className="mb-1 text-[11px] font-semibold tracking-wider text-muted uppercase">{s.title}</div>
+                      <div className="mb-1 text-xs font-medium text-muted">{s.title}</div>
                       <div className="flex flex-wrap gap-1.5">
                         {s.more.map((id) => (
                           <button
@@ -633,78 +623,10 @@ function InstallPane({ nav, runtimes, labels, onNext }: { nav: Nav; runtimes: st
   );
 }
 
-function NameStep({ nav, initial, onBack, onNext }: { nav: Nav; initial: string; onBack: () => void; onNext: () => void }) {
-  const queryClient = useQueryClient();
-  const [name, setName] = useState(initial);
-  const save = useMutation({
-    mutationFn: async () => {
-      const current = await api.getSettings();
-      return api.saveSettings({ ...current, developerName: name.trim() });
-    },
-    onSuccess: (saved) => {
-      queryClient.setQueryData(["settings"], saved);
-      onNext();
-    },
-    onError: notifyError,
-  });
-  const hour = new Date().getHours();
-  const greeting = hour < 5 || hour >= 17 ? "Good evening" : hour < 12 ? "Good morning" : "Good afternoon";
-  return (
-    <Shell
-      nav={nav}
-      title="Last thing: what should we call you?"
-      lead="Home greets you by name. It stays on this computer, and you can change it in Settings → General."
-      footer={
-        <>
-          <BackButton onClick={onBack} />
-          <span className="mr-auto" />
-          <Button variant="ghost" size="lg" onClick={onNext}>
-            Skip
-          </Button>
-          <Button variant="primary" size="lg" onClick={() => save.mutate()} disabled={save.isPending || !name.trim()}>
-            Continue <ArrowRight size={16} />
-          </Button>
-        </>
-      }
-    >
-      <form
-        className="max-w-md"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (name.trim()) save.mutate();
-        }}
-      >
-        <label htmlFor="developer-name" className="text-sm font-medium text-fg">
-          Your name
-        </label>
-        <input
-          id="developer-name"
-          data-autofocus
-          value={name}
-          maxLength={40}
-          autoComplete="given-name"
-          placeholder="Your name"
-          onChange={(e) => setName(e.target.value)}
-          className="mt-1.5 w-full rounded-xl border border-line bg-surface px-4 py-3 text-lg text-fg shadow-card focus:border-accent focus:outline-none"
-        />
-      </form>
-      <div className="mt-8 rounded-2xl border border-dashed border-line p-6" aria-hidden>
-        <div className="text-[11px] font-semibold tracking-wider text-muted uppercase">On Home</div>
-        <div className="mt-2 flex items-center gap-3 text-3xl font-extrabold tracking-tight">
-          {greeting}, {name.trim() || "developer"}
-          <Sun size={26} strokeWidth={1.75} className="text-accent-text" />
-        </div>
-      </div>
-    </Shell>
-  );
-}
-
 function DoneStep({ nav, wanted, picked, installed, imported, onClose }: { nav: Nav; wanted: string[]; picked: UsageId[]; installed: number; imported: number; onClose: () => void }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const setNewProjectOpen = useAppStore((s) => s.setNewProjectOpen);
-  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
-  const name = settings.data?.developerName?.trim();
   // The components that run as services (not PHP, Composer or Node), to start in one go.
   const startable = wanted.filter((r) => r in serviceLabels) as ServiceKind[];
   const startNow = useMutation({
@@ -724,7 +646,7 @@ function DoneStep({ nav, wanted, picked, installed, imported, onClose }: { nav: 
   return (
     <Shell
       nav={nav}
-      title={name ? `You're all set, ${name}` : "You're all set"}
+      title="You're all set"
       lead={`Create a project from a template (${examples}…), with its database made for you, or open Home to start and stop services.`}
       footer={
         <>
@@ -741,7 +663,7 @@ function DoneStep({ nav, wanted, picked, installed, imported, onClose }: { nav: 
               setNewProjectOpen(true);
             }}
           >
-            <Sparkles size={16} /> Create a project
+            <Plus size={16} /> Create a project
           </Button>
         </>
       }
@@ -755,11 +677,11 @@ function DoneStep({ nav, wanted, picked, installed, imported, onClose }: { nav: 
       </div>
       {startable.length > 0 && (
         <div className="mt-6 flex flex-wrap items-center gap-4 rounded-2xl border border-line bg-surface p-5 shadow-card">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent-text">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-muted">
             {startNow.isSuccess ? <CheckCircle2 size={20} /> : <Play size={18} />}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="font-semibold">{startNow.isSuccess ? "Started" : "Start your services now?"}</div>
+            <div className="font-medium">{startNow.isSuccess ? "Started" : "Start your services now?"}</div>
             <div className="text-sm text-muted">{startNow.isSuccess ? "Their status is on Home." : startable.map((k) => serviceLabels[k]).join(", ")}</div>
           </div>
           {!startNow.isSuccess && (
@@ -887,7 +809,7 @@ function ImportPane({ nav, nextLabel, onImported, onNext }: { nav: Nav; nextLabe
           return (
             <section key={`${s.id}:${s.folders[0] ?? ""}`} aria-label={s.name} className="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
               <header className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
-                <span className="font-semibold text-fg">{s.name}</span>
+                <span className="font-medium text-fg">{s.name}</span>
                 <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted" title={s.folders.join("\n")}>
                   {s.folders.join(" · ")}
                 </span>

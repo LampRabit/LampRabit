@@ -25,7 +25,7 @@ export default class PageBoundary extends Component<{ children: ReactNode }, { e
         <div className="flex items-start gap-3">
           <AlertTriangle size={20} className="mt-0.5 shrink-0 text-danger-text" aria-hidden />
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold">This page ran into a problem</h2>
+            <h2 className="text-lg font-medium">This page ran into a problem</h2>
             <p className="mt-1 text-sm text-muted">The rest of LampRabit keeps working. Try again, or open another page.</p>
             <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-surface-2 p-3 font-mono text-xs whitespace-pre-wrap text-fg">{this.state.error.message}</pre>
             <Button className="mt-4" variant="primary" onClick={() => this.setState({ error: null })}>

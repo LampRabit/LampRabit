@@ -60,6 +60,12 @@ pub async fn run(layout: &Layout, config_dir: &Path) -> Report {
     if let Err(e) = shims::set_on_path(layout, false) {
         problems.push(format!("LampRabit's commands couldn't be taken off your PATH: {e}. Remove {} from it by hand.", shims::dir(layout).display()));
     }
+    if let Err(e) = crate::overrides::system_path_first(layout, &shims::dir(layout), false).await {
+        problems.push(format!("{e} Remove {} from the system PATH by hand.", shims::dir(layout).display()));
+    }
+    if let Err(e) = crate::overrides::remove_defender_exclusion(layout).await {
+        problems.push(format!("{e} Remove {} from Windows Security's exclusions by hand.", layout.root().display()));
+    }
     let _ = tunnels::set_ngrok_token(None);
     // AI assistants' "lamprabit" entries, and the copy of LampRabit they ran (Windows).
     problems.extend(crate::mcp_clients::remove_all());

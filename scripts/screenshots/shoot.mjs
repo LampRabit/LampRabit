@@ -24,6 +24,7 @@ if (!browser) throw new Error("No Edge or Chrome found for screenshots.");
 const views = {
   home: "page=overview",
   "home-dark": "page=overview&theme=dark",
+  "home-issues": "page=overview&issues=1",
   sites: "page=sites",
   "git-changes": "page=sites&tab=git&file=README.md",
   "git-changes-dark": "page=sites&tab=git&file=README.md&theme=dark",

@@ -103,7 +103,7 @@ export default function MoveEnvironmentDialog({ current, onClose }: { current: s
     >
       {phase.kind === "done" ? (
         <div className="space-y-2 text-sm">
-          <p className="flex items-center gap-2 font-semibold text-accent-text">
+          <p className="flex items-center gap-2 font-medium text-accent-text">
             <Check size={16} /> Moved to <span className="font-mono">{phase.to}</span>
           </p>
           <p className="text-muted">Services were stopped for the move; start the ones you need. Their configs follow the new folder on their own.</p>
@@ -115,7 +115,7 @@ export default function MoveEnvironmentDialog({ current, onClose }: { current: s
             <span className="font-mono text-fg">{current}</span>.
           </p>
           <label className="block">
-            <span className="mb-1.5 block font-semibold">New location</span>
+            <span className="mb-1.5 block font-medium">New location</span>
             <span className="flex gap-2">
               <input data-autofocus className={clsx(inputClass, "font-mono")} value={target} onChange={(e) => setTarget(e.target.value)} placeholder="D:\LampRabit" disabled={moving} />
               <Button className="h-auto" onClick={browse} disabled={moving}>
@@ -154,7 +154,7 @@ export default function MoveEnvironmentDialog({ current, onClose }: { current: s
 
           {busy.length > 0 && (
             <div className="rounded-lg border border-warn/40 bg-warn/10 p-3">
-              <p className="font-semibold">Programs using the folder</p>
+              <p className="font-medium">Programs using the folder</p>
               <p className="text-xs text-muted">They have to stop before the folder can move. Close them yourself, or stop them here (unsaved work in them is lost).</p>
               <ul className="mt-2 space-y-1.5">
                 {busy.map((h) => (

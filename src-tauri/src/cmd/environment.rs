@@ -163,6 +163,44 @@ pub(crate) fn vc_runtime_status() -> comfort::VcRuntime {
     comfort::vc_runtime()
 }
 
+/// Stops another stack's Windows service that holds a port (asks for admin rights).
+#[tauri::command]
+pub(crate) async fn stop_windows_service(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    overrides::stop_service(&layout, &name).await?;
+    logs::system(&app, logs::Level::Info, format!("Stopped the {name} Windows service and set it to start by hand"));
+    Ok(())
+}
+
+/// Commands another install answers before LampRabit's, from the system PATH.
+#[tauri::command]
+pub(crate) async fn path_shadows(state: State<'_, AppState>) -> Result<Vec<overrides::Shadow>> {
+    let (settings, layout) = state.snapshot().await;
+    if !settings.add_to_path {
+        return Ok(Vec::new());
+    }
+    Ok(overrides::shadows(&shims::dir(&layout)))
+}
+
+/// Puts LampRabit's commands first in the system PATH (asks for admin rights).
+#[tauri::command]
+pub(crate) async fn put_commands_first(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    overrides::system_path_first(&layout, &shims::dir(&layout), true).await?;
+    logs::system(&app, logs::Level::Info, "LampRabit's commands now come first in the system PATH; new terminals use them");
+    Ok(())
+}
+
+/// Excludes the LampRabit folder and Composer's cache from Windows Security scans.
+#[tauri::command]
+pub(crate) async fn exclude_from_defender(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    let paths = overrides::exclude_from_defender(&layout).await?;
+    let list = paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(" and ");
+    logs::system(&app, logs::Level::Info, format!("Windows Security no longer scans {list}"));
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) async fn vc_runtime_install(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     let (_, layout) = state.snapshot().await;

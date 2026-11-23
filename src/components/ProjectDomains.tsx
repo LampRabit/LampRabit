@@ -160,7 +160,7 @@ export default function ProjectDomains({ site, settings }: { site: Site; setting
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3">
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-bold">Domains</h3>
+          <h3 className="text-sm font-medium">Domains</h3>
           <p className="text-xs text-muted">Where each domain goes. Change a row, then ✓ to save it.</p>
         </div>
         <Button size="sm" variant="soft" onClick={() => setRows([...rows, { label: "", target: { kind: "main" } }])}>
@@ -173,8 +173,8 @@ export default function ProjectDomains({ site, settings }: { site: Site; setting
         <li className="px-5 py-3">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <span className={clsx(domainCell, "gap-2")}>
-              <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-accent-text uppercase">Main</span>
-              <span className="truncate font-mono text-sm font-semibold">{site.domain}</span>
+              <span className="rounded bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent-text">Main</span>
+              <span className="truncate font-mono text-sm font-medium">{site.domain}</span>
             </span>
             <ArrowRight size={14} className="hidden shrink-0 text-muted sm:block" aria-hidden />
             <span title={targetHint(main, true)}>

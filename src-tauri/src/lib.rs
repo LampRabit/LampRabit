@@ -27,6 +27,7 @@ mod logs;
 mod manifest;
 mod manage;
 mod node;
+mod overrides;
 mod php;
 mod ports;
 mod procgroup;
@@ -870,6 +871,10 @@ pub fn run() {
             take_startup_warnings,
             open_in_editor,
             vc_runtime_status,
+            stop_windows_service,
+            path_shadows,
+            put_commands_first,
+            exclude_from_defender,
             vc_runtime_install,
             runtime_updates,
             node_status,

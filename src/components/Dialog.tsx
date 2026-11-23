@@ -80,7 +80,7 @@ export default function Dialog({
       >
         <div className="flex items-center gap-3 border-b border-line px-6 py-4">
           {icon && <span className="text-accent-text">{icon}</span>}
-          <h2 className="flex-1 text-lg font-bold tracking-tight">{title}</h2>
+          <h2 className="flex-1 text-lg font-medium tracking-tight">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close"
@@ -100,7 +100,7 @@ export default function Dialog({
 /** A key cap, for shortcut hints. */
 export function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-line bg-surface-2 px-1.5 font-mono text-[11px] font-semibold text-fg shadow-[inset_0_-1px_0_var(--line)]">
+    <kbd className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-line bg-surface-2 px-1.5 font-mono text-[11px] font-medium text-fg shadow-[inset_0_-1px_0_var(--line)]">
       {children}
     </kbd>
   );
