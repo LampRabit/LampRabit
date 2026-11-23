@@ -21,7 +21,7 @@ export default function ShortcutsDialog() {
                   <dd className="flex shrink-0 items-center gap-1">
                     {item.keys.map((k, i) => (
                       <span key={k} className="flex items-center gap-1">
-                        {i > 0 && <span className="text-xs text-muted">{item.keys[0] === "Shift" ? "+" : "or"}</span>}
+                        {i > 0 && <span className="text-xs text-muted">{["Shift", "Ctrl"].includes(item.keys[0]) ? "+" : "or"}</span>}
                         <Kbd>{k}</Kbd>
                       </span>
                     ))}

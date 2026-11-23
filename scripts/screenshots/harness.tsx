@@ -306,6 +306,7 @@ if (page) useAppStore.setState({ page: page as never });
 const guide = q.get("guide");
 if (guide === "guide" || guide === "import") useAppStore.setState({ setupGuideOpen: guide });
 if (q.get("templateEditor")) useAppStore.setState({ templateEditor: {} });
+if (q.get("palette")) useAppStore.setState({ paletteOpen: true });
 await import("../../src/main");
 
 // Click through to deeper views once the page has drawn: a tab, then a Git view.

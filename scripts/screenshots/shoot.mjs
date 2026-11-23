@@ -25,6 +25,8 @@ const views = {
   home: "page=overview",
   "home-dark": "page=overview&theme=dark",
   "home-issues": "page=overview&issues=1",
+  palette: "page=overview&palette=1",
+  "palette-dark": "page=overview&palette=1&theme=dark",
   sites: "page=sites",
   "git-changes": "page=sites&tab=git&file=README.md",
   "git-changes-dark": "page=sites&tab=git&file=README.md&theme=dark",

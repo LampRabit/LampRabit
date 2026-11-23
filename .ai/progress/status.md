@@ -1,6 +1,6 @@
 # Current status
 
-Last updated 2026-11-21. Keep this short: where things stand and what comes next. History goes in [history.md](history.md).
+Last updated 2026-11-24. Keep this short: where things stand and what comes next. History goes in [history.md](history.md).
 
 ## Released
 
@@ -19,11 +19,17 @@ Plan: [../plans/active/phase-27-pluggable-services.md](../plans/active/phase-27-
 | B3. Services without an enum variant (`ServiceKind::Plugin`, `Ports.extra`) | done, commit `981d67d` |
 | C. Local services from a file, `lamprabit service check/try` | done, commit `e2700d6` |
 | D. Registry repo, signed index, marketplace | **later** (the user, 2026-11-21) |
-| KarotX bundled as LampRabit's own database client (`connects`) | done 2026-11-21; services file (every local database) 2026-11-22. Repo is public, but **the v0.1.0 release is still a draft**: publish it before anyone can install KarotX |
+| KarotX bundled as LampRabit's own database client (`connects`) | done 2026-11-21; services file (every local database) 2026-11-22; repo and v0.1.0 release public, installs checked 2026-11-22 |
 | E1–E6: every service (and KarotX) defined only by YAML; only the site engine (`engine:`) stays Rust | done, commits `469dca5`, `6d37942`, `d272dba`, `508bdb0` |
 | E7a keywords/docs/config files, E7b backup hooks (+ smoke round trip, MySQL restore fix) | done, `1325049`, `0785179` |
 | **E7 rest: `scope: project`, connection adapters, `kind: tool`/`cli` (PHP tools, CLIs are runtimes)** | **open: waiting for the user's call** (scope/adapters have no consumer until Firebase/PocketBase and service binding) |
 | Leftovers: clicking Add/Remove in the running app; macOS (CI runs when the branch is pushed) | **open** |
+
+## Next release: 0.8 (not yet)
+
+The user, 2026-11-24: 0.8 ships from `dev-1.0` with a lot more features, **only once they're all built and tested**. Commits carry no AI attribution.
+
+Done on `dev-1.0` since phase 27: UI polish and Home's status strip + Needs attention (2026-11-23), fixes from the owner's notes (selection Start/Stop, phpMyAdmin after install, other stacks' Windows services and PATH, Windows Security exclusion), **phase 28 command palette** steps 1–2 (2026-11-24, [plan](../plans/active/phase-28-command-palette.md)).
 
 ## Next after phase 27
 

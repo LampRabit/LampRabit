@@ -24,6 +24,7 @@ import Titlebar from "./components/Titlebar";
 import Diagnostics from "./components/Diagnostics";
 import FirstRunDialog from "./components/FirstRunDialog";
 import ShortcutsDialog from "./components/ShortcutsDialog";
+import CommandPalette from "./components/CommandPalette";
 import { useHotkeys } from "./lib/shortcuts";
 import { useStack } from "./lib/stack";
 import type { PageId } from "./lib/store";
@@ -114,6 +115,18 @@ function useGlobalShortcuts() {
         .then((p) => openPath(p.www))
         .catch(notifyError),
   });
+  // Ctrl/Cmd+K opens the command palette from anywhere, also while typing in a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        const s = useAppStore.getState();
+        s.setPaletteOpen(!s.paletteOpen);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 }
 
 // Home loads with the app; the other pages and the big dialogs are separate chunks, loaded
@@ -212,6 +225,7 @@ export default function App() {
         </Suspense>
         <FirstRunDialog />
         <ShortcutsDialog />
+        <CommandPalette />
       </div>
     </PageToolbarProvider>
   );

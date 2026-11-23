@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useQuery } from "@tanstack/react-query";
-import { Copy, Download, FolderOpen, Keyboard, Minus, Moon, MoreHorizontal, Play, Square, SquareTerminal, Sun, X } from "lucide-react";
+import { Copy, Download, FolderOpen, Keyboard, Minus, Moon, MoreHorizontal, Play, Search, Square, SquareTerminal, Sun, X } from "lucide-react";
 import clsx from "clsx";
 import { api } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
@@ -82,6 +82,16 @@ export default function Titlebar() {
         {/* The page's own actions, then LampRabit's, which are the same on every page. */}
         {(pageToolbar?.actions || pageToolbar?.menuActions) && <span className="mx-1 h-5 w-px shrink-0 bg-line" aria-hidden />}
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+        <button
+          onClick={() => useAppStore.getState().setPaletteOpen(true)}
+          aria-label="Search everything"
+          title="Search actions, projects, services and settings"
+          className="flex h-8 items-center gap-2 rounded-lg border border-line bg-bg px-2.5 text-sm text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+        >
+          <Search size={14} aria-hidden />
+          <span className="hidden lg:inline">Search</span>
+          <kbd className="hidden rounded border border-line px-1 font-mono text-[11px] lg:inline">{os === "macos" ? "⌘K" : "Ctrl K"}</kbd>
+        </button>
         <ThemeToggle />
         <Button size="sm" variant="ghost" className="hidden sm:inline-flex" onClick={() => useAppStore.getState().setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
           <Keyboard size={15} />

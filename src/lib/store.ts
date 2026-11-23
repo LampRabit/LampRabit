@@ -65,6 +65,15 @@ interface AppStore {
   /** Opens a project on the Sites page (from Home); Sites picks it up and clears it. */
   siteFocus: string | null;
   openSite: (path: string | null) => void;
+  /** Opens a service or runtime on the Services page; Services picks it up and clears it. */
+  serviceFocus: string | null;
+  openService: (id: string | null) => void;
+  /** Scrolls Settings to a section (its id); Settings picks it up and clears it. */
+  settingsFocus: string | null;
+  openSettings: (section: string | null) => void;
+  /** The command palette (Ctrl/Cmd+K). */
+  paletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
   /** When Logs was last on screen, for the "new errors" dot on its tab. */
   logsSeenAt: number;
   /** Service the Logs page opens filtered to, set by "View logs" on a service. */
@@ -143,6 +152,12 @@ export const useAppStore = create<AppStore>((set) => ({
   navigate: (page) => set((s) => ({ page, logsSeenAt: page === "logs" || s.page === "logs" ? Date.now() : s.logsSeenAt })),
   siteFocus: null,
   openSite: (siteFocus) => set(siteFocus ? { siteFocus, page: "sites" } : { siteFocus }),
+  serviceFocus: null,
+  openService: (serviceFocus) => set(serviceFocus ? { serviceFocus, page: "services" } : { serviceFocus }),
+  settingsFocus: null,
+  openSettings: (settingsFocus) => set(settingsFocus ? { settingsFocus, page: "settings" } : { settingsFocus }),
+  paletteOpen: false,
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   logsSeenAt: Date.now(),
   logFilter: null,
   showLogs: (logFilter) => set({ page: "logs", logFilter }),

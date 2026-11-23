@@ -14,6 +14,7 @@ export default function Dialog({
   children,
   footer,
   width = "max-w-lg",
+  bare = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -22,6 +23,8 @@ export default function Dialog({
   children: ReactNode;
   footer?: ReactNode;
   width?: string;
+  /** No title bar or padding, near the top of the window: the command palette. */
+  bare?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   // Callers often pass a new function each render; reading it through a ref keeps the
@@ -69,7 +72,7 @@ export default function Dialog({
 
   if (!open) return null;
   return createPortal(
-    <div className="motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6" onMouseDown={onClose}>
+    <div className={`motion-backdrop fixed inset-0 z-50 flex justify-center bg-black/40 p-6 ${bare ? "items-start pt-[12vh]" : "items-center"}`} onMouseDown={onClose}>
       <div
         ref={panel}
         role="dialog"
@@ -78,6 +81,7 @@ export default function Dialog({
         className={`motion-dialog flex max-h-full w-full ${width} flex-col rounded-2xl border border-line bg-surface shadow-float`}
         onMouseDown={(e) => e.stopPropagation()}
       >
+        {bare ? children : <>
         <div className="flex items-center gap-3 border-b border-line px-6 py-4">
           {icon && <span className="text-accent-text">{icon}</span>}
           <h2 className="flex-1 text-lg font-medium tracking-tight">{title}</h2>
@@ -91,6 +95,7 @@ export default function Dialog({
         </div>
         <div className="min-h-0 overflow-y-auto px-6 py-5">{children}</div>
         {footer && <div className="flex justify-end gap-2 border-t border-line px-6 py-4">{footer}</div>}
+        </>}
       </div>
     </div>,
     document.body,

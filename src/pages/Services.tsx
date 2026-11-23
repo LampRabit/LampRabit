@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, FilePlus2, FolderOpen, Hexagon, Search, X, Play, Puzzle, RefreshCw, RotateCw, Share2, Square, Trash2 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -64,6 +64,15 @@ export default function Services() {
     writePref("services-scope", v);
   };
   const [filter, setFilter] = useState("");
+  // Opened on one service from elsewhere (the command palette): show it, even outside Essentials.
+  const serviceFocus = useAppStore((s) => s.serviceFocus);
+  useEffect(() => {
+    if (!serviceFocus) return;
+    setSelected(serviceFocus as ServiceSelection);
+    if (!ESSENTIALS.includes(serviceFocus as ServiceSelection)) setScope("all");
+    setFilter("");
+    useAppStore.getState().openService(null);
+  }, [serviceFocus]);
   const allGroups = catalog.data?.groups ?? [];
   // Essentials keeps what's installed too, so nothing in use disappears from the list.
   const groups = allGroups

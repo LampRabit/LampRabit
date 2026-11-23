@@ -1,23 +1,27 @@
 import { usePageActive } from "./pageActive";
 import { useEffect, useRef } from "react";
 
-/** Every shortcut, as shown in the "?" dialog. Handlers live with the screens they act on. */
-export const SHORTCUTS: { group: string; items: { keys: string[]; label: string }[] }[] = [
+/**
+ * Every shortcut, as shown in the "?" dialog. Handlers live with the screens they act on;
+ * an `id` lets the command palette show the keys next to its action of the same id.
+ */
+export const SHORTCUTS: { group: string; items: { keys: string[]; label: string; id?: string }[] }[] = [
   {
     group: "Anywhere",
     items: [
-      { keys: ["?"], label: "Show keyboard shortcuts" },
-      { keys: ["1"], label: "Home" },
-      { keys: ["2"], label: "Sites" },
-      { keys: ["3"], label: "Services" },
-      { keys: ["4"], label: "Logs" },
-      { keys: ["5"], label: "Settings" },
-      { keys: ["Shift", "S"], label: "Start all (or the active profile)" },
-      { keys: ["Shift", "X"], label: "Stop all" },
-      { keys: ["Shift", "R"], label: "Restart the running services" },
-      { keys: ["N"], label: "New project" },
-      { keys: ["T"], label: "Open terminal" },
-      { keys: ["W"], label: "Open the www folder" },
+      { keys: ["Ctrl", "K"], label: "Search everything (⌘K on macOS)", id: "palette" },
+      { keys: ["?"], label: "Show keyboard shortcuts", id: "shortcuts" },
+      { keys: ["1"], label: "Home", id: "page-overview" },
+      { keys: ["2"], label: "Sites", id: "page-sites" },
+      { keys: ["3"], label: "Services", id: "page-services" },
+      { keys: ["4"], label: "Logs", id: "page-logs" },
+      { keys: ["5"], label: "Settings", id: "page-settings" },
+      { keys: ["Shift", "S"], label: "Start all (or the active profile)", id: "start-all" },
+      { keys: ["Shift", "X"], label: "Stop all", id: "stop-all" },
+      { keys: ["Shift", "R"], label: "Restart the running services", id: "restart-running" },
+      { keys: ["N"], label: "New project", id: "new-project" },
+      { keys: ["T"], label: "Open terminal", id: "terminal" },
+      { keys: ["W"], label: "Open the www folder", id: "www" },
     ],
   },
   {
@@ -56,6 +60,9 @@ export const SHORTCUTS: { group: string; items: { keys: string[]; label: string 
   },
 
 ];
+
+/** The keys of the shortcut with this id, for the command palette. */
+export const keysFor = (id: string) => SHORTCUTS.flatMap((g) => g.items).find((i) => i.id === id)?.keys;
 
 /** "shift+s", "?", "arrowdown", " "… for a key event; null when a modifier other than Shift is held. */
 function combo(e: KeyboardEvent): string | null {

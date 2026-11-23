@@ -3,39 +3,26 @@ import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
-  Bot,
   CheckCircle2,
   CircleSlash,
-  Database,
   ExternalLink,
   Feather,
   FolderInput,
   FolderOpen,
-  Layers,
-  LifeBuoy,
-  Mail,
-  ScrollText,
   Monitor,
   Moon,
-  Palette,
-  Plug,
-  Power,
   RefreshCw,
-  ServerCog,
-  Settings2,
-  Share2,
-  ArrowDownToLine,
   Compass,
   ShieldCheck,
   Stethoscope,
   Sun,
-  SquareTerminal,
   Trash2,
   Wind,
 } from "lucide-react";
 import clsx from "clsx";
 import { allServers, api, runtimeLabels, type EnvPaths, type PortStatus, type Runtime, type Server, type Settings as SettingsT } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
+import { sections } from "../lib/settingsSections";
 import { useTheme } from "../lib/theme";
 import { useMotion } from "../lib/motion";
 import { installAppUpdate, useAppUpdate } from "../lib/updates";
@@ -52,24 +39,6 @@ import { Button, Card, Segmented, Switch, inputClass } from "../components/ui";
 import { usePageToolbar } from "../components/PageToolbar";
 
 type Os = EnvPaths["os"];
-
-/** Settings → section index; ids are the anchors. */
-const sections = [
-  { id: "general", label: "General", icon: Settings2 },
-  { id: "startup", label: "Startup", icon: Power },
-  { id: "terminal", label: "Terminal", icon: SquareTerminal },
-  { id: "assistants", label: "AI assistants", icon: Bot },
-  { id: "web", label: "Web server", icon: ServerCog },
-  { id: "databases", label: "Databases", icon: Database },
-  { id: "versions", label: "Active versions", icon: Layers },
-  { id: "ports", label: "Ports", icon: Plug },
-  { id: "email", label: "Email", icon: Mail },
-  { id: "logs", label: "Logs", icon: ScrollText },
-  { id: "sharing", label: "Sharing", icon: Share2 },
-  { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "updates", label: "Updates", icon: ArrowDownToLine },
-  { id: "help", label: "Troubleshooting", icon: LifeBuoy },
-] as const;
 
 const hostsFile: Record<Os, string> = {
   windows: String.raw`C:\Windows\System32\drivers\etc\hosts`,
@@ -98,6 +67,19 @@ export default function Settings() {
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const openDiagnostics = useAppStore((s) => s.setDiagnosticsOpen);
   const openSetupGuide = useAppStore((s) => s.setSetupGuideOpen);
+  // Opened on a section from elsewhere (the command palette): scroll to it once it's drawn.
+  const settingsFocus = useAppStore((s) => s.settingsFocus);
+  useEffect(() => {
+    if (!settingsFocus) return;
+    let tries = 0;
+    const go = () => {
+      const el = document.getElementById(`settings-${settingsFocus}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      else if (tries++ < 30) return void requestAnimationFrame(go);
+      useAppStore.getState().openSettings(null);
+    };
+    go();
+  }, [settingsFocus]);
   const [uninstalling, setUninstalling] = useState(false);
   const [moving, setMoving] = useState(false);
   const [draft, setDraft] = useState<SettingsT | null>(null);
