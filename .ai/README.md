@@ -45,7 +45,7 @@ Read the one for the code you're changing. Don't reverse a decision without aski
 |---|---|
 | Roadmap: every phase with its status and product-level decisions | [plans/roadmap.md](plans/roadmap.md) |
 | **Active:** phase 27, pluggable services (branch `dev-1.0`) | [plans/active/phase-27-pluggable-services.md](plans/active/phase-27-pluggable-services.md) |
-| **Active:** phase 28, command palette (branch `dev-1.0`) | [plans/active/phase-28-command-palette.md](plans/active/phase-28-command-palette.md) |
+| Phase 28, command palette (complete, not released) | [plans/active/phase-28-command-palette.md](plans/active/phase-28-command-palette.md) |
 | Completed phases (6, 7, 9–26), one file each | [plans/completed/](plans/completed/) |
 | **Order** of the backlog (confirmed 2026-11-21) | [plans/roadmap.md](plans/roadmap.md) "Next" |
 

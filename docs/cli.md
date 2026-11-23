@@ -13,19 +13,25 @@ It talks to the running app, so everything goes through the same code as the but
 | `lamprabit service start\|stop\|restart <id>` | One service (`apache`, `nginx`, `mariadb`, `mysql`, `postgres`, `redis`, `mailpit`…) |
 | `lamprabit start [<profile>]` | Everything installed except the heavy services (Elasticsearch, OpenSearch, ClickHouse, Neo4j, Ollama, n8n, RabbitMQ), or a stack profile |
 | `lamprabit stop` | Every service |
+| `lamprabit restart` | The running services, one at a time; prints any that failed |
 | `lamprabit profiles` | Stack profiles |
 | `lamprabit projects` | Projects in `www/` with their `.test` URLs |
 | `lamprabit project start\|stop <name>` | A project's dev server |
 | `lamprabit project open <name>` | Its site, in the browser |
+| `lamprabit project edit <name>` | Its folder, in your editor (Settings → General → Editor command) |
+| `lamprabit terminal [<project>]` | A terminal in the project (or `www`) with LampRabit's `php`, `composer`… first on PATH |
 | `lamprabit project create <name> --template <id> [--php <v>] [--database <db>]` | A new project from a template (`lamprabit templates` lists them) |
 | `lamprabit runtimes [--available <id>]` | Installed runtimes, or what `<id>` can install |
 | `lamprabit runtime install <id> [version]` | Download (checksum checked) and use it; a line like `8.4` picks its newest |
 | `lamprabit runtime use <id> <version>` | Switch the version in use |
 | `lamprabit runtime remove <id> <version> --yes` | Delete a version |
+| `lamprabit php extensions [--php <version>]` | PHP's extensions: on, off, or available to download (the active PHP by default) |
+| `lamprabit php enable\|disable <extension> [--php <version>]` | Turn one on (downloading it when needed) or off; the web servers restart |
 | `lamprabit logs [--source <id>] [--lines N] [--follow]` | Recent log lines; the source is a service id, `php`, `system` or `project:<name>` |
 | `lamprabit doctor <project> [--fix <id> \| --fix-all] [--dry-run]` | The project doctor; `--dry-run` shows what the fixes would do |
 | `lamprabit git <project>` | Branch, upstream, changed files |
 | `lamprabit config [key.path]` | The settings, or one value (`lamprabit config ports.http`) |
+| `lamprabit files` | Every config file with its path: each service's, `php.ini` per PHP version, Composer's `config.json`, `settings.toml`, the hosts file |
 | `lamprabit mcp` | The MCP server on stdin/stdout |
 | `lamprabit service check <file>` | Checks a service file (`service.yaml`) and says what it downloads, runs and uses; works without the app |
 | `lamprabit service try <file>` | Installs the service with what it needs, starts it, checks its health, starts it again (nothing new may spawn) and stops it, in a throwaway folder with its own settings; your LampRabit isn't touched. The folder is deleted when the run passes |
@@ -47,9 +53,11 @@ By hand, `lamprabit mcp` is the same server over stdio, for example:
 { "mcpServers": { "lamprabit": { "command": "C:\\lampRabit\\shims\\lamprabit.cmd", "args": ["mcp"] } } }
 ```
 
-Tools that only read: `status`, `list_services`, `list_projects`, `read_logs`, `project_doctor`, `git_status`, `list_runtimes`, `list_templates`.
+Tools that only read: `status`, `list_services`, `list_projects`, `read_logs`, `project_doctor`, `git_status`, `list_runtimes`, `list_templates`, `list_config_files`, `list_php_extensions`.
 
-Tools that change something, which clients ask about first (`readOnlyHint: false`; stopping and fixing are also `destructiveHint`): `start_service`, `stop_service`, `restart_service`, `start_project`, `stop_project`, `fix_project_issue`, `create_project` (a user template's risky steps are refused), `install_runtime`.
+Tools that change something, which clients ask about first (`readOnlyHint: false`; stopping and fixing are also `destructiveHint`): `start_service`, `stop_service`, `restart_service`, `start_project`, `stop_project`, `fix_project_issue`, `create_project` (a user template's risky steps are refused), `install_runtime`, `set_php_extension`, `restart_running_services`, `open_project_in_editor`.
+
+The same actions are in the app's command palette (Ctrl/Cmd+K): the palette, the command line and MCP go through the same requests.
 
 The settings aren't exposed, and nothing returns a password or token: local services have none, and Git remotes come back with credentials stripped.
 

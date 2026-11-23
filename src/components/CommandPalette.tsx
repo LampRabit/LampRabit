@@ -7,6 +7,7 @@ import { api, type ServiceKind } from "../lib/api";
 import { useCatalog } from "../lib/catalog";
 import { pushRecent, readRecent, search, type PaletteItem } from "../lib/palette";
 import { sections } from "../lib/settingsSections";
+import { loadSettingsIndex } from "../lib/settingsIndex";
 import { keysFor } from "../lib/shortcuts";
 import { useStack } from "../lib/stack";
 import { notifyError, useAppStore, type PageId } from "../lib/store";
@@ -26,6 +27,16 @@ const DOCS: { title: string; url: string; keywords: string[] }[] = [
   { title: "Moving from Laragon", url: `${REPO}/docs/website/migrate-from-laragon.md`, keywords: ["import", "laragon", "migrate"] },
   { title: "Moving from XAMPP", url: `${REPO}/docs/website/migrate-from-xampp.md`, keywords: ["import", "xampp", "migrate"] },
   { title: "Questions and answers", url: `${REPO}/docs/website/faq.md`, keywords: ["faq", "help", "question"] },
+];
+
+/** A project's tabs, for "blog: Git" and the like: [tab id, label, other words]. */
+const PROJECT_TABS: [string, string, string[]][] = [
+  ["git", "Git", ["commit", "branch", "push", "pull", "changes"]],
+  ["commands", "commands and processes", ["artisan", "npm", "scripts", "queue", "cron", "processes"]],
+  ["dependencies", "dependencies", ["composer", "packages", "npm", "outdated", "vendor"]],
+  ["domains", "domains", ["alias", "subdomain", "url", "https"]],
+  ["settings", "project settings", ["php version", "web server", "docroot", "public"]],
+  ["overview", "health", ["doctor", "problems", "fix", "check"]],
 ];
 
 const PAGES: { id: PageId; title: string; keywords: string[] }[] = [
@@ -147,12 +158,11 @@ function useItems(): PaletteItem[] {
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
-  const installedServices = (services.data ?? []).filter((s) => s.installed).map((s) => s.kind);
-  const configFiles = useQuery({
-    queryKey: ["palette-config-files", installedServices.join(",")],
-    queryFn: () => Promise.all(installedServices.map(async (kind) => ({ kind, files: (await api.serviceConfigFiles(kind).catch(() => null)) ?? [] }))),
-    staleTime: 60_000,
-  });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const configFiles = useQuery({ queryKey: ["all-config-files"], queryFn: api.allConfigFiles, staleTime: 60_000 });
+  const settingRows = useQuery({ queryKey: ["settings-index"], queryFn: loadSettingsIndex, staleTime: Infinity });
+  const php = installed.data?.find((r) => r.runtime === "php")?.active ?? null;
+  const extensions = useQuery({ queryKey: ["php-extensions", php], queryFn: () => api.phpExtensions(php!), enabled: !!php, staleTime: 60_000 });
 
   return useMemo(() => {
     const out: PaletteItem[] = [];
@@ -160,6 +170,7 @@ function useItems(): PaletteItem[] {
     const refresh = () => queryClient.invalidateQueries({ queryKey: ["services"] });
     const fail = (p: Promise<unknown>) => p.then(refresh, notifyError);
 
+    const keywordsOf = (id: string) => catalog.data?.runtimes.find((r) => r.id === id)?.keywords ?? [];
     for (const p of PAGES) out.push({ id: `page-${p.id}`, title: `Go to ${p.title}`, group: "Pages", keywords: p.keywords, keys: keysFor(`page-${p.id}`), run: () => store.navigate(p.id) });
     action("new-project", "New project", () => store.setNewProjectOpen(true), ["create", "laravel", "wordpress", "template"]);
     action("terminal", "Open terminal", () => api.openTerminal(null).catch(notifyError), ["shell", "console"]);
@@ -181,9 +192,21 @@ function useItems(): PaletteItem[] {
       out.push({ id: `site-open-${site.path}`, title: `Open ${site.name} in the browser`, group: "Projects", keywords: [...words, "browser", "visit"], run: () => openUrl(site.url).catch(notifyError) });
       out.push({ id: `site-editor-${site.path}`, title: `Open ${site.name} in the editor`, group: "Projects", keywords: [...words, "code", "vscode", "ide"], run: () => api.openInEditor(site.path).catch(notifyError) });
       out.push({ id: `site-terminal-${site.path}`, title: `Terminal in ${site.name}`, group: "Projects", keywords: [...words, "shell", "console"], run: () => api.openTerminal(site.path).catch(notifyError) });
+      // Straight to one of its tabs.
+      for (const [tab, label, more] of PROJECT_TABS) {
+        out.push({ id: `site-${tab}-${site.path}`, title: `${site.name}: ${label}`, group: "Projects", keywords: [...words, ...more], run: () => store.openSite(site.path, tab) });
+      }
+      out.push({ id: `site-logs-${site.path}`, title: `${site.name}: logs`, group: "Projects", keywords: [...words, "output", "errors"], run: () => store.showLogs(`project:${site.name}`) });
+      if (site.app) {
+        out.push({ id: `site-start-${site.path}`, title: `Start the ${site.name} dev server`, group: "Projects", keywords: [...words, "run", "serve", "npm run dev"], run: () => api.appStart(site.name).catch(notifyError) });
+        out.push({ id: `site-stop-${site.path}`, title: `Stop the ${site.name} dev server`, group: "Projects", keywords: [...words, "kill"], run: () => api.appStop(site.name).catch(notifyError) });
+      }
+    }
+    // Web tools (phpMyAdmin, Adminer, KarotX, Mailpit…) at their own addresses.
+    if (sites.data?.hostsOk) {
+      for (const t of sites.data.tools) out.push({ id: `tool-${t.name}`, title: `Open ${catalog.data?.runtimes.find((r) => r.id === t.name)?.label ?? t.name}`, group: "Tools", hint: t.domain, keywords: [t.name, ...keywordsOf(t.name), "browser"], run: () => openUrl(t.url).catch(notifyError) });
     }
 
-    const keywordsOf = (id: string) => catalog.data?.runtimes.find((r) => r.id === id)?.keywords ?? [];
     for (const s of services.data ?? []) {
       if (!s.installed) continue;
       const kind = s.kind as ServiceKind;
@@ -203,16 +226,44 @@ function useItems(): PaletteItem[] {
       out.push({ id: `service-${r.id}`, title: has(r.id) ? `${r.label} versions and settings` : `Install ${r.label}`, group: "Services", hint: has(r.id) ? undefined : r.blurb, keywords: [r.id, ...r.keywords], run: () => store.openService(r.id) });
     }
 
-    for (const sec of sections) out.push({ id: `settings-${sec.id}`, title: `${sec.label} settings`, group: "Settings", keywords: sec.keywords, run: () => store.openSettings(sec.id) });
-
-    for (const { kind, files } of configFiles.data ?? []) {
-      const label = services.data?.find((s) => s.kind === kind)?.label ?? kind;
-      for (const f of files.filter((f) => f.exists)) {
-        out.push({ id: `config-${kind}-${f.path}`, title: `${f.label}`, group: "Config files", hint: label, keywords: [f.path, kind, "config", "edit"], run: () => api.openInEditor(f.path).catch(notifyError) });
+    // Another installed version of a runtime: switch to it.
+    for (const r of installed.data ?? []) {
+      const label = catalog.data?.runtimes.find((c) => c.id === r.runtime)?.label ?? r.runtime;
+      for (const v of r.versions.filter((v) => v !== r.active)) {
+        out.push({ id: `use-${r.runtime}-${v}`, title: `Use ${label} ${v}`, group: "Services", hint: r.active ? `now ${r.active}` : undefined, keywords: [r.runtime, "switch", "version", "change"], run: () => api.setActiveVersion(r.runtime, v).then(() => queryClient.invalidateQueries(), notifyError) });
       }
+    }
+    for (const p of settings.data?.profiles ?? []) {
+      out.push({ id: `profile-${p.name}`, title: `Start the ${p.name} profile`, group: "Profiles", hint: p.services.join(", "), keywords: ["profile", "stack", ...p.services], run: () => stack.startProfile(p.services) });
+    }
+
+    // PHP's extensions (the active version): turn one on or off, or download it.
+    if (php) {
+      out.push({ id: "php-extensions", title: "PHP extensions", group: "PHP", hint: `PHP ${php}`, keywords: ["extension", "ext", "module", "xdebug", "php.ini"], run: () => store.openExtensions(true) });
+      const toggle = (name: string, on: boolean, install: boolean) =>
+        (install ? api.installPhpExtension(php, name) : api.setPhpExtension(php, name, on)).then(() => {
+          store.notify("info", `PHP ${php}: ${name} ${on ? "on" : "off"}; the web servers restart to apply it`);
+          queryClient.invalidateQueries({ queryKey: ["php-extensions"] });
+        }, notifyError);
+      for (const e of extensions.data ?? []) {
+        const words = ["extension", "ext", "php", e.description ?? ""];
+        if (e.installed) out.push({ id: `ext-${e.name}`, title: `${e.enabled ? "Turn off" : "Turn on"} ${e.name}`, group: "PHP extensions", hint: e.enabled ? "on" : "off", keywords: [...words, e.enabled ? "disable" : "enable"], run: () => toggle(e.name, !e.enabled, false) });
+        else if (e.available) out.push({ id: `ext-${e.name}`, title: `Install ${e.name}`, group: "PHP extensions", hint: e.description ?? e.available, keywords: [...words, "enable", "download", "pecl"], run: () => toggle(e.name, true, true) });
+      }
+    }
+
+    for (const sec of sections) out.push({ id: `settings-${sec.id}`, title: `${sec.label} settings`, group: "Settings", keywords: sec.keywords, run: () => store.openSettings(sec.id) });
+    // Each setting on its own, found by its name and its explanation.
+    for (const row of settingRows.data ?? []) {
+      const section = sections.find((s) => s.id === row.section);
+      out.push({ id: `setting-${row.section}-${row.label}`, title: row.label, group: "Settings", hint: section?.label, keywords: [row.hint, ...(section?.keywords ?? [])], run: () => store.openSettings(`${row.section}#${row.label}`) });
+    }
+
+    for (const f of (configFiles.data ?? []).filter((f) => f.exists)) {
+      out.push({ id: `config-${f.path}`, title: f.label, group: "Config files", hint: f.owner, keywords: [f.path, f.owner, "config", "edit", "where is"], run: () => api.openInEditor(f.path).catch(notifyError) });
     }
 
     for (const d of DOCS) out.push({ id: `docs-${d.url}`, title: d.title, group: "Docs", keywords: ["docs", "documentation", "how to", ...d.keywords], run: () => openUrl(d.url).catch(notifyError) });
     return out;
-  }, [queryClient, store, stack, theme, setTheme, catalog.data, services.data, installed.data, sites.data, configFiles.data]);
+  }, [queryClient, store, stack, theme, setTheme, catalog.data, services.data, installed.data, sites.data, settings.data, configFiles.data, settingRows.data, php, extensions.data]);
 }

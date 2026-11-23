@@ -29,7 +29,7 @@ Plan: [../plans/active/phase-27-pluggable-services.md](../plans/active/phase-27-
 
 The user, 2026-11-24: 0.8 ships from `dev-1.0` with a lot more features, **only once they're all built and tested**. Commits carry no AI attribution.
 
-Done on `dev-1.0` since phase 27: UI polish and Home's status strip + Needs attention (2026-11-23), fixes from the owner's notes (selection Start/Stop, phpMyAdmin after install, other stacks' Windows services and PATH, Windows Security exclusion), **phase 28 command palette** steps 1–2 (2026-11-24, [plan](../plans/active/phase-28-command-palette.md)).
+Done on `dev-1.0` since phase 27: UI polish and Home's status strip + Needs attention (2026-11-23), fixes from the owner's notes (selection Start/Stop, phpMyAdmin after install, other stacks' Windows services and PATH, Windows Security exclusion), **phase 28 command palette**, complete (2026-11-24, [plan](../plans/active/phase-28-command-palette.md)).
 
 ## Next after phase 27
 

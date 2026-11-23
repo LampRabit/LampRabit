@@ -871,6 +871,7 @@ pub fn run() {
             take_startup_warnings,
             open_in_editor,
             vc_runtime_status,
+            all_config_files,
             stop_windows_service,
             path_shadows,
             put_commands_first,

@@ -71,11 +71,20 @@ export default function Settings() {
   const settingsFocus = useAppStore((s) => s.settingsFocus);
   useEffect(() => {
     if (!settingsFocus) return;
+    // "ports" scrolls to the section, "general#Editor command" to one setting, which is
+    // briefly outlined so the eye finds it.
+    const [section, row] = settingsFocus.split("#");
     let tries = 0;
     const go = () => {
-      const el = document.getElementById(`settings-${settingsFocus}`);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-      else if (tries++ < 30) return void requestAnimationFrame(go);
+      const box = document.getElementById(`settings-${section}`);
+      const el = (row && box?.querySelector<HTMLElement>(`[data-setting="${CSS.escape(row)}"]`)) || box;
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: row ? "center" : "start" });
+        if (row && el !== box) {
+          el.classList.add("setting-found");
+          setTimeout(() => el.classList.remove("setting-found"), 1600);
+        }
+      } else if (tries++ < 30) return void requestAnimationFrame(go);
       useAppStore.getState().openSettings(null);
     };
     go();
@@ -730,7 +739,7 @@ function Section({ id, title, subtitle, children }: { id: string; title: string;
 /** Label and hint on the left, the control on the right; `wide` puts the control underneath. */
 function Row({ label, hint, wide = false, children }: { label: ReactNode; hint?: string; wide?: boolean; children?: ReactNode }) {
   return (
-    <div className={clsx("px-5 py-3.5", wide ? "space-y-2.5" : "flex flex-wrap items-center justify-between gap-x-6 gap-y-2")}>
+    <div data-setting={typeof label === "string" ? label : undefined} className={clsx("px-5 py-3.5", wide ? "space-y-2.5" : "flex flex-wrap items-center justify-between gap-x-6 gap-y-2")}>
       <div className="min-w-0 flex-1 basis-64">
         <div className="text-sm font-medium">{label}</div>
         {hint && <p className="mt-0.5 text-xs leading-relaxed text-muted">{hint}</p>}
@@ -742,7 +751,7 @@ function Row({ label, hint, wide = false, children }: { label: ReactNode; hint?:
 
 function ToggleRow({ label, hint, checked, onChange }: { label: string; hint: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <div className="flex items-center justify-between gap-6 px-5 py-3.5">
+    <div data-setting={label} className="flex items-center justify-between gap-6 px-5 py-3.5">
       <div className="min-w-0">
         <div className="text-sm font-medium">{label}</div>
         <p className="mt-0.5 text-xs leading-relaxed text-muted">{hint}</p>

@@ -330,6 +330,48 @@ pub(crate) async fn service_config_files(state: State<'_, AppState>, kind: Servi
     Ok(out)
 }
 
+/// One config file anywhere in LampRabit, with what it belongs to: the command palette and
+/// `lamprabit files` list them all.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConfigFileEntry {
+    pub(crate) owner: String,
+    pub(crate) label: String,
+    pub(crate) path: PathBuf,
+    pub(crate) exists: bool,
+}
+
+/// Every installed service's config files, each installed PHP version's php.ini (the active
+/// one first), Composer's global config, LampRabit's own settings and the hosts file.
+#[tauri::command]
+pub(crate) async fn all_config_files(state: State<'_, AppState>) -> Result<Vec<ConfigFileEntry>> {
+    let (settings, layout) = state.snapshot().await;
+    let mut out = Vec::new();
+    let mut add = |owner: &str, label: &str, path: PathBuf| out.push(ConfigFileEntry { owner: owner.to_string(), label: label.to_string(), exists: path.exists(), path });
+    let active = settings.versions.get("php").cloned();
+    let mut php = runtimes::installed(&layout, Runtime::Php);
+    php.sort_by_key(|v| Some(v) != active.as_ref());
+    for v in &php {
+        let etc = layout.etc("php").join(v);
+        add(&format!("PHP {v}"), "php.ini", etc.join("php.ini"));
+        if !cfg!(windows) {
+            add(&format!("PHP {v}"), "php-fpm.conf", etc.join("php-fpm.conf"));
+        }
+    }
+    add("Composer", "config.json", layout.data("composer").join("config.json"));
+    add("LampRabit", "settings.toml", state.settings_path.clone());
+    add("System", "hosts", sites::hosts_file());
+    for kind in ServiceKind::all() {
+        if settings.versions.get(kind.id()).is_none() {
+            continue;
+        }
+        for f in service_config_files(state.clone(), kind).await.unwrap_or_default() {
+            out.push(ConfigFileEntry { owner: kind.label().to_string(), label: f.label, path: f.path, exists: f.exists });
+        }
+    }
+    Ok(out)
+}
+
 /// A service file's summary for the user to approve, and whether it replaces one they added.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -329,6 +329,13 @@ function RuntimeCard({
   const notify = useAppStore((s) => s.notify);
   const installs = useAppStore((s) => s.installs);
   const [extOpen, setExtOpen] = useState(false);
+  // Asked for from the command palette.
+  const extensionsFocus = useAppStore((s) => s.extensionsFocus);
+  useEffect(() => {
+    if (!extensionsFocus || runtime !== "php") return;
+    setExtOpen(true);
+    useAppStore.getState().openExtensions(false);
+  }, [extensionsFocus, runtime]);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const catalogInfo = useCatalog();
   const info = infoFor(catalogInfo.data, runtime);

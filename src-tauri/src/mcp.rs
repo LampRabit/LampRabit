@@ -50,6 +50,29 @@ fn tools() -> Vec<Tool> {
         t("git_status", "A project's Git branch, upstream with ahead/behind counts, changed files and remotes (credentials stripped).", "git.status", project(), true, false),
         t("list_runtimes", "Installed runtimes (PHP, Node via NVM, MariaDB, MySQL, PostgreSQL, Redis, Java…) with the version in use and every installed version.", "runtimes", none(), true, false),
         t("list_templates", "Project templates (Laravel, Symfony, WordPress, Vite, Next.js, Django…) with their ids, for create_project.", "templates", none(), true, false),
+        t("list_config_files", "Every config file LampRabit uses, with its path and what it belongs to: each service's (httpd.conf, my.ini…), php.ini for each installed PHP version, Composer's global config, LampRabit's settings and the hosts file. Read them to see how something is set up.", "files", none(), true, false),
+        t(
+            "list_php_extensions",
+            "PHP's extensions for one version (the active one by default): which are on, which are installed but off, and which can be downloaded.",
+            "php.extensions",
+            json!({"type": "object", "properties": {"version": {"type": "string", "description": "A PHP version, like 8.4.14 (default: the active one)"}}}),
+            true,
+            false,
+        ),
+        t(
+            "set_php_extension",
+            "Turn a PHP extension on or off (downloading it first when it isn't installed). The web servers restart to apply it.",
+            "php.extension",
+            json!({"type": "object", "properties": {
+                "extension": {"type": "string", "description": "Its name, from list_php_extensions (xdebug, redis, intl…)"},
+                "enabled": {"type": "boolean"},
+                "version": {"type": "string", "description": "A PHP version (default: the active one)"}
+            }, "required": ["extension", "enabled"]}),
+            false,
+            false,
+        ),
+        t("restart_running_services", "Restart every running service, for example after changing config files. Returns the problems, if any.", "restart_running", none(), false, false),
+        t("open_project_in_editor", "Open a project's folder in the user's code editor (Settings > General).", "project.editor", project(), false, false),
         t("start_service", "Start a service (and what it needs, like PHP for a web server).", "service.start", service(), false, false),
         t("stop_service", "Stop a service. Sites or projects using it stop working until it starts again.", "service.stop", service(), false, true),
         t("restart_service", "Restart a service, for example after changing its config.", "service.restart", service(), false, false),
@@ -97,7 +120,9 @@ fn tools() -> Vec<Tool> {
 fn request(tool: &Tool, args: &Value) -> Value {
     match tool.cmd {
         "service.start" | "service.stop" | "service.restart" => json!({"name": args["service"]}),
-        "doctor" | "git.status" | "project.start" | "project.stop" => json!({"name": args["project"]}),
+        "doctor" | "git.status" | "project.start" | "project.stop" | "project.editor" => json!({"name": args["project"]}),
+        "php.extensions" => json!({"version": args["version"]}),
+        "php.extension" => json!({"name": args["extension"], "enabled": args["enabled"], "version": args["version"]}),
         "doctor.fix" => json!({"name": args["project"], "id": args["id"]}),
         "runtime.install" => json!({"name": args["runtime"], "version": args["version"]}),
         "logs" => json!({"source": args["source"], "lines": args["lines"].as_u64().unwrap_or(100).min(1000)}),

@@ -66,12 +66,15 @@ export default function Sites() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const siteFocus = useAppStore((s) => s.siteFocus);
   const openSite = useAppStore((s) => s.openSite);
+  const [tab, setTab] = useState<Tab>("overview");
   useEffect(() => {
     if (!siteFocus) return;
     setSelectedPath(siteFocus);
+    // A tab asked for with it (the command palette's "blog: Git"), else the one shown.
+    const wanted = useAppStore.getState().siteTab;
+    if (wanted) setTab(wanted as Tab);
     openSite(null);
   }, [siteFocus, openSite]);
-  const [tab, setTab] = useState<Tab>("overview");
   const [cloning, setCloning] = useState(false);
 
   const apply = useMutation({ mutationFn: api.applySites, onSuccess: refresh, onError: notifyError });

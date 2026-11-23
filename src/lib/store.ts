@@ -64,7 +64,12 @@ interface AppStore {
   navigate: (page: PageId) => void;
   /** Opens a project on the Sites page (from Home); Sites picks it up and clears it. */
   siteFocus: string | null;
-  openSite: (path: string | null) => void;
+  /** The project tab to open with it ("git", "commands"…), from the command palette. */
+  siteTab: string | null;
+  openSite: (path: string | null, tab?: string) => void;
+  /** Opens PHP's extensions dialog on the Services page (the command palette). */
+  extensionsFocus: boolean;
+  openExtensions: (open: boolean) => void;
   /** Opens a service or runtime on the Services page; Services picks it up and clears it. */
   serviceFocus: string | null;
   openService: (id: string | null) => void;
@@ -151,7 +156,10 @@ export const useAppStore = create<AppStore>((set) => ({
   // Leaving or entering Logs counts as having seen its errors.
   navigate: (page) => set((s) => ({ page, logsSeenAt: page === "logs" || s.page === "logs" ? Date.now() : s.logsSeenAt })),
   siteFocus: null,
-  openSite: (siteFocus) => set(siteFocus ? { siteFocus, page: "sites" } : { siteFocus }),
+  siteTab: null,
+  openSite: (siteFocus, siteTab) => set(siteFocus ? { siteFocus, siteTab: siteTab ?? null, page: "sites" } : { siteFocus, siteTab: null }),
+  extensionsFocus: false,
+  openExtensions: (extensionsFocus) => set(extensionsFocus ? { extensionsFocus, serviceFocus: "php", page: "services" } : { extensionsFocus }),
   serviceFocus: null,
   openService: (serviceFocus) => set(serviceFocus ? { serviceFocus, page: "services" } : { serviceFocus }),
   settingsFocus: null,

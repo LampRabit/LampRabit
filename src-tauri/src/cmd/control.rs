@@ -116,6 +116,50 @@ pub(crate) async fn control_command(app: AppHandle, cmd: &str, args: serde_json:
         "doctor" => Ok(to_value(project_doctor(state.clone(), text("name")?).await?)?),
         "doctor.fix" => ok(doctor_fix(app.clone(), state.clone(), text("name")?, text("id")?).await.map(|label| json!(label))),
         "config" => Ok(to_value(get_settings(state.clone()).await?)?),
+        "files" => Ok(to_value(all_config_files(state.clone()).await?)?),
+        "restart_running" => {
+            // One at a time, so each failure is reported for its own service (like the app).
+            let mut problems = Vec::new();
+            for s in list_services(state.clone()).await?.into_iter().filter(|s| s.state == services::ServiceState::Running && !s.external) {
+                if let Err(e) = restart_service(app.clone(), state.clone(), s.kind).await {
+                    problems.push(format!("{}: {e}", s.label));
+                }
+            }
+            Ok(to_value(problems)?)
+        }
+        "terminal" | "project.editor" => {
+            let dir = match args["name"].as_str() {
+                Some(name) => list_sites(state.clone()).await?.sites.into_iter().find(|s| s.name.eq_ignore_ascii_case(name)).map(|s| s.path).ok_or_else(|| Error::msg(format!("There's no project called {name}.")))?,
+                None if cmd == "terminal" => state.snapshot().await.1.www(),
+                None => return Err(Error::msg("Missing \"name\".")),
+            };
+            if cmd == "terminal" { open_terminal(state.clone(), Some(dir)).await? } else { open_in_editor(state.clone(), dir).await? }
+            done()
+        }
+        "php.extensions" => {
+            let version = match args["version"].as_str() {
+                Some(v) => v.to_string(),
+                None => state.snapshot().await.0.versions.get("php").cloned().ok_or_else(|| Error::msg("PHP isn't installed. `lamprabit runtime install php` installs it."))?,
+            };
+            Ok(json!({"version": version, "extensions": php_extensions(state.clone(), version.clone()).await?}))
+        }
+        "php.extension" => {
+            let name = text("name")?;
+            let enabled = args["enabled"].as_bool().ok_or_else(|| Error::msg("Missing \"enabled\" (true or false)."))?;
+            let version = match args["version"].as_str() {
+                Some(v) => v.to_string(),
+                None => state.snapshot().await.0.versions.get("php").cloned().ok_or_else(|| Error::msg("PHP isn't installed."))?,
+            };
+            let list = php_extensions(state.clone(), version.clone()).await?;
+            let ext = list.iter().find(|e| e.name.eq_ignore_ascii_case(&name)).ok_or_else(|| Error::msg(format!("PHP {version} has no extension called {name}. `lamprabit php extensions` lists them.")))?;
+            // An extra extension that isn't downloaded yet is installed (which enables it).
+            if enabled && !ext.installed {
+                install_php_extension(app.clone(), state.clone(), version.clone(), ext.name.clone()).await?;
+            } else {
+                set_php_extension(app.clone(), state.clone(), version.clone(), ext.name.clone(), enabled).await?;
+            }
+            Ok(json!(format!("PHP {version}: {} {}", ext.name, if enabled { "enabled" } else { "disabled" })))
+        }
         "git.status" => Ok(to_value(git_status(state.clone(), text("name")?).await?)?),
         other => Err(Error::msg(format!("Unknown request {other} (this LampRabit may be older than the command line).")))
     }

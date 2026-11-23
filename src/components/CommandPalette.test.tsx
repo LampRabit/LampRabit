@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 /** The command palette finds services, projects and settings by name or synonym, and runs them. */
 
 const started: string[] = [];
+const toggled: unknown[][] = [];
 vi.mock("../lib/api", async (importOriginal) => {
   const original = await importOriginal<typeof import("../lib/api")>();
   const api = {
@@ -15,10 +16,23 @@ vi.mock("../lib/api", async (importOriginal) => {
         { kind: "mariadb", label: "MariaDB", installed: true, state: "stopped", external: false },
         { kind: "redis", label: "Redis", installed: false, state: "stopped", external: false },
       ]),
-    installedRuntimes: () => Promise.resolve([{ runtime: "mariadb", active: "12.3.4", versions: ["12.3.4"] }]),
+    installedRuntimes: () =>
+      Promise.resolve([
+        { runtime: "mariadb", active: "12.3.4", versions: ["12.3.4"] },
+        { runtime: "php", active: "8.4.14", versions: ["8.4.14", "8.3.27"] },
+      ]),
+    phpExtensions: () => Promise.resolve([{ name: "xdebug", kind: "extra", description: "Step debugging", enabled: false, installed: true, available: null, note: null }]),
+    setPhpExtension: (...args: unknown[]) => (toggled.push(args), Promise.resolve()),
     listSites: () => Promise.resolve({ sites: [{ name: "blog", domain: "blog.test", path: "C:/www/blog", url: "https://blog.test", framework: "Laravel", language: "php" }], tools: [] }),
-    runtimeInfo: () => Promise.resolve({ runtimes: [{ id: "mariadb", label: "MariaDB", blurb: "Database", unavailable: null, keywords: ["sql"] }], groups: [] }),
-    serviceConfigFiles: () => Promise.resolve([{ label: "my.ini", path: "C:/lampRabit/etc/mariadb/my.ini", exists: true }]),
+    runtimeInfo: () => Promise.resolve({ runtimes: [
+          { id: "mariadb", label: "MariaDB", blurb: "Database", unavailable: null, keywords: ["sql"] },
+          { id: "php", label: "PHP", blurb: "Runs your PHP sites", unavailable: null, keywords: [] },
+        ], groups: [] }),
+    allConfigFiles: () =>
+      Promise.resolve([
+        { owner: "MariaDB", label: "my.ini", path: "C:/lampRabit/etc/mariadb/my.ini", exists: true },
+        { owner: "PHP 8.4.14", label: "php.ini", path: "C:/lampRabit/etc/php/8.4.14/php.ini", exists: true },
+      ]),
     getSettings: () => Promise.resolve({ profiles: [], webServers: ["apache"] }),
     startService: (kind: string) => (started.push(kind), Promise.resolve()),
   };
@@ -40,6 +54,7 @@ const show = () => {
 afterEach(() => {
   cleanup();
   started.length = 0;
+  toggled.length = 0;
   localStorage.clear();
 });
 
@@ -66,12 +81,45 @@ describe("the command palette", () => {
     show();
     await userEvent.type(await screen.findByRole("combobox"), "ngrok");
     await userEvent.keyboard("{Enter}");
-    expect(useAppStore.getState().settingsFocus).toBe("sharing");
+    // The Ngrok token setting itself, in Sharing.
+    expect(useAppStore.getState().settingsFocus).toBe("sharing#Ngrok authtoken");
 
     cleanup();
     show();
     await userEvent.type(await screen.findByRole("combobox"), "my.ini");
     expect(await screen.findByText("my.ini")).toBeTruthy();
+  });
+
+  it("reaches PHP extensions, single settings, project tabs and php.ini", async () => {
+    show();
+    await userEvent.type(await screen.findByRole("combobox"), "xdebug");
+    expect((await screen.findAllByRole("option"))[0].textContent).toContain("Turn on xdebug");
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => expect(toggled).toEqual([["8.4.14", "xdebug", true]]));
+
+    cleanup();
+    show();
+    await screen.findByText("Start MariaDB");
+    await userEvent.type(screen.getByRole("combobox"), "editor command");
+    await screen.findByText("Editor command");
+    await userEvent.keyboard("{Enter}");
+    expect(useAppStore.getState().settingsFocus).toBe("general#Editor command");
+
+    cleanup();
+    show();
+    await userEvent.type(await screen.findByRole("combobox"), "blog git");
+    await userEvent.keyboard("{Enter}");
+    expect([useAppStore.getState().siteFocus, useAppStore.getState().siteTab]).toEqual(["C:/www/blog", "git"]);
+
+    cleanup();
+    show();
+    await userEvent.type(await screen.findByRole("combobox"), "php.ini");
+    expect((await screen.findAllByRole("option"))[0].textContent).toContain("PHP 8.4.14");
+
+    cleanup();
+    show();
+    await userEvent.type(await screen.findByRole("combobox"), "use php");
+    expect((await screen.findAllByRole("option"))[0].textContent).toContain("Use PHP 8.3.27");
   });
 
   it("says when nothing matches", async () => {

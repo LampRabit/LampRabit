@@ -17,11 +17,14 @@ Usage: lamprabit <command> [arguments] [--json] [--no-launch] [--yes] [--dry-run
   service start|stop|restart <id>
   start [<profile>]              Start what is installed (not the heavy services), or a profile
   stop                           Stop every service
+  restart                        Restart the running services
   profiles                       Stack profiles
 
   projects                       Projects in www, with their domains
   project start|stop <name>      A project's dev server
   project open <name>            Open its site in the browser
+  project edit <name>            Open it in your editor (Settings > General)
+  terminal [<project>]           A terminal in the project (or www), with LampRabit's commands
   project create <name> --template <id> [--php <version>] [--database <name>]
   templates                      Project templates
 
@@ -29,6 +32,10 @@ Usage: lamprabit <command> [arguments] [--json] [--no-launch] [--yes] [--dry-run
   runtime install <id> [version] Download and use it (a line like 8.4 picks its newest)
   runtime use <id> <version>     Switch the version in use
   runtime remove <id> <version>  Delete a version (asks for --yes)
+  php extensions [--php <version>]
+                                 PHP's extensions and which are on (the active PHP by default)
+  php enable|disable <extension> [--php <version>]
+                                 Turn one on (downloading it when needed) or off
 
   logs [--source <id>] [--lines N] [--follow]
                                  Recent log lines (source: a service id, system, php,
@@ -40,6 +47,7 @@ Usage: lamprabit <command> [arguments] [--json] [--no-launch] [--yes] [--dry-run
   service check <file>           Check a service file (service.yaml) and say what it does
   service try <file>             Install, start, check and stop it in a throwaway folder
   config [key.path]              Settings, or one value (ports.http)
+  files                          Every config file: services, php.ini, Composer, hosts
   mcp                            Run the MCP server on stdin/stdout, for AI assistants
 
   --json       Print the answer as JSON
@@ -227,11 +235,17 @@ async fn run(a: &Args) -> Result<(), Failure> {
         ("start", None) => ("start_all", json!({}), print_problems),
         ("start", Some(profile)) => ("profile.start", json!({"name": profile}), print_problems),
         ("stop", _) => ("stop_all", json!({}), print_done),
+        ("restart", _) => ("restart_running", json!({}), print_restarted),
+        ("terminal", project) => ("terminal", json!({"name": project}), print_done),
+        ("files", _) => ("files", json!({}), print_files),
+        ("php", Some("extensions")) => ("php.extensions", json!({"version": a.opt("php")}), print_extensions),
+        ("php", Some(verb @ ("enable" | "disable"))) => ("php.extension", json!({"name": need(2, "the extension's name (lamprabit php extensions lists them)")?, "enabled": verb == "enable", "version": a.opt("php")}), print_value),
         ("profiles", _) => ("profiles", json!({}), print_profiles),
         ("projects", _) => ("projects", json!({}), print_projects),
         ("project", Some("start")) => ("project.start", json!({"name": need(2, "the project's name")?}), print_done),
         ("project", Some("stop")) => ("project.stop", json!({"name": need(2, "the project's name")?}), print_done),
         ("project", Some("open")) => ("project.open", json!({"name": need(2, "the project's name")?}), print_value),
+        ("project", Some("edit")) => ("project.editor", json!({"name": need(2, "the project's name")?}), print_done),
         ("project", Some("create")) => {
             let name = need(2, "the new project's name")?;
             let template = a.opt("template").ok_or_else(|| Failure::Usage("Name a template with --template <id> (lamprabit templates lists them).".into()))?;
@@ -262,7 +276,7 @@ async fn run(a: &Args) -> Result<(), Failure> {
         (other, _) => return Err(Failure::Usage(format!("Unknown command \"{other}\"."))),
     };
     // A dry run of a change says what it would send, and stops.
-    let changes = !matches!(cmd, "status" | "services" | "profiles" | "projects" | "templates" | "runtimes" | "runtime.available" | "logs" | "doctor" | "git.status" | "config");
+    let changes = !matches!(cmd, "status" | "services" | "profiles" | "projects" | "templates" | "runtimes" | "runtime.available" | "logs" | "doctor" | "git.status" | "config" | "files" | "php.extensions");
     if a.dry_run && changes {
         println!("Would run {cmd} with {req}");
         return Ok(());
@@ -337,6 +351,31 @@ fn print_value(v: &Value) {
 
 fn print_done(_: &Value) {
     println!("Done.");
+}
+
+fn print_restarted(v: &Value) {
+    let problems = v.as_array().cloned().unwrap_or_default();
+    if problems.is_empty() {
+        println!("Restarted.");
+    }
+    for p in problems {
+        println!("! {}", p.as_str().unwrap_or_default());
+    }
+}
+
+fn print_files(v: &Value) {
+    for f in v.as_array().into_iter().flatten() {
+        let missing = if f["exists"].as_bool() == Some(true) { "" } else { "  (not written yet)" };
+        println!("  {:<16} {:<16} {}{missing}", s(f, "owner"), s(f, "label"), s(f, "path"));
+    }
+}
+
+fn print_extensions(v: &Value) {
+    println!("PHP {}", s(v, "version"));
+    for e in v["extensions"].as_array().into_iter().flatten() {
+        let state = if e["enabled"].as_bool() == Some(true) { "on" } else if e["installed"].as_bool() == Some(true) { "off" } else { "available" };
+        println!("  {:<18} {:<10} {}", s(e, "name"), state, e["description"].as_str().unwrap_or_default());
+    }
 }
 
 fn print_problems(v: &Value) {

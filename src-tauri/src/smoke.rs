@@ -159,13 +159,35 @@ async fn command_line(app: &AppHandle, with_project: bool) -> std::result::Resul
         return Err(Outcome::Failed("services, projects or logs didn't answer with a list".into()));
     }
     let mut notes = vec![format!("{} services, {} projects", services.as_array().map_or(0, Vec::len), projects.as_array().map_or(0, Vec::len))];
+    // `lamprabit files`: LampRabit's own settings and the hosts file are always listed.
+    let files = crate::control::call(&endpoint, "files", json!({})).await.map_err(fail)?;
+    let labels: Vec<&str> = files.as_array().into_iter().flatten().filter_map(|f| f["label"].as_str()).collect();
+    if !labels.contains(&"settings.toml") || !labels.contains(&"hosts") {
+        return Err(Outcome::Failed(format!("files didn't list settings.toml and hosts: {labels:?}")));
+    }
+    notes.push(format!("{} config files", labels.len()));
+    let restarted = crate::control::call(&endpoint, "restart_running", json!({})).await.map_err(fail)?;
+    if !restarted.is_array() {
+        return Err(Outcome::Failed(format!("restart_running didn't answer with a list: {restarted}")));
+    }
+    // PHP's extensions, when PHP is one of the runtimes under test.
+    if labels.contains(&"php.ini") {
+        let ext = crate::control::call(&endpoint, "php.extensions", json!({})).await.map_err(fail)?;
+        let count = ext["extensions"].as_array().map_or(0, Vec::len);
+        if count == 0 {
+            return Err(Outcome::Failed(format!("php.extensions listed nothing: {ext}")));
+        }
+        notes.push(format!("PHP {} has {count} extensions", ext["version"].as_str().unwrap_or("?")));
+    }
     if let (true, Some(name)) = (with_project, projects.as_array().and_then(|p| p.first()).and_then(|p| p["name"].as_str())) {
         let issues = crate::control::call(&endpoint, "doctor", json!({"name": name})).await.map_err(fail)?;
         notes.push(format!("doctor on {name}: {} issues", issues.as_array().map_or(0, Vec::len)));
     }
-    let mcp = crate::mcp::answer(false, &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "list_services", "arguments": {}}})).await;
-    if mcp.as_ref().is_none_or(|m| m["result"]["isError"] == true) {
-        return Err(Outcome::Failed(format!("the MCP tool call failed: {mcp:?}")));
+    for tool in ["list_services", "list_config_files"] {
+        let mcp = crate::mcp::answer(false, &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": {}}})).await;
+        if mcp.as_ref().is_none_or(|m| m["result"]["isError"] == true) {
+            return Err(Outcome::Failed(format!("the MCP tool {tool} failed: {mcp:?}")));
+        }
     }
     // `lamprabit logs --follow`: a line written now reaches a client that follows (the app
     // sends lines in batches, the client gets them one by one).

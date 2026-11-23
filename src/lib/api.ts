@@ -1046,6 +1046,8 @@ export const api = {
   setServiceOption: (kind: ServiceKind, name: string, value: string) => invoke<ServiceOption[]>("set_service_option", { kind, name, value }),
   inspectServiceFile: (path: string) => invoke<ServiceFile>("inspect_service_file", { path }),
   serviceConfigFiles: (kind: ServiceKind) => invoke<ConfigFileInfo[]>("service_config_files", { kind }),
+  /** Every config file: services', php.ini per PHP version, Composer's, settings.toml, hosts. */
+  allConfigFiles: () => invoke<(ConfigFileInfo & { owner: string })[]>("all_config_files"),
   /** The backend refuses without `approve`: the user must have seen the review. */
   addServiceFile: (path: string, approve: boolean) => invoke<string>("add_service_file", { path, approve }),
   removeLocalService: (id: string) => invoke<void>("remove_local_service", { id }),

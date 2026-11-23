@@ -38,6 +38,8 @@ The UI was polished to stop looking AI-built (an "unslop" pass), keeping the bra
 - Logs: error and warning keep their colour; sources and info lines are neutral. Doctor findings: the icon carries the colour, the row stays neutral.
 - Template `color:` still tints a template's tile (it's the user's choice in the template editor).
 
+The palette's items are built in `useItems()` (`components/CommandPalette.tsx`); the CLI and MCP go through `control_command`. Settings rows are indexed from Settings.tsx's source, so a new `<Row label hint>` is searchable without extra work (2026-11-24).
+
 ## Definition of done for a new feature
 
 1. It has one home. 2. Its actions are in the palette with keywords (and CLI/MCP where sensible). 3. Its config files are reachable with Open/Reveal/Copy path. 4. Its errors have a fix or a docs link. 5. It has an empty state or first-run hint. 6. It has a task-titled docs page.

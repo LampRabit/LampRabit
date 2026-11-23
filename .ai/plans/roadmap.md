@@ -60,7 +60,7 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 
 The spec's recommended order, checked against the code. Each item links to its backlog plan; an item becomes a numbered phase (and moves to `active/`) when the user starts it.
 
-1. [Command palette + action registry](active/phase-28-command-palette.md): phase 28, built 2026-11-24 (steps 1–2); config files beyond services and CLI/MCP left
+1. [Command palette + action registry](active/phase-28-command-palette.md): phase 28, complete 2026-11-24
 2. Service manifests: phase 27, in progress
 3. [Project model: endpoints and kinds](backlog/project-model.md): foundation for everything non-web (partly built)
 4. [Tools tab](backlog/tools-tab-build-list.md) and [dynamic dashboard](backlog/dynamic-dashboard.md)
