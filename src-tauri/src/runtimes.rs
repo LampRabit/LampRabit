@@ -259,7 +259,6 @@ impl Runtime {
         match self {
             Self::Php if cfg!(windows) => PathBuf::from(exe("php")),
             Self::Php => PathBuf::from("php-fpm"),
-            Self::Adminer => PathBuf::from("adminer.php"),
             Self::Phpmyadmin => PathBuf::from("index.php"),
             Self::Ngrok => PathBuf::from(exe("ngrok")),
             Self::Cloudflared => PathBuf::from(exe("cloudflared")),
@@ -269,7 +268,6 @@ impl Runtime {
             Self::Python if cfg!(windows) => PathBuf::from("python.exe"),
             Self::Python => Path::new("bin").join("python3"),
             Self::Phppgadmin => PathBuf::from("index.php"),
-            Self::Mongosh => Path::new("bin").join(exe("mongosh")),
             Self::Mongotools => Path::new("bin").join(exe("mongodump")),
             // Compass is an Electron app: its executable's name varies, its app bundle doesn't.
             Self::Compass if cfg!(target_os = "macos") => Path::new("MongoDB Compass.app").join("Contents").join("Resources").join("app.asar"),
@@ -282,9 +280,6 @@ impl Runtime {
             Self::Maven => Path::new("bin").join("mvn"),
             Self::Gradle => Path::new("bin").join("gradle"),
             Self::Git => Path::new("cmd").join("git.exe"),
-            Self::Bun => PathBuf::from(exe("bun")),
-            Self::Deno => PathBuf::from(exe("deno")),
-            Self::Uv => PathBuf::from(exe("uv")),
             // Written last by `setup_conda`, so a half-finished install doesn't count.
             Self::Conda => PathBuf::from("installed.txt"),
             // Services: from their manifest, above.
@@ -394,7 +389,6 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         // Services whose manifest says where their releases are (src-tauri/services/).
         _ if crate::manifest::get(runtime.id()).is_some() => manifest_releases(client, runtime).await?,
         Runtime::Php => php_releases(client).await?,
-        Runtime::Adminer => adminer_releases(client).await?,
         Runtime::Phpmyadmin => phpmyadmin_releases(client).await?,
         Runtime::Ngrok => ngrok_releases(),
         Runtime::Cloudflared => cloudflared_releases(client).await?,
@@ -403,7 +397,6 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         Runtime::Java => java_releases(client).await?,
         Runtime::Python => python_releases(client).await?,
         Runtime::Phppgadmin => phppgadmin_releases(client).await?,
-        Runtime::Mongosh => mongosh_releases(client).await?,
         Runtime::Mongotools => mongotools_releases(client).await?,
         Runtime::Compass => compass_releases(client).await?,
         Runtime::Sqlite => sqlite_releases(client).await?,
@@ -413,9 +406,6 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         Runtime::Maven => maven_releases(client).await?,
         Runtime::Gradle => gradle_releases(client).await?,
         Runtime::Git => git_releases(client).await?,
-        Runtime::Bun => bun_releases(client).await?,
-        Runtime::Deno => deno_releases(client).await?,
-        Runtime::Uv => uv_releases(client).await?,
         Runtime::Conda => conda_releases(client).await?,
         _ => return Err(unsupported(runtime.id())),
     };
@@ -693,17 +683,6 @@ async fn phppgadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
 /// Runs a setup command, failing with the last line it printed to stderr.
 async fn run_quiet(program: &Path, args: &[String], cwd: &Path) -> Result<()> {
     run_quiet_env(program, args, cwd, &[]).await
-}
-
-async fn mongosh_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
-    let (platform, ext, archive) = match std::env::consts::OS {
-        "windows" => ("win32", "zip", Archive::Zip),
-        "macos" => ("darwin", "zip", Archive::Zip),
-        "linux" => ("linux", "tgz", Archive::TarGz),
-        _ => return Err(unsupported("mongosh")),
-    };
-    github_latest(client, Runtime::Mongosh, "mongodb-js/mongosh", archive, |n, v| n == format!("mongosh-{v}-{platform}-{arch}.{ext}")).await
 }
 
 /// The newest MongoDB Database Tools. They're built against old distributions (Ubuntu
@@ -1099,50 +1078,6 @@ pub fn n8n_node(minimum: u32) -> Result<PathBuf> {
     Ok(bin)
 }
 
-/// Bun from its GitHub releases ("bun-v1.3.2" tags). Windows on Arm runs the x64 build.
-async fn bun_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let name = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
-        ("windows", _) => "bun-windows-x64.zip",
-        ("linux", false) => "bun-linux-x64.zip",
-        ("linux", true) => "bun-linux-aarch64.zip",
-        ("macos", false) => "bun-darwin-x64.zip",
-        ("macos", true) => "bun-darwin-aarch64.zip",
-        _ => return Err(unsupported("Bun")),
-    };
-    let mut releases = github_newest_with(client, Runtime::Bun, "oven-sh/bun", Archive::Zip, name).await?;
-    for r in &mut releases {
-        r.version = r.version.trim_start_matches("bun-v").to_string();
-    }
-    Ok(releases)
-}
-
-/// Deno from its GitHub releases. Windows on Arm runs the x64 build.
-async fn deno_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let target = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
-        ("windows", _) => "x86_64-pc-windows-msvc",
-        ("linux", false) => "x86_64-unknown-linux-gnu",
-        ("linux", true) => "aarch64-unknown-linux-gnu",
-        ("macos", false) => "x86_64-apple-darwin",
-        ("macos", true) => "aarch64-apple-darwin",
-        _ => return Err(unsupported("Deno")),
-    };
-    github_newest_with(client, Runtime::Deno, "denoland/deno", Archive::Zip, &format!("deno-{target}.zip")).await
-}
-
-/// uv from Astral's GitHub releases.
-async fn uv_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let (target, archive) = match (std::env::consts::OS, cfg!(target_arch = "aarch64")) {
-        ("windows", false) => ("x86_64-pc-windows-msvc.zip", Archive::Zip),
-        ("windows", true) => ("aarch64-pc-windows-msvc.zip", Archive::Zip),
-        ("linux", false) => ("x86_64-unknown-linux-gnu.tar.gz", Archive::TarGz),
-        ("linux", true) => ("aarch64-unknown-linux-gnu.tar.gz", Archive::TarGz),
-        ("macos", false) => ("x86_64-apple-darwin.tar.gz", Archive::TarGz),
-        ("macos", true) => ("aarch64-apple-darwin.tar.gz", Archive::TarGz),
-        _ => return Err(unsupported("uv")),
-    };
-    github_newest_with(client, Runtime::Uv, "astral-sh/uv", archive, &format!("uv-{target}")).await
-}
-
 /// Where uv keeps the Pythons it downloads: inside LampRabit's folder (bin/ is removed on
 /// uninstall and moved with the folder), not the user's ~/.local/share/uv.
 pub fn uv_env(layout: &Layout) -> Vec<(String, String)> {
@@ -1269,12 +1204,6 @@ async fn cloudflared_releases(client: &reqwest::Client) -> Result<Vec<Release>> 
         _ => (format!("cloudflared-linux-{arch}"), Archive::File),
     };
     github_latest(client, Runtime::Cloudflared, "cloudflare/cloudflared", archive, |n, _| n == name).await
-}
-
-async fn adminer_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    // The all-drivers, all-languages single file.
-    github_latest(client, Runtime::Adminer, "vrana/adminer", Archive::File, |n, v| n == format!("adminer-{v}.php"))
-        .await
 }
 
 /// phpRedisAdmin publishes source releases on GitHub (no separate archives or checksums,

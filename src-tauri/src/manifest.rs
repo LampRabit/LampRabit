@@ -58,6 +58,12 @@ const BUILT_IN: &[&str] = &[
     include_str!("../services/redis.yaml"),
     include_str!("../services/memcached.yaml"),
     include_str!("../services/pgadmin.yaml"),
+    // Tools and command-line tools: downloaded and described here, never run.
+    include_str!("../services/adminer.yaml"),
+    include_str!("../services/mongosh.yaml"),
+    include_str!("../services/bun.yaml"),
+    include_str!("../services/deno.yaml"),
+    include_str!("../services/uv.yaml"),
 ];
 
 /// The groups of the Services page a manifest can name.
@@ -127,6 +133,7 @@ pub struct Manifest {
     pub run: Option<Run>,
     #[serde(default)]
     pub stop: Option<Stop>,
+    #[serde(default)]
     pub health: Health,
     #[serde(default)]
     pub behaviour: Behaviour,
@@ -190,6 +197,42 @@ pub struct Manifest {
     /// registering LampRabit's PostgreSQL in pgAdmin.
     #[serde(default)]
     pub once: Vec<crate::setup::Once>,
+    /// A service that runs (the default), a web tool served by the web servers, or a
+    /// command-line tool: the last two are downloaded and described here but never run.
+    #[serde(default)]
+    pub kind: Kind,
+    /// Commands put on LampRabit's PATH (its shims) for the active version: `kind: cli`.
+    #[serde(default)]
+    pub commands: Vec<CommandDef>,
+}
+
+/// What a manifest describes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// Started, stopped and health-checked by the supervisor.
+    #[default]
+    Service,
+    /// A web app served from its files through the web servers (Adminer); built-in only,
+    /// since serving one needs the site engine.
+    Tool,
+    /// Programs run from the terminal (Bun, uv): only `commands`.
+    Cli,
+}
+
+/// A command on LampRabit's PATH: `bunx` is `bun x`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandDef {
+    /// The name typed in the terminal.
+    pub name: String,
+    /// The program it runs, inside the install (`{{home}}/bun{{exe}}`).
+    pub program: Text,
+    /// Arguments put before the ones typed.
+    #[serde(default)]
+    pub args: Vec<Arg>,
+    #[serde(default)]
+    pub env: Ordered<Text>,
 }
 
 fn one() -> u32 {
@@ -624,6 +667,9 @@ pub struct Source {
     /// the label shown next to it (ClickHouse's `-lts`, `-stable`).
     #[serde(default)]
     pub tags: Ordered<String>,
+    /// Text before the version in each tag, dropped (Bun's tags are `bun-v1.2.3`).
+    #[serde(default)]
+    pub prefix: Option<String>,
     /// The file to download per platform (`windows-x64`, `windows`, `unix`); `{version}` is
     /// the release's version.
     #[serde(default)]
@@ -1199,6 +1245,8 @@ pub struct Review {
     pub checksum: Option<String>,
     pub program: Option<String>,
     pub args: Vec<String>,
+    /// A command-line tool's commands: "bunx → {{home}}/bun{{exe}} x".
+    pub commands: Vec<String>,
     /// Files it writes or copies before it starts.
     pub files: Vec<String>,
     /// Each port's label and default.
@@ -1213,7 +1261,7 @@ pub fn version_condition(when: &str) -> Option<(&'static str, &str)> {
 }
 
 /// Placeholders every manifest can use.
-const PLAIN: &[&str] = &["home", "data", "etc", "logs", "tmp", "version", "major", "exe", "script", "loopback", "log", "pathsep"];
+const PLAIN: &[&str] = &["home", "data", "etc", "logs", "tmp", "root", "version", "major", "exe", "script", "loopback", "log", "pathsep"];
 /// Placeholders that name a folder: a value starting with one is a path.
 const FOLDERS: &[&str] = &["home", "data", "etc", "logs", "tmp"];
 
@@ -1248,6 +1296,54 @@ impl Manifest {
         if !builtin {
             if self.engine.is_some() {
                 return Err("engine is only for LampRabit's own services".into());
+            }
+            if self.kind == Kind::Tool {
+                return Err("kind: tool is only for LampRabit's own web tools; use kind: cli for programs run from the terminal".into());
+            }
+        }
+        let service = self.kind == Kind::Service;
+        if !service {
+            // Nothing that runs: what a service has to say about starting is out of place.
+            let running = [
+                ("run", self.run.is_some()),
+                ("stop", self.stop.is_some()),
+                ("ports", self.ports.iter().next().is_some()),
+                ("health", [self.health.http.is_some(), self.health.tcp.is_some(), self.health.line.is_some(), self.health.mysql.is_some(), self.health.postgres.is_some()].contains(&true)),
+                ("connection", self.connection.is_some()),
+                ("backup", self.backup.is_some()),
+                ("open", self.open.is_some()),
+                ("ui", self.ui.is_some()),
+                ("init", self.init.is_some()),
+                ("after_start", !self.after_start.is_empty()),
+                ("once", !self.once.is_empty()),
+                ("external", self.external.is_some()),
+                ("connects", self.connects.is_some()),
+            ];
+            if let Some((field, _)) = running.iter().find(|(_, set)| *set) {
+                return Err(format!("{field} is for services; a {} doesn't run", if self.kind == Kind::Cli { "kind: cli" } else { "kind: tool" }));
+            }
+        }
+        if self.kind != Kind::Cli && !self.commands.is_empty() {
+            return Err("commands are for kind: cli".into());
+        }
+        let mut seen: Vec<&str> = Vec::new();
+        for c in &self.commands {
+            if c.name.is_empty() || !c.name.chars().all(|ch| ch.is_ascii_alphanumeric() || "-_.".contains(ch)) || c.name.starts_with(['-', '.']) {
+                return Err(format!("commands: \"{}\" must be a command name (letters, digits, -, _ and .)", c.name));
+            }
+            if seen.contains(&c.name.as_str()) {
+                return Err(format!("commands: \"{}\" is listed twice", c.name));
+            }
+            seen.push(&c.name);
+            for program in c.program.all() {
+                if !program.starts_with("{{home}}") {
+                    return Err(format!("commands: \"{}\" must run a program inside the install ({{{{home}}}}/…)", c.name));
+                }
+            }
+            for (key, _) in c.env.iter() {
+                if key.is_empty() || !key.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                    return Err(format!("commands: \"{key}\" isn't a variable name"));
+                }
             }
         }
 
@@ -1296,12 +1392,12 @@ impl Manifest {
                 return Err(format!("port \"{name}\": {} needs administrator rights on Linux and macOS; pick one above 1023", port.default));
             }
         }
-        if names.is_empty() && !self.web_server() {
+        if service && names.is_empty() && !self.web_server() {
             return Err("at least one port is needed".into());
         }
         let port_ok = |p: &Option<String>| p.as_deref().is_none_or(|p| names.contains(&p));
         let checks = [self.health.http.is_some(), self.health.tcp.is_some(), self.health.line.is_some(), self.health.mysql.is_some(), self.health.postgres.is_some()];
-        if checks.iter().filter(|c| **c).count() != 1 {
+        if service && checks.iter().filter(|c| **c).count() != 1 {
             return Err("health needs exactly one of http, tcp, line, mysql, postgres".into());
         }
         let health_port = [
@@ -1366,7 +1462,7 @@ impl Manifest {
         }
 
         // Launch.
-        if self.run.is_none() {
+        if service && self.run.is_none() {
             return Err("run is needed (program and args)".into());
         }
         if let Some(run) = &self.run {
@@ -1536,6 +1632,11 @@ impl Manifest {
         if let Some(stop) = &self.stop {
             out.extend(stop.command.iter().flat_map(Arg::all));
         }
+        for c in &self.commands {
+            out.extend(c.program.all());
+            out.extend(c.args.iter().flat_map(Arg::all));
+            out.extend(c.env.iter().flat_map(|(_, t)| t.all()));
+        }
         if let Some(c) = &self.connection {
             out.push(&c.url);
             out.extend(c.env.iter().map(|(_, v)| v.as_str()));
@@ -1608,6 +1709,11 @@ impl Manifest {
             checksum,
             program: run.and_then(|r| r.program.pick()).map(str::to_string),
             args: run.map(|r| r.args.iter().flat_map(Arg::picked).map(str::to_string).collect()).unwrap_or_default(),
+            commands: self
+                .commands
+                .iter()
+                .map(|c| std::iter::once(c.name.as_str()).chain(std::iter::once("→")).chain(c.program.pick()).chain(c.args.iter().flat_map(Arg::picked)).collect::<Vec<_>>().join(" "))
+                .collect(),
             files: self.files.iter().filter(|f| matches(&f.on)).filter_map(|f| f.path.clone().or_else(|| f.to.clone()).or_else(|| f.copy.clone())).collect(),
             ports: self.ports.iter().map(|(name, d)| (d.label.clone().unwrap_or_else(|| name.clone()), d.default)).collect(),
             needs: self.needs.iter().filter(|n| matches(&n.on)).map(|n| match &n.min {
@@ -1754,7 +1860,7 @@ fn check_source(src: &Source, builtin: bool) -> std::result::Result<(), String> 
 }
 
 /// What `needs:` can name: runtimes whose folder a service can be pointed at.
-const NEEDS: &[&str] = &["java", "erlang", "node", "python", "postgres"];
+const NEEDS: &[&str] = &["java", "erlang", "node", "python", "postgres", "php", "mongodb"];
 
 /// A path must not climb out of the folder it starts in.
 fn inside(path: &str) -> std::result::Result<(), String> {
@@ -1871,6 +1977,8 @@ impl<'a> Ctx<'a> {
             "exe" => if cfg!(windows) { ".exe" } else { "" }.to_string(),
             "script" => if cfg!(windows) { ".bat" } else { "" }.to_string(),
             "pathsep" => if cfg!(windows) { ";" } else { ":" }.to_string(),
+            // LampRabit's own folder (uv keeps the Pythons it downloads in bin/uv-python).
+            "root" => self.layout.root().to_string_lossy().into_owned(),
             // The service's own log file (its `log`), which the Logs page reads.
             "log" => self.layout.logs().join(self.manifest.log_file()).to_string_lossy().into_owned(),
             // Both loopback addresses where the machine has IPv6: "localhost" often resolves
@@ -2167,6 +2275,13 @@ pub fn select(m: &Manifest, src: &Source, json: &serde_json::Value) -> Result<Ve
                 continue;
             }
             let tag = release["tag_name"].as_str().unwrap_or_default();
+            let tag = match &src.prefix {
+                Some(prefix) => match tag.strip_prefix(prefix.as_str()) {
+                    Some(rest) => rest,
+                    None => continue,
+                },
+                None => tag,
+            };
             let (tag, label) = if src.tags.0.is_empty() {
                 if release["prerelease"] == true {
                     continue;
@@ -2397,6 +2512,46 @@ connection:
         let mut src = m.source.here().unwrap().clone();
         f(&mut src);
         (m, src)
+    }
+
+    /// A command-line tool: SMALL's download, no run, ports, health or connection.
+    fn cli(extra: &str) -> std::result::Result<Manifest, String> {
+        let head = SMALL.split("ports:").next().unwrap();
+        parse(&format!("{head}kind: cli\ncommands:\n  - {{ name: echo, program: \"{{{{home}}}}/echo{{{{exe}}}}\" }}\n  - {{ name: echox, program: \"{{{{home}}}}/echo{{{{exe}}}}\", args: [x], env: {{ ECHO_HOME: \"{{{{root}}}}/echo\" }} }}\n{extra}"), false).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn command_line_tools_have_commands_and_never_run() {
+        let m = cli("").unwrap();
+        assert_eq!(m.kind, Kind::Cli);
+        assert_eq!(m.commands.len(), 2);
+        assert!(m.review().commands[1].starts_with("echox → {{home}}/echo{{exe}} x"));
+        // What only a service has is refused.
+        assert!(cli("ports:\n  http: { default: 7000 }\n").unwrap_err().contains("ports is for services"));
+        assert!(cli("health: { tcp: {} }\n").unwrap_err().contains("health is for services"));
+        assert!(cli("run: { program: \"{{home}}/echo\" }\n").unwrap_err().contains("run is for services"));
+        // Commands run what's inside the install, under a plain name, once each.
+        let outside = SMALL.split("ports:").next().unwrap().to_string() + "kind: cli\ncommands:\n  - { name: echo, program: /usr/bin/echo }\n";
+        assert!(parse(&outside, false).unwrap_err().to_string().contains("inside the install"));
+        let odd = SMALL.split("ports:").next().unwrap().to_string() + "kind: cli\ncommands:\n  - { name: \"-rf\", program: \"{{home}}/echo\" }\n";
+        assert!(parse(&odd, false).unwrap_err().to_string().contains("command name"));
+        // Services can't have commands, and only LampRabit's own manifests are web tools.
+        assert!(with("commands:\n  - { name: echo, program: \"{{home}}/echo\" }\n").unwrap_err().contains("commands are for kind: cli"));
+        let tool = SMALL.split("ports:").next().unwrap().to_string() + "kind: tool\n";
+        assert!(parse(&tool, false).unwrap_err().to_string().contains("only for LampRabit's own web tools"));
+        assert!(parse(&tool, true).is_ok());
+    }
+
+    #[test]
+    fn a_tag_prefix_is_dropped_and_other_tags_skipped() {
+        let mut m = with("").unwrap();
+        m.source = serde_yaml_ng::from_str("github: someone/echo\nprefix: echo-\nversions: newest\nassets:\n  windows: { file: \"echo-{version}-windows.zip\", archive: zip }\n  linux-x64: { file: \"echo-{version}-linux.tar.gz\", archive: targz }\n  linux-arm64: { file: \"echo-{version}-linux-arm.tar.gz\", archive: targz }\n  macos: { file: \"echo-{version}-macos.tar.gz\", archive: targz }\n").unwrap();
+        let src = m.source.here().unwrap().clone();
+        let mut r = release(&m, "v1.4.0", Some("ab"));
+        r["tag_name"] = "echo-v1.4.0".into();
+        let list = serde_json::json!([{ "tag_name": "other-v9.0.0", "assets": [] }, r]);
+        let found = select(&m, &src, &list).unwrap();
+        assert_eq!(found[0].version, "1.4.0");
     }
 
     /// A GitHub release with this platform's echo file.

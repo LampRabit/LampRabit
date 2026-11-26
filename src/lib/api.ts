@@ -159,6 +159,8 @@ export interface ServiceReview {
   checksum: string | null;
   program: string | null;
   args: string[];
+  /** A command-line tool's commands on PATH: "bunx → {{home}}/bun{{exe}} x". */
+  commands: string[];
   files: string[];
   /** Each port's label and default. */
   ports: [string, number][];

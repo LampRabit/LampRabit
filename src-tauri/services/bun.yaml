@@ -1,0 +1,28 @@
+schema: 1
+id: bun
+kind: cli
+name: Bun
+category: packages
+blurb: JavaScript runtime and packages
+origin: Bun's official builds from GitHub (checksum checked); bun and bunx work in LampRabit's terminal, and projects with a bun.lock use it
+homepage: https://bun.sh
+license: MIT
+docs: https://bun.sh/docs
+keywords: [javascript, typescript, npm, bunx]
+
+source:
+  github: oven-sh/bun
+  versions: newest
+  prefix: bun-
+  assets:
+    windows: { file: bun-windows-x64.zip, archive: zip }
+    linux-x64: { file: bun-linux-x64.zip, archive: zip }
+    linux-arm64: { file: bun-linux-aarch64.zip, archive: zip }
+    macos-x64: { file: bun-darwin-x64.zip, archive: zip }
+    macos-arm64: { file: bun-darwin-aarch64.zip, archive: zip }
+binary: "bun{{exe}}"
+
+commands:
+  - { name: bun, program: "{{home}}/bun{{exe}}" }
+  # bunx is `bun x`.
+  - { name: bunx, program: "{{home}}/bun{{exe}}", args: [x] }

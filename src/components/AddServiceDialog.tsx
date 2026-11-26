@@ -66,6 +66,17 @@ export default function AddServiceDialog({ path, file, onClose, onAdded }: { pat
             <code className="font-mono text-xs">{[r.program, ...r.args].join(" ")}</code>
           </Fact>
         )}
+        {r.commands.length > 0 && (
+          <Fact label="Adds commands">
+            <span className="block space-y-0.5">
+              {r.commands.map((c) => (
+                <code key={c} className="block font-mono text-xs">
+                  {c}
+                </code>
+              ))}
+            </span>
+          </Fact>
+        )}
         {r.ports.length > 0 && <Fact label="Ports">{r.ports.map(([label, port]) => `${label} ${port}`).join(", ")}</Fact>}
         {r.files.length > 0 && <Fact label="Writes">{r.files.join(", ")}</Fact>}
         {r.needs.length > 0 && <Fact label="Needs">{r.needs.join(", ")}</Fact>}

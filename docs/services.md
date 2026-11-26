@@ -77,6 +77,7 @@ A source is GitHub, npm, a vendor's JSON API (`json`) or a web page (`page`):
 | `versions` | Which versions are offered. `latest` (the default) is the release GitHub marks as latest. `newest` is the newest recent release that has this platform's file, for projects that sometimes ship a release without one platform's build. `per-major` is the newest release of each major version from `min` on (PostgreSQL 14–18). `per-line` is the newest patch of each `major.minor` line, the `keep` newest lines (4 by default). `newest-tag` is the newest `x.y.z` tag, for projects that tag on GitHub but publish elsewhere. Drafts and pre-releases are skipped. |
 | `min`, `keep` | For `per-major` and `per-line`. |
 | `skip` | Versions never offered (`json` and `page` sources), for a release published broken upstream; the next one down is offered instead. Give the source every release (`items: releases.*` for PyPI) so there is one to fall back to. |
+| `prefix` | Text before the version in every tag, dropped; tags without it are skipped. Bun tags `bun-v1.2.3`, so `prefix: bun-`. |
 | `tags` | Only tags ending with one of these suffixes, which the version drops; the value is the label shown next to it: `{ -lts: LTS, -stable: Stable }`. |
 | `assets` | The file for each platform. The key is `<os>-<arch>` (`windows-x64`, `linux-arm64`, `macos-arm64`…), an OS (`macos`), or `unix` (Linux and macOS); the most exact key wins. `file` is the file's name, where `{version}` stands for the release's version. `archive` is `zip`, `targz`, `tarxz`, `tarzst` or `file` (a single program). **Quote names that contain `{version}`**, since YAML reads `{` as the start of a map. |
 | `url` | Download from the vendor's own site instead of the GitHub release: `"https://artifacts.elastic.co/downloads/elasticsearch/{file}"` (`{version}`, `{file}`). |
@@ -359,6 +360,36 @@ stop:
 
 `run.test` gives arguments that check the config without starting (`httpd -t`, `caddy validate`); when it fails, the start stops with the program's own message.
 
+### Command-line tools: `kind: cli` and `commands`
+
+Not everything runs. `kind: cli` describes programs used from the terminal (Bun, Deno, uv): LampRabit downloads, checks and installs them like a service, and puts their `commands` on its PATH (its shims) for the active version. A `kind: cli` manifest has no `run`, `stop`, `ports`, `health`, `connection`, `ui` or `open`.
+
+```yaml
+schema: 1
+id: bun
+kind: cli
+name: Bun
+category: packages
+blurb: JavaScript runtime and packages
+source:
+  github: oven-sh/bun
+  versions: newest
+  prefix: bun-
+  assets:
+    windows: { file: bun-windows-x64.zip, archive: zip }
+    linux-x64: { file: bun-linux-x64.zip, archive: zip }
+    macos-arm64: { file: bun-darwin-aarch64.zip, archive: zip }
+binary: "bun{{exe}}"
+commands:
+  - { name: bun, program: "{{home}}/bun{{exe}}" }
+  - { name: bunx, program: "{{home}}/bun{{exe}}", args: [x] }
+```
+
+| Field | What it is |
+|---|---|
+| `kind` | `service` (the default), `cli`, or `tool`. `tool` is LampRabit's own web tools served from their files (Adminer); manifests from a file can't use it. |
+| `commands` | `name` (what's typed in the terminal), `program` (inside the install: `{{home}}/…`), `args` put before the typed ones, and `env`. The review before adding a file lists them. |
+
 ### Is it up: `health`
 
 Exactly one of:
@@ -433,6 +464,7 @@ connects:
 | `{{runtime.<id>.home}}` | The runtime named by `stop.if_installed` |
 | `{{ui.url}}` | Its `https://<domain>.test` address |
 | `{{setting.<name>}}` | One of its `settings` |
+| `{{root}}` | LampRabit's folder |
 
 Folder paths: whatever follows a folder placeholder up to the next space is a path, so `{{etc}}/my.ini` and `--dir={{data}}/x` get this OS's separator (`\` on Windows). Add `|slash` to keep forward slashes (`{{data|slash}}`), which config files and programs built with MSYS2 want. An unknown placeholder is an error when the manifest is read, not when the service starts.
 

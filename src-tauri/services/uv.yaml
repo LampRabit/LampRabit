@@ -1,0 +1,34 @@
+schema: 1
+id: uv
+kind: cli
+name: uv
+category: packages
+blurb: Python packages
+origin: Astral's uv from GitHub (checksum checked); uv and uvx work in LampRabit's terminal, and the Pythons uv downloads stay inside LampRabit's folder
+homepage: https://docs.astral.sh/uv/
+license: MIT OR Apache-2.0
+docs: https://docs.astral.sh/uv/
+keywords: [python, pip, uvx, venv]
+
+source:
+  github: astral-sh/uv
+  versions: newest
+  assets:
+    windows-x64: { file: uv-x86_64-pc-windows-msvc.zip, archive: zip }
+    windows-arm64: { file: uv-aarch64-pc-windows-msvc.zip, archive: zip }
+    linux-x64: { file: uv-x86_64-unknown-linux-gnu.tar.gz, archive: targz }
+    linux-arm64: { file: uv-aarch64-unknown-linux-gnu.tar.gz, archive: targz }
+    macos-x64: { file: uv-x86_64-apple-darwin.tar.gz, archive: targz }
+    macos-arm64: { file: uv-aarch64-apple-darwin.tar.gz, archive: targz }
+binary: "uv{{exe}}"
+
+# The Pythons uv downloads stay inside LampRabit's folder (runtimes::uv_env says the same).
+commands:
+  - name: uv
+    program: "{{home}}/uv{{exe}}"
+    env: { UV_PYTHON_INSTALL_DIR: "{{root}}/bin/uv-python" }
+  # uvx is `uv tool run`.
+  - name: uvx
+    program: "{{home}}/uv{{exe}}"
+    args: [tool, run]
+    env: { UV_PYTHON_INSTALL_DIR: "{{root}}/bin/uv-python" }

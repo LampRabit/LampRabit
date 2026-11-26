@@ -1,0 +1,26 @@
+schema: 1
+id: mongosh
+kind: cli
+name: mongosh
+category: tools
+blurb: MongoDB shell
+origin: MongoDB's shell from its GitHub releases (checksum checked); mongosh works in LampRabit's terminal, and MongoDB uses it to shut down cleanly
+homepage: https://www.mongodb.com/docs/mongodb-shell/
+license: Apache-2.0
+keywords: [mongodb, shell]
+
+source:
+  github: mongodb-js/mongosh
+  assets:
+    windows-x64: { file: "mongosh-{version}-win32-x64.zip", archive: zip }
+    linux-x64: { file: "mongosh-{version}-linux-x64.tgz", archive: targz }
+    linux-arm64: { file: "mongosh-{version}-linux-arm64.tgz", archive: targz }
+    macos-x64: { file: "mongosh-{version}-darwin-x64.zip", archive: zip }
+    macos-arm64: { file: "mongosh-{version}-darwin-arm64.zip", archive: zip }
+binary: "bin/mongosh{{exe}}"
+
+needs:
+  - { runtime: mongodb, why: It works with LampRabit's MongoDB }
+
+# No commands here: LampRabit's own mongosh shim adds --port only when MongoDB isn't on
+# 27017 (mongosh refuses --port next to a connection string with a host).

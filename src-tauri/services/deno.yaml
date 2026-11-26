@@ -1,0 +1,26 @@
+schema: 1
+id: deno
+kind: cli
+name: Deno
+category: packages
+blurb: JavaScript and TypeScript
+origin: Deno's official builds from GitHub (checksum checked); deno works in LampRabit's terminal
+homepage: https://deno.com
+license: MIT
+docs: https://docs.deno.com
+keywords: [javascript, typescript]
+
+source:
+  github: denoland/deno
+  versions: newest
+  assets:
+    windows-x64: { file: deno-x86_64-pc-windows-msvc.zip, archive: zip }
+    windows-arm64: { file: deno-aarch64-pc-windows-msvc.zip, archive: zip }
+    linux-x64: { file: deno-x86_64-unknown-linux-gnu.zip, archive: zip }
+    linux-arm64: { file: deno-aarch64-unknown-linux-gnu.zip, archive: zip }
+    macos-x64: { file: deno-x86_64-apple-darwin.zip, archive: zip }
+    macos-arm64: { file: deno-aarch64-apple-darwin.zip, archive: zip }
+binary: "deno{{exe}}"
+
+commands:
+  - { name: deno, program: "{{home}}/deno{{exe}}" }

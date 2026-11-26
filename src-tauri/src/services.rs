@@ -92,7 +92,8 @@ impl<'de> Deserialize<'de> for ServiceKind {
 impl ServiceKind {
     pub fn all() -> Vec<Self> {
         let mut all = vec![Self::Apache, Self::Nginx, Self::Caddy, Self::Frankenphp, Self::Tomcat, Self::Mariadb, Self::Mysql, Self::Postgres, Self::Mongodb, Self::Clickhouse, Self::Neo4j, Self::Meilisearch, Self::Typesense, Self::Rustfs, Self::Minio, Self::Elasticsearch, Self::Opensearch, Self::Rabbitmq, Self::Ollama, Self::N8n, Self::Mailpit, Self::Redis, Self::Memcached, Self::Pgadmin];
-        all.extend(manifest::extra_indexes().into_iter().map(Self::Plugin));
+        // Only manifests of services: an added command-line tool never runs.
+        all.extend(manifest::extra_indexes().into_iter().filter(|&i| manifest::extra(i).kind == manifest::Kind::Service).map(Self::Plugin));
         all
     }
 

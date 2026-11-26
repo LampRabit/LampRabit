@@ -29,6 +29,7 @@ const file: ServiceFile = {
     checksum: "The SHA-256 GitHub reports for each file",
     program: "{{home}}/echo{{exe}}",
     args: ["--port", "{{port.http}}"],
+    commands: [],
     files: [],
     ports: [["Web", 7000]],
     needs: ["java 21 or newer"],

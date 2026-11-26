@@ -1,0 +1,21 @@
+schema: 1
+id: adminer
+kind: tool
+name: Adminer
+category: tools
+blurb: Database admin
+origin: A single-file database manager from its GitHub releases (checksum checked), served at adminer.test
+homepage: https://www.adminer.org
+license: Apache-2.0 OR GPL-2.0
+keywords: [mysql, mariadb, postgresql, sqlite, database]
+
+source:
+  github: vrana/adminer
+  assets:
+    # The all-drivers, all-languages single file.
+    windows: { file: "adminer-{version}.php", archive: file }
+    unix: { file: "adminer-{version}.php", archive: file }
+binary: adminer.php
+
+needs:
+  - { runtime: php, why: It runs on PHP }

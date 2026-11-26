@@ -75,6 +75,7 @@ fn groups() -> Vec<Group> {
         g("web", "Web and app servers", "Apache, Nginx, Caddy or FrankenPHP serve your sites; Tomcat runs Java web apps behind them. Several can run side by side.", &[]),
         g("languages", "Languages", "Several versions side by side; projects pick theirs.", &["php", "java", "python", "go", "rust", "node"]),
         g("packages", "Package managers", "Run them from LampRabit's terminal, or anywhere once LampRabit's commands are on PATH. npm comes with Node.js (pnpm and Yarn through corepack), pip with Python, Cargo with Rust; each project's Dependencies tab uses them.", &["composer", "bun", "deno", "uv", "conda", "maven", "gradle"]),
+        // (Bun, Deno, uv, Adminer and mongosh have manifests; listing them here keeps their order.)
         g("databases", "Databases", "They can all run side by side, each on its own port.", &["sqlite"]),
         g("search", "Search", "Full-text search engines for your apps.", &[]),
         g("storage", "Storage", "S3-compatible object storage. Their storage folder can be anywhere, even outside the LampRabit folder.", &[]),
@@ -102,7 +103,9 @@ pub fn catalog() -> Catalog {
         }
     }
     for (g, group) in groups.iter_mut().enumerate() {
-        let mut items: Vec<&'static str> = placed.iter().filter(|(i, _)| *i == g).map(|(_, id)| *id).collect();
+        // A runtime listed by hand above keeps its place there, manifest or not (Composer
+        // stays ahead of Bun); the other manifests' services go first.
+        let mut items: Vec<&'static str> = placed.iter().filter(|(i, id)| *i == g && !group.items.contains(id)).map(|(_, id)| *id).collect();
         items.append(&mut group.items);
         group.items = items;
     }
@@ -143,7 +146,6 @@ fn info(runtime: Runtime) -> RuntimeInfo {
     let (label, blurb, source, unavailable): (&str, &str, &str, Option<&str>) = match runtime {
         Runtime::Php => ("PHP", "Runs your code", unix("Thread-safe builds from windows.php.net", "LampRabit's static builds with common extensions built in, Redis and Memcached clients included"), None),
         Runtime::Java => ("Java", "Runs Java apps", "Eclipse Temurin JDKs from Adoptium (checksum checked); java, javac and jar work in LampRabit's terminal, with JAVA_HOME set", None),
-        Runtime::Mongosh => ("mongosh", "MongoDB shell", "MongoDB's shell from its GitHub releases; mongosh works in LampRabit's terminal, and MongoDB uses it to shut down cleanly", None),
         Runtime::Mongotools => ("MongoDB Database Tools", "MongoDB backups", "MongoDB's mongodump and mongorestore (checksum checked); LampRabit's MongoDB backups use them", None),
         Runtime::Compass => ("MongoDB Compass", "MongoDB GUI", "MongoDB's desktop app from its GitHub releases; opens connected to LampRabit's MongoDB", None),
         Runtime::Sqlite => ("SQLite", "File databases", "The sqlite3 shell from sqlite.org (SHA3 checked). PHP has SQLite built in, so projects don't need this to use it; backups use it to copy safely", None),
@@ -165,7 +167,6 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         ),
         Runtime::Python => ("Python", "Runs Python code", "python-build-standalone (the builds uv uses, checksum checked); python and pip work in LampRabit's terminal", None),
         Runtime::Phppgadmin => ("phpPgAdmin", "PostgreSQL admin", "The PostgreSQL web interface in PHP (ReimuHakurei's maintained fork for PHP 8); log in as root without a password", None),
-        Runtime::Adminer => ("Adminer", "Database admin", "A single-file database manager", None),
         Runtime::Phpmyadmin => ("phpMyAdmin", "Database admin", "The classic MySQL/MariaDB web interface", None),
         Runtime::Ngrok => ("Ngrok", "Public tunnels", "Share sites on a public URL (free account needed)", None),
         Runtime::Cloudflared => ("Cloudflare Tunnel", "Public tunnels", "Cloudflare quick tunnels, no account needed", None),
@@ -177,9 +178,6 @@ fn info(runtime: Runtime) -> RuntimeInfo {
             "MinGit, Git for Windows' official portable build (SHA-256 checked), for the Git tab, Clone and LampRabit's terminal. A Git already installed on the computer works too",
             (!win).then_some("LampRabit uses your system's Git here: install it with your package manager (sudo apt install git), or xcode-select --install on macOS."),
         ),
-        Runtime::Bun => ("Bun", "JavaScript runtime and packages", "Bun's official builds from GitHub (checksum checked); bun and bunx work in LampRabit's terminal, and projects with a bun.lock use it", None),
-        Runtime::Deno => ("Deno", "JavaScript and TypeScript", "Deno's official builds from GitHub (checksum checked); deno works in LampRabit's terminal", None),
-        Runtime::Uv => ("uv", "Python packages", "Astral's uv from GitHub (checksum checked); uv and uvx work in LampRabit's terminal, and the Pythons uv downloads stay inside LampRabit's folder", None),
         Runtime::Conda => ("conda", "Python environments", "Miniforge, conda-forge's installer (checksum checked), installed into LampRabit's folder without changing PATH or your shell; conda and mamba work in LampRabit's terminal", None),
         Runtime::Gradle => ("Gradle", "Java builds", "Gradle's official distribution from services.gradle.org (SHA-256 checked); gradle works in LampRabit's terminal on the active Java", None),
         Runtime::Phpredisadmin => ("phpRedisAdmin", "Redis admin", "Browse and edit Redis keys in the browser, like phpMyAdmin", None),
@@ -251,8 +249,8 @@ pub fn needs(runtime: Runtime, version: Option<&str>) -> Vec<Need> {
         }
         Runtime::Phppgadmin => vec![need("postgres", None, None, "phpPgAdmin manages LampRabit's PostgreSQL"), need("php", Some("8.0"), None, "phpPgAdmin runs on PHP")],
         Runtime::Phpredisadmin => vec![need("redis", None, None, "phpRedisAdmin browses LampRabit's Redis"), need("php", Some("7.2"), None, "phpRedisAdmin runs on PHP")],
-        Runtime::Phpmyadmin | Runtime::Adminer => vec![need("php", None, None, "It runs on PHP")],
-        Runtime::Mongosh | Runtime::Mongotools | Runtime::Compass => vec![need("mongodb", None, None, "It works with LampRabit's MongoDB")],
+        Runtime::Phpmyadmin => vec![need("php", None, None, "It runs on PHP")],
+        Runtime::Mongotools | Runtime::Compass => vec![need("mongodb", None, None, "It works with LampRabit's MongoDB")],
         _ => vec![],
     }
 }

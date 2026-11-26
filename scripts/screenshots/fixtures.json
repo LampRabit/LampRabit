@@ -2,6 +2,7 @@
   "settings": {
     "rootDir": "C:\\lampRabit",
     "tld": "test",
+    "cloudflareDomain": "",
     "ports": {
       "http": 80,
       "https": 443,
@@ -82,6 +83,7 @@
     "phpExtensions": {},
     "profiles": [],
     "defaultDatabase": "mariadb",
+    "dbClients": {},
     "storage": {},
     "serviceOptions": {},
     "autoRestart": [
@@ -347,7 +349,7 @@
         "id": "adminer",
         "label": "Adminer",
         "blurb": "Database admin",
-        "source": "A single-file database manager",
+        "source": "A single-file database manager from its GitHub releases (checksum checked), served at adminer.test",
         "unavailable": null,
         "needs": [
           "php"
@@ -357,7 +359,13 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
+        "keywords": [
+          "mysql",
+          "mariadb",
+          "postgresql",
+          "sqlite",
+          "database"
+        ],
         "docs": null
       },
       {
@@ -741,7 +749,7 @@
         "id": "mongosh",
         "label": "mongosh",
         "blurb": "MongoDB shell",
-        "source": "MongoDB's shell from its GitHub releases; mongosh works in LampRabit's terminal, and MongoDB uses it to shut down cleanly",
+        "source": "MongoDB's shell from its GitHub releases (checksum checked); mongosh works in LampRabit's terminal, and MongoDB uses it to shut down cleanly",
         "unavailable": null,
         "needs": [
           "mongodb"
@@ -751,7 +759,10 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
+        "keywords": [
+          "mongodb",
+          "shell"
+        ],
         "docs": null
       },
       {
@@ -1265,8 +1276,13 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
-        "docs": null
+        "keywords": [
+          "javascript",
+          "typescript",
+          "npm",
+          "bunx"
+        ],
+        "docs": "https://bun.sh/docs"
       },
       {
         "id": "deno",
@@ -1280,8 +1296,11 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
-        "docs": null
+        "keywords": [
+          "javascript",
+          "typescript"
+        ],
+        "docs": "https://docs.deno.com"
       },
       {
         "id": "uv",
@@ -1295,8 +1314,13 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
-        "docs": null
+        "keywords": [
+          "python",
+          "pip",
+          "uvx",
+          "venv"
+        ],
+        "docs": "https://docs.astral.sh/uv/"
       },
       {
         "id": "conda",

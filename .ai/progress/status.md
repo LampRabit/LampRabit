@@ -22,7 +22,9 @@ Plan: [../plans/active/phase-27-pluggable-services.md](../plans/active/phase-27-
 | KarotX bundled as LampRabit's own database client (`connects`) | done 2026-11-21; services file (every local database) 2026-11-22; repo and v0.1.0 release public, installs checked 2026-11-22 |
 | E1–E6: every service (and KarotX) defined only by YAML; only the site engine (`engine:`) stays Rust | done, commits `469dca5`, `6d37942`, `d272dba`, `508bdb0` |
 | E7a keywords/docs/config files, E7b backup hooks (+ smoke round trip, MySQL restore fix) | done, `1325049`, `0785179` |
-| **E7 rest: `scope: project`, connection adapters, `kind: tool`/`cli` (PHP tools, CLIs are runtimes)** | **open: waiting for the user's call** (scope/adapters have no consumer until Firebase/PocketBase and service binding) |
+| E7c `kind: cli`/`tool`, `commands` (shims), `source.prefix`, `{{root}}`; Bun, Deno, uv, mongosh, Adminer moved to YAML | done 2026-11-26 |
+| E7 later: move Composer, SQLite, Go, Maven, Gradle, Java, Python, Git, conda, Erlang, Compass, Mongotools, phpMyAdmin, phpRedisAdmin, phpPgAdmin (vendor indexes or source zips without checksums: need new source types) | open |
+| `scope: project`, connection adapters | **with** Firebase/PocketBase and service binding (the user, 2026-11-26: "start the other things one by one") |
 | Leftovers: clicking Add/Remove in the running app; macOS (CI runs when the branch is pushed) | **open** |
 
 ## Next release: 0.8 (not yet)

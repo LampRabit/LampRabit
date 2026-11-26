@@ -212,13 +212,18 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
             }
         }
     }
-    // Bun, Deno and uv are single programs; bunx is `bun x` and uvx is `uv tool run`.
-    for (runtime, name, args) in [("bun", "bun", &[][..]), ("bun", "bunx", &["x"][..]), ("deno", "deno", &[][..]), ("uv", "uv", &[][..]), ("uv", "uvx", &["tool", "run"][..])] {
-        let Some(v) = settings.versions.get(runtime) else { continue };
-        let target = layout.bin(runtime, v).join(exe(runtime));
-        if target.exists() {
-            let env = if runtime == "uv" { crate::runtimes::uv_env(layout) } else { Vec::new() };
-            shim(&dir, name, &[Case { folder: None, target, args: args.iter().map(|a| a.to_string()).collect(), env }])?;
+    // Command-line tools (Bun, Deno, uv, and any added from a file): their manifest's
+    // `commands`, for the active version.
+    for m in crate::manifest::built_ins().iter().chain(crate::manifest::extras()).filter(|m| m.kind == crate::manifest::Kind::Cli) {
+        let Ok(ctx) = crate::manifest::Ctx::new(m, settings, layout) else { continue };
+        for c in &m.commands {
+            let (Ok(Some(target)), Ok(args)) = (ctx.text(&c.program), ctx.args(&c.args)) else { continue };
+            let target = PathBuf::from(target);
+            if !target.exists() {
+                continue;
+            }
+            let env = c.env.iter().filter_map(|(k, v)| ctx.text(v).ok().flatten().map(|v| (k.clone(), v))).collect();
+            shim(&dir, &c.name, &[Case { folder: None, target, args, env }])?;
         }
     }
     // conda and mamba from Miniforge. `conda activate` needs conda's own shell setup, which
