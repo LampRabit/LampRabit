@@ -25,7 +25,8 @@ Plan: [../plans/active/phase-27-pluggable-services.md](../plans/active/phase-27-
 | E7c `kind: cli`/`tool`, `commands` (shims), `source.prefix`, `{{root}}`; Bun, Deno, uv, mongosh, Adminer moved to YAML | done 2026-11-26 |
 | E7 later: move Composer, SQLite, Go, Maven, Gradle, Java, Python, Git, conda, Erlang, Compass, Mongotools, phpMyAdmin, phpRedisAdmin, phpPgAdmin (vendor indexes or source zips without checksums: need new source types) | open |
 | `scope: project`, connection adapters | **with** Firebase/PocketBase and service binding (the user, 2026-11-26: "start the other things one by one") |
-| Leftovers: clicking Add/Remove in the running app; macOS (CI runs when the branch is pushed) | **open** |
+| Add/Remove a service in the running app (add, install, remove version, remove service) | done: the user tested it 2026-11-26, works; New Project's auto-install also tested and works |
+| macOS through CI (runs when `dev-1.0` is pushed) | **open: waiting for the user's OK to push** |
 
 ## Next release: 0.8 (not yet)
 
