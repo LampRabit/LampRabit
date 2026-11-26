@@ -31,6 +31,11 @@ pub struct JsonSource {
     pub then: Option<Follow>,
     /// Path to a release's version.
     pub version: String,
+    /// A regular expression whose `version` group is the version inside that value, for a
+    /// version written into a file name (`cpython-3.13.18+20261026-…`); a value it doesn't
+    /// match isn't a release.
+    #[serde(default)]
+    pub version_match: Option<String>,
     /// Path to a release's files, and the values the right one has.
     #[serde(default)]
     pub files: Option<String>,
@@ -142,6 +147,12 @@ pub fn check(src: &Source) -> std::result::Result<(), String> {
         if j.version.is_empty() || j.download.is_empty() {
             return Err("source.json needs version and download".into());
         }
+        if let Some(m) = &j.version_match {
+            let re = Regex::new(m).map_err(|e| format!("source.json.version_match isn't a valid regular expression: {e}"))?;
+            if !re.capture_names().flatten().any(|n| n == "version") {
+                return Err("source.json.version_match needs a (?P<version>…) group".into());
+            }
+        }
     }
     if let Some(p) = &src.page {
         https("page.url", &p.url)?;
@@ -193,7 +204,16 @@ pub async fn releases(client: &reqwest::Client, m: &Manifest, src: &Source) -> R
 }
 
 async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value> {
-    client.get(url).send().await.and_then(|r| r.error_for_status()).map_err(|e| Error::msg(format!("Couldn't read {url}: {e}")))?.json().await.map_err(|e| Error::msg(format!("{url} didn't answer with JSON: {e}")))
+    let mut request = client.get(url);
+    // GitHub's API (a json source over its releases, like Python's builds) wants its own
+    // media type, and a token raises its limit from 60 requests an hour to 5000.
+    if url.starts_with("https://api.github.com/") {
+        request = request.header("Accept", "application/vnd.github+json");
+        if let Some(token) = ["GITHUB_TOKEN", "GH_TOKEN"].iter().find_map(|v| std::env::var(v).ok().filter(|t| !t.is_empty())) {
+            request = request.bearer_auth(token);
+        }
+    }
+    request.send().await.and_then(|r| r.error_for_status()).map_err(|e| Error::msg(format!("Couldn't read {url}: {e}")))?.json().await.map_err(|e| Error::msg(format!("{url} didn't answer with JSON: {e}")))
 }
 
 /// One release candidate from a JSON source: its item, the item of the first request when
@@ -206,9 +226,17 @@ pub struct Entry {
 
 pub fn from_json(m: &Manifest, src: &Source, j: &JsonSource, vars: &Vars, entries: Vec<Entry>) -> Result<Vec<Found>> {
     let asset = src.asset();
+    let pattern = j.version_match.as_deref().map(Regex::new).transpose().map_err(|e| Error::msg(format!("{}: source.json.version_match: {e}", m.id)))?;
     let mut found = Vec::new();
     for e in &entries {
         let Some(version) = text(lookup(&e.item, &j.version, e.key.as_deref())).filter(|v| !v.is_empty()) else { continue };
+        let version = match &pattern {
+            Some(re) => match re.captures(&version).and_then(|c| c.name("version")) {
+                Some(v) => v.as_str().to_string(),
+                None => continue,
+            },
+            None => version,
+        };
         // Go writes go1.25.4: `prefix` drops it (an entry without it isn't a release).
         let version = match &src.prefix {
             Some(p) => match version.strip_prefix(p.as_str()) {
@@ -241,7 +269,10 @@ pub fn from_json(m: &Manifest, src: &Source, j: &JsonSource, vars: &Vars, entrie
             if url.is_empty() {
                 continue;
             }
-            let hash = |t: &Option<String>| -> Result<Option<String>> { Ok(t.as_ref().map(|t| vars.fill(t, &ctx)).transpose()?.filter(|h| !h.is_empty())) };
+            // GitHub writes its digests "sha256:<hex>".
+            let hash = |t: &Option<String>| -> Result<Option<String>> {
+                Ok(t.as_ref().map(|t| vars.fill(t, &ctx)).transpose()?.map(|h| h.split_once(':').map_or(h.clone(), |(_, hex)| hex.to_string())).filter(|h| !h.is_empty()))
+            };
             let label = match &j.label {
                 None => None,
                 Some(Label::Text(t)) => Some(vars.fill(t, &ctx)?),
@@ -777,6 +808,26 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!((found[0].version.as_str(), found[0].url.as_str(), found[0].sha256.as_deref()), ("9.18", "https://files.pythonhosted.org/9.18.whl", Some("bb")));
         assert!(matches!(found[0].archive, Archive::File));
+    }
+
+    #[test]
+    fn python_lines_from_file_names_in_a_github_release() {
+        let (m, src) = source_of("python", false);
+        let j = src.json.as_ref().unwrap();
+        let target = Vars::new(m).unwrap().fill("{var.target}", &Ctx::default()).unwrap();
+        let asset = |v: &str, t: &str| serde_json::json!({"name": format!("cpython-{v}+20261026-{t}-install_only.tar.gz"), "browser_download_url": format!("https://github.com/{v}.tar.gz"), "digest": "sha256:cc"});
+        let answer = serde_json::json!({"assets": [
+            asset("3.13.18", &target), asset("3.13.17", &target), asset("3.14.10", &target),
+            // A pre-release, another platform's build and a debug build aren't offered.
+            asset("3.16.0a1", &target), asset("3.14.10", "riscv64-unknown-linux-gnu"),
+            {"name": format!("cpython-3.12.16+20261026-{target}-debug-full.tar.zst"), "browser_download_url": "x", "digest": "sha256:dd"}]});
+        // `where` picks this platform's install_only files, as `releases` does.
+        let vars = Vars::new(m).unwrap();
+        let picked: Vec<Entry> = entries(&answer, &j.items).into_iter().filter(|e| matches_all(&j.filter, &e.item, &vars, &Ctx::default()).unwrap()).collect();
+        let found = from_json(m, src, j, &vars, picked).unwrap();
+        let versions: Vec<&str> = found.iter().map(|f| f.version.as_str()).collect();
+        assert_eq!(versions, ["3.14.10", "3.13.18"]);
+        assert_eq!(found[1].sha256.as_deref(), Some("cc"), "GitHub's sha256: prefix is dropped");
     }
 
     #[test]

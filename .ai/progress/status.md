@@ -24,8 +24,8 @@ Plan: [../plans/active/phase-27-pluggable-services.md](../plans/active/phase-27-
 | E7a keywords/docs/config files, E7b backup hooks (+ smoke round trip, MySQL restore fix) | done, `1325049`, `0785179` |
 | E7c `kind: cli`/`tool`, `commands` (shims), `source.prefix`, `{{root}}`; Bun, Deno, uv, mongosh, Adminer moved to YAML | done 2026-11-26 |
 | E7d Composer, Java, Go, Maven, Gradle, Erlang, cloudflared, Compass, Mongotools, phpMyAdmin, phpRedisAdmin, phpPgAdmin in YAML (the user, 2026-11-26: "continue making the dependencies yamls and make them dynamic too") | done 2026-11-27; Java now offers LTS lines only |
-| E7e Git (MinGit) in YAML (`.windows.1` tags) | done 2026-11-27 |
-| E7 rest: PHP, Python, SQLite (SHA3), conda, Rust (installers), ngrok (no version list) still in Rust | open |
+| E7e Git (MinGit, `.windows.1` tags) and Python (`json` over its GitHub release, `version_match`) in YAML | done 2026-11-27 |
+| E7 rest: PHP (windows.php.net + LampRabit builds), SQLite (SHA3 in a page), conda and Rust (installers), ngrok (no version list) still in Rust | open |
 | `scope: project`, connection adapters | **with** Firebase/PocketBase and service binding (the user, 2026-11-26: "start the other things one by one") |
 | Add/Remove a service in the running app (add, install, remove version, remove service) | done: the user tested it 2026-11-26, works; New Project's auto-install also tested and works |
 | macOS through CI (runs when `dev-1.0` is pushed) | **open: waiting for the user's OK to push** |

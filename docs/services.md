@@ -120,6 +120,7 @@ source:
 
 - `then: { url: ".../{item.release_id}/latest/", items: "releases.*" }` makes one more request per item (MariaDB lists its series first, then each one's latest release); the first request's item is then `parent` (`parent.release_support_type`).
 - Without `items`, the answer is one release (PyPI's `info.version`).
+- `version_match` is a regular expression with a `version` group, for a version written into a value: Python's builds are files in one GitHub release (`version: name`, `version_match: '^cpython-(?P<version>\d+\.\d+\.\d+)\+'`); a value it doesn't match isn't a release. Hashes written `sha256:<hex>` (GitHub's `digest`) are read as the hex. A `json` source over `https://api.github.com/` sends `GITHUB_TOKEN` when it's set.
 - Templates (`download`, hashes, labels, filter values) can use `{version}`, `{major}`, `{line}` (`8.4` of 8.4.7), `{key}` (an item's key when the list was an object; `@key` in a path), `{asset}` (the platform's file from `assets`), `{item.<path>}` (`{item}` alone for a list of plain values, like Adoptium's release lines), `{parent.<path>}`, `{file.<path>}` and `{var.<name>}`. Paths are dotted (`archive.url`, `urls.0.digests.sha256`).
 - `label` is a template, or `{ from: <path>, map: { value: label }, else: <label> }`; without `else` the value itself is shown.
 

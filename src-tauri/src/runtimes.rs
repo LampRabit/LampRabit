@@ -260,8 +260,6 @@ impl Runtime {
             Self::Php if cfg!(windows) => PathBuf::from(exe("php")),
             Self::Php => PathBuf::from("php-fpm"),
             Self::Ngrok => PathBuf::from(exe("ngrok")),
-            Self::Python if cfg!(windows) => PathBuf::from("python.exe"),
-            Self::Python => Path::new("bin").join("python3"),
             Self::Sqlite => PathBuf::from(exe("sqlite3")),
             // Written last by `setup_rust`, so a half-finished install doesn't count.
             Self::Rust => PathBuf::from("installed.txt"),
@@ -375,7 +373,6 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         _ if crate::manifest::get(runtime.id()).is_some() => manifest_releases(client, runtime).await?,
         Runtime::Php => php_releases(client).await?,
         Runtime::Ngrok => ngrok_releases(),
-        Runtime::Python => python_releases(client).await?,
         Runtime::Sqlite => sqlite_releases(client).await?,
         Runtime::Rust => rust_releases(client).await?,
         Runtime::Conda => conda_releases(client).await?,
@@ -511,52 +508,6 @@ async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value> {
         .map_err(http)
 }
 
-
-/// The newest patch of every stable Python line from the latest python-build-standalone
-/// release (its "install_only" archives: a plain Python folder, no debug files).
-async fn python_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let arm = cfg!(target_arch = "aarch64");
-    let target = match (std::env::consts::OS, arm) {
-        ("windows", false) => "x86_64-pc-windows-msvc",
-        ("windows", true) => "aarch64-pc-windows-msvc",
-        ("linux", false) => "x86_64-unknown-linux-gnu",
-        ("linux", true) => "aarch64-unknown-linux-gnu",
-        ("macos", false) => "x86_64-apple-darwin",
-        ("macos", true) => "aarch64-apple-darwin",
-        _ => return Err(unsupported("Python")),
-    };
-    let latest = get_json(client, "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest").await?;
-    let suffix = format!("-{target}-install_only.tar.gz");
-    let mut newest: std::collections::BTreeMap<String, Release> = Default::default();
-    for asset in latest["assets"].as_array().into_iter().flatten() {
-        let name = asset["name"].as_str().unwrap_or_default();
-        // cpython-3.13.18+20261026-x86_64-pc-windows-msvc-install_only.tar.gz
-        let Some(version) = name.strip_prefix("cpython-").and_then(|n| n.strip_suffix(&suffix)).and_then(|n| n.split('+').next()) else { continue };
-        // Stable releases only (no 3.16.0a1).
-        if !version.split('.').all(|p| p.parse::<u32>().is_ok()) {
-            continue;
-        }
-        let line = line(version);
-        if newest.get(&line).is_some_and(|r| version_key(&r.version) >= version_key(version)) {
-            continue;
-        }
-        newest.insert(line, Release {
-            runtime: Runtime::Python,
-            version: version.to_string(),
-            url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
-            sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
-            sha512: None,
-            md5: None,
-            sha3_256: None,
-            archive: Archive::TarGz,
-            label: None,
-        });
-    }
-    if newest.is_empty() {
-        return Err(Error::msg("No Python builds for this platform were found. Check your connection and try again."));
-    }
-    Ok(newest.into_values().collect())
-}
 
 /// Runs a setup command, failing with the last line it printed to stderr.
 async fn run_quiet(program: &Path, args: &[String], cwd: &Path) -> Result<()> {

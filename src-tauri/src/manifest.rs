@@ -77,6 +77,7 @@ const BUILT_IN: &[&str] = &[
     include_str!("../services/phpredisadmin.yaml"),
     include_str!("../services/phppgadmin.yaml"),
     include_str!("../services/git.yaml"),
+    include_str!("../services/python.yaml"),
 ];
 
 /// The groups of the Services page a manifest can name.

@@ -1,0 +1,38 @@
+schema: 1
+id: python
+kind: cli
+name: Python
+category: languages
+blurb: Runs Python code
+origin: python-build-standalone (the builds uv uses, checksum checked); python and pip work in LampRabit's terminal
+homepage: https://www.python.org
+license: PSF-2.0
+docs: https://docs.python.org/3/
+keywords: [pip, venv, django, flask, fastapi]
+
+source:
+  # The newest release holds every supported line (3.10–3.14); each file's name says its
+  # version: cpython-3.13.18+20261026-x86_64-pc-windows-msvc-install_only.tar.gz.
+  json:
+    url: https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest
+    items: assets
+    where: { name: "cpython-*-{var.target}-install_only.tar.gz" }
+    version: name
+    # Stable releases only: 3.16.0a1 doesn't match.
+    version_match: '^cpython-(?P<version>\d+\.\d+\.\d+)\+'
+    download: "{item.browser_download_url}"
+    sha256: "{item.digest}"
+  versions: per-line
+  keep: 10
+  archive: targz
+vars:
+  target:
+    - { value: x86_64-pc-windows-msvc, on: [windows-x64] }
+    - { value: aarch64-pc-windows-msvc, on: [windows-arm64] }
+    - { value: x86_64-unknown-linux-gnu, on: [linux-x64] }
+    - { value: aarch64-unknown-linux-gnu, on: [linux-arm64] }
+    - { value: x86_64-apple-darwin, on: [macos-x64] }
+    - { value: aarch64-apple-darwin, on: [macos-arm64] }
+binary:
+  - { value: python.exe, on: [windows] }
+  - { value: bin/python3 }
