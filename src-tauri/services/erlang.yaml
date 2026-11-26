@@ -4,8 +4,7 @@ kind: cli
 name: Erlang
 category: queues
 blurb: Runs RabbitMQ
-origin:
-  - { value: "Official Erlang/OTP builds for Windows (checksum checked)", on: [windows] }
+origin: Official Erlang/OTP builds for Windows (checksum checked)
 unavailable: { value: "Erlang has no official Linux or macOS builds: install it with your system's packages (sudo apt install erlang-nox, sudo dnf install erlang, or brew install erlang); RabbitMQ uses it.", on: [linux, macos] }
 homepage: https://www.erlang.org
 license: Apache-2.0

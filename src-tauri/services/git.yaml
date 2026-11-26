@@ -1,0 +1,22 @@
+schema: 1
+id: git
+kind: cli
+name: Git
+category: tools
+blurb: Version control
+origin: "MinGit, Git for Windows' official portable build (SHA-256 checked), for the Git tab, Clone and LampRabit's terminal. A Git already installed on the computer works too"
+unavailable: { value: "LampRabit uses your system's Git here: install it with your package manager (sudo apt install git), or xcode-select --install on macOS.", on: [linux, macos] }
+homepage: https://gitforwindows.org
+license: GPL-2.0
+docs: https://git-scm.com/doc
+keywords: [version control, vcs, clone, mingit]
+
+source:
+  # Git for Windows tags v2.56.1.windows.1; a rare .windows.2 rebuild is skipped until the
+  # next release (its file is named 2.56.1.2).
+  github: git-for-windows/git
+  tags: { ".windows.1": "" }
+  assets:
+    windows-x64: { file: "MinGit-{version}-64-bit.zip", archive: zip }
+    windows-arm64: { file: "MinGit-{version}-arm64.zip", archive: zip }
+binary: cmd/git.exe

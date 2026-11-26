@@ -76,6 +76,7 @@ const BUILT_IN: &[&str] = &[
     include_str!("../services/phpmyadmin.yaml"),
     include_str!("../services/phpredisadmin.yaml"),
     include_str!("../services/phppgadmin.yaml"),
+    include_str!("../services/git.yaml"),
 ];
 
 /// The groups of the Services page a manifest can name.
@@ -2339,7 +2340,8 @@ pub fn select(m: &Manifest, src: &Source, json: &serde_json::Value) -> Result<Ve
         if src.versions == Versions::PerMajor && src.min.is_some_and(|min| major < min) {
             continue;
         }
-        let label = tag_label.or_else(|| src.label.as_ref().map(|l| l.replace("{major}", &major.to_string()).replace("{version}", &version)));
+        // An empty tag label (`tags: { ".windows.1": "" }`) is no label.
+        let label = tag_label.filter(|l| !l.is_empty()).or_else(|| src.label.as_ref().map(|l| l.replace("{major}", &major.to_string()).replace("{version}", &version)));
         let candidate = Found { version, url, archive: asset.archive, sha256, sha512: None, md5: None, checksum_file, label };
         match src.versions {
             Versions::Latest | Versions::Newest | Versions::NewestTag | Versions::All => {
@@ -2410,6 +2412,17 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), all.len(), "two built-in manifests share an id");
+        // The Services page shows where each comes from on every platform, also where it
+        // can't be installed (a Windows-only description left Linux and macOS empty).
+        for m in all {
+            let everywhere = match &m.origin {
+                Some(Text::Plain(_)) => true,
+                Some(Text::One(c)) => c.on.is_empty(),
+                Some(Text::Choice(cases)) => cases.iter().any(|c| c.on.is_empty() && c.when.is_none()),
+                None => false,
+            };
+            assert!(everywhere, "{}: origin needs a value for every platform (a last case without on)", m.id);
+        }
     }
 
     #[test]

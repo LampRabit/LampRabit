@@ -265,7 +265,6 @@ impl Runtime {
             Self::Sqlite => PathBuf::from(exe("sqlite3")),
             // Written last by `setup_rust`, so a half-finished install doesn't count.
             Self::Rust => PathBuf::from("installed.txt"),
-            Self::Git => Path::new("cmd").join("git.exe"),
             // Written last by `setup_conda`, so a half-finished install doesn't count.
             Self::Conda => PathBuf::from("installed.txt"),
             // Services: from their manifest, above.
@@ -379,7 +378,6 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         Runtime::Python => python_releases(client).await?,
         Runtime::Sqlite => sqlite_releases(client).await?,
         Runtime::Rust => rust_releases(client).await?,
-        Runtime::Git => git_releases(client).await?,
         Runtime::Conda => conda_releases(client).await?,
         _ => return Err(unsupported(runtime.id())),
     };
@@ -511,36 +509,6 @@ async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value> {
         .json()
         .await
         .map_err(http)
-}
-
-/// Latest GitHub release of `repo`, picking the asset `pick` accepts. GitHub reports a
-/// sha256 digest for each asset.
-async fn github_latest(
-    client: &reqwest::Client,
-    runtime: Runtime,
-    repo: &str,
-    archive: Archive,
-    pick: impl Fn(&str, &str) -> bool,
-) -> Result<Vec<Release>> {
-    let latest = get_json(client, &format!("https://api.github.com/repos/{repo}/releases/latest")).await?;
-    let version = latest["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
-    let asset = latest["assets"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|a| a["name"].as_str().is_some_and(|n| pick(n, &version)))
-        .ok_or_else(|| Error::msg(format!("no download for this platform in {repo} {version}")))?;
-    Ok(vec![Release {
-        runtime,
-        url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
-        sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
-        sha512: None,
-        md5: None,
-        sha3_256: None,
-        version,
-        archive,
-        label: None,
-    }])
 }
 
 
@@ -895,29 +863,6 @@ fn ngrok_releases() -> Vec<Release> {
         archive,
         label: Some("Stable channel".into()),
     }]
-}
-
-/// MinGit from Git for Windows' latest release (GitHub's SHA-256 digest checked). The tag
-/// is "v2.47.1.windows.1"; the version shown is Git's own ("2.47.1", or "2.47.1.2" for a
-/// Windows-only follow-up release).
-async fn git_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    if !cfg!(windows) {
-        return Err(Error::msg("Use your system's Git: install it with your package manager, or xcode-select --install on macOS."));
-    }
-    let suffix = if cfg!(target_arch = "aarch64") { "-arm64.zip" } else { "-64-bit.zip" };
-    let mut releases = github_latest(client, Runtime::Git, "git-for-windows/git", Archive::Zip, |n, _| n.starts_with("MinGit-") && n.ends_with(suffix) && !n.contains("busybox")).await?;
-    for r in &mut releases {
-        r.version = git_version_from_tag(&r.version);
-    }
-    Ok(releases)
-}
-
-fn git_version_from_tag(tag: &str) -> String {
-    match tag.split_once(".windows.") {
-        Some((base, "1")) => base.to_string(),
-        Some((base, n)) => format!("{base}.{n}"),
-        None => tag.to_string(),
-    }
 }
 
 /// phpRedisAdmin talks to Redis through Predis, normally installed by Composer. LampRabit
@@ -1287,13 +1232,6 @@ mod tests {
             }
         }
         assert!(failed.is_empty(), "{failed:#?}");
-    }
-
-    #[test]
-    fn reads_git_for_windows_tags() {
-        assert_eq!(git_version_from_tag("2.47.1.windows.1"), "2.47.1");
-        assert_eq!(git_version_from_tag("2.47.1.windows.2"), "2.47.1.2");
-        assert_eq!(git_version_from_tag("2.48.0-rc1.windows.1"), "2.48.0-rc1");
     }
 
 }

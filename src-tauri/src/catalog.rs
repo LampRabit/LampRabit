@@ -157,12 +157,6 @@ fn info(runtime: Runtime) -> RuntimeInfo {
         ),
         Runtime::Python => ("Python", "Runs Python code", "python-build-standalone (the builds uv uses, checksum checked); python and pip work in LampRabit's terminal", None),
         Runtime::Ngrok => ("Ngrok", "Public tunnels", "Share sites on a public URL (free account needed)", None),
-        Runtime::Git => (
-            "Git",
-            "Version control",
-            "MinGit, Git for Windows' official portable build (SHA-256 checked), for the Git tab, Clone and LampRabit's terminal. A Git already installed on the computer works too",
-            (!win).then_some("LampRabit uses your system's Git here: install it with your package manager (sudo apt install git), or xcode-select --install on macOS."),
-        ),
         Runtime::Conda => ("conda", "Python environments", "Miniforge, conda-forge's installer (checksum checked), installed into LampRabit's folder without changing PATH or your shell; conda and mamba work in LampRabit's terminal", None),
         // Services: from their manifest, above.
         _ => (runtime.id(), "", "", None),

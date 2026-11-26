@@ -1308,8 +1308,13 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
-        "docs": null
+        "keywords": [
+          "version control",
+          "vcs",
+          "clone",
+          "mingit"
+        ],
+        "docs": "https://git-scm.com/doc"
       },
       {
         "id": "bun",

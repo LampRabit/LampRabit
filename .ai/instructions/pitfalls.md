@@ -26,3 +26,5 @@ Add one line here whenever something costs time and could bite again.
 - A YAML flow map (`{ value: x, label: … }`) breaks on a comma inside the label: quote it.
 - Python on Windows opens files as cp1252 by default: an edit script must pass `encoding="utf-8"`, or "…" and "→" are written as invalid UTF-8.
 - A dropdown inside a card with `opacity-*` (Home dims services outside the active profile) inherits the fade, and nothing inside can undo it: `Menu` draws its list in a portal on `<body>` (2026-11-26).
+- A manifest's `origin` limited to one platform (`on: [windows]`) is empty elsewhere, and the catalog test fails only on Linux and macOS CI: give the last case no `on` (now checked by `built_in_manifests_are_valid` on every platform, 2026-11-27).
+- `live_manifest_catalogs` makes ~60 GitHub API calls; without a token it hits the 60-an-hour limit. Run it with `GITHUB_TOKEN=$(gh auth token)`.
