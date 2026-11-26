@@ -408,8 +408,17 @@ mod tests {
     #[tokio::test]
     async fn serves_over_http() {
         use tokio::io::AsyncReadExt;
-        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        start_http(port, "secret-token".into()).await.unwrap();
+        // A free port can be taken by a test running alongside between finding it and
+        // binding it (macOS CI hit that): try another.
+        let mut port = 0;
+        for _ in 0..5 {
+            port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+            if start_http(port, "secret-token".into()).await.is_ok() {
+                break;
+            }
+            port = 0;
+        }
+        assert_ne!(port, 0, "no free port for the MCP server");
         async fn post(port: u16, body: &str, auth: Option<&str>, origin: Option<&str>) -> (u16, String) {
             let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
             let crlf = "\r\n";
