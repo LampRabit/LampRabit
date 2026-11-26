@@ -2,6 +2,24 @@
 
 use crate::*;
 
+/// Sets the app a database opens in (`tool: None` goes back to the default, KarotX). Applies
+/// at once, like the other choices on the Services page.
+#[tauri::command]
+pub(crate) async fn set_db_client(state: State<'_, AppState>, database: String, tool: Option<String>) -> Result<()> {
+    for id in std::iter::once(&database).chain(tool.as_ref()) {
+        if runtimes::Runtime::from_id(id).is_none() {
+            return Err(Error::msg(format!("{id} isn't something LampRabit installs.")));
+        }
+    }
+    state
+        .update_settings(|s| match tool {
+            Some(t) => drop(s.db_clients.insert(database, t)),
+            None => drop(s.db_clients.remove(&database)),
+        })
+        .await?;
+    Ok(())
+}
+
 /// The service of a database engine, which has to be running for its tools to connect.
 pub(crate) async fn running_database(state: &AppState, engine: templates::DbEngine) -> Result<()> {
     let kind = match engine {
@@ -82,6 +100,21 @@ pub(crate) async fn open_compass(state: State<'_, AppState>) -> Result<()> {
 #[tauri::command]
 pub(crate) async fn delete_backup(state: State<'_, AppState>, path: PathBuf) -> Result<()> {
     backups::delete(&state.snapshot().await.1, &path)
+}
+
+/// The PostgreSQL extensions one database has, and the ones it could have.
+#[tauri::command]
+pub(crate) async fn pg_extensions(state: State<'_, AppState>, database: String) -> Result<Vec<manage::PgExtension>> {
+    running_database(&state, templates::DbEngine::Postgres).await?;
+    let (settings, layout) = state.snapshot().await;
+    manage::pg_extensions(&settings, &layout, &database).await
+}
+
+#[tauri::command]
+pub(crate) async fn set_pg_extension(state: State<'_, AppState>, database: String, name: String, action: manage::PgExtensionAction) -> Result<()> {
+    running_database(&state, templates::DbEngine::Postgres).await?;
+    let (settings, layout) = state.snapshot().await;
+    manage::set_pg_extension(&settings, &layout, &database, &name, action).await
 }
 
 /// Whether the project's database exists, and its server runs.

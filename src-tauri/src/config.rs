@@ -14,6 +14,9 @@ pub struct Settings {
     pub root_dir: PathBuf,
     /// Top-level domain used for auto virtual hosts, e.g. `myapp.test`.
     pub tld: String,
+    /// The user's domain on Cloudflare, for sharing projects at <project>.<domain> through
+    /// named tunnels. Empty until they set it in Settings → Sharing.
+    pub cloudflare_domain: String,
     pub ports: Ports,
     pub versions: Versions,
     /// The web servers that run, side by side. The first is the primary one: it has the
@@ -49,6 +52,9 @@ pub struct Settings {
     pub profiles: Vec<StackProfile>,
     /// What `mysql`, new projects and the database tools use first.
     pub default_database: Database,
+    /// The app each database opens in, by service id (`postgres` → `pgadmin`), chosen on the
+    /// Services page. Absent: KarotX when installed, else the first installed web tool.
+    pub db_clients: BTreeMap<String, String>,
     /// Where object storage (RustFS, MinIO) keeps its buckets, by service id; data/<id>
     /// when absent. Can be outside the LampRabit folder (another drive, a NAS): it isn't
     /// moved with it, and uninstall never deletes it.
@@ -275,6 +281,29 @@ impl PackageManager {
             Self::Pnpm => "pnpm",
             Self::Yarn => "yarn",
             Self::Bun => "bun",
+        }
+    }
+}
+
+/// How a new Python project gets its environment and packages.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PythonManager {
+    /// `python -m venv .venv` on LampRabit's Python, packages with pip, a requirements.txt.
+    #[default]
+    Pip,
+    /// `uv init` + `uv add`: a pyproject.toml and uv.lock, the environment in .venv.
+    Uv,
+    /// A conda environment in .venv (`conda create -p`), packages with its pip.
+    Conda,
+}
+
+impl PythonManager {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Pip => "pip",
+            Self::Uv => "uv",
+            Self::Conda => "conda",
         }
     }
 }
@@ -547,6 +576,7 @@ impl Default for Settings {
         Self {
             root_dir: default_root(),
             tld: "test".into(),
+            cloudflare_domain: String::new(),
             ports: Ports::default(),
             versions: Versions::default(),
             web_servers: vec![Server::Apache],
@@ -564,6 +594,7 @@ impl Default for Settings {
             php_extensions: BTreeMap::new(),
             profiles: Vec::new(),
             default_database: Database::Mariadb,
+            db_clients: BTreeMap::new(),
             storage: BTreeMap::new(),
             service_options: BTreeMap::new(),
             // n8n's Node process is the one that falls over on large workflows.

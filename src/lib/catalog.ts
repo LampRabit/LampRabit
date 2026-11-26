@@ -30,8 +30,11 @@ export function serviceLink(info: RuntimeInfo | undefined, sites: SitesInfo | un
     return url ? { label: `Open ${info.label}`, url } : undefined;
   }
   if (info.open) {
+    // Its console is served at <id>.test too (sites.rs), like a web interface.
+    const tool = sites?.tools.find((t) => t.tool === info.id);
     const direct = port(info.open.port);
-    return direct ? { label: info.open.label, url: `http://localhost:${direct}${info.open.path}` } : undefined;
+    const base = sites?.hostsOk && tool ? tool.url.replace(/\/$/, "") : direct ? `http://localhost:${direct}` : undefined;
+    return base ? { label: info.open.label, url: `${base}${info.open.path}` } : undefined;
   }
   return undefined;
 }

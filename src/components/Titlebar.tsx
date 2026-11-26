@@ -1,15 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useQuery } from "@tanstack/react-query";
-import { Copy, Download, FolderOpen, Keyboard, Minus, Moon, MoreHorizontal, Play, Search, Square, SquareTerminal, Sun, X } from "lucide-react";
+import { Copy, Download, FolderOpen, Minus, Moon, Play, Search, Square, SquareTerminal, Sun, X } from "lucide-react";
 import clsx from "clsx";
 import { api } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
 import { useAppUpdate } from "../lib/updates";
 import { startAllHint, useStack } from "../lib/stack";
 import { useEffectiveTheme, useTheme } from "../lib/theme";
-import { useCurrentPageToolbar } from "./PageToolbar";
 import Logo from "./Logo";
 import { Button } from "./ui";
 
@@ -21,16 +20,6 @@ import { Button } from "./ui";
 export default function Titlebar() {
   const navigate = useAppStore((s) => s.navigate);
   const page = useAppStore((s) => s.page);
-  const pageToolbar = useCurrentPageToolbar(page);
-  // The narrow-window actions menu (a <details>) closes on a choice or a click outside it.
-  const menu = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    const close = (e: MouseEvent) => {
-      if (menu.current?.open && !menu.current.contains(e.target as Node)) menu.current.removeAttribute("open");
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, []);
   const update = useAppUpdate((s) => s.available);
   // The user agent knows macOS before the backend answers, so the traffic lights never
   // land on the logo while it loads.
@@ -54,33 +43,12 @@ export default function Titlebar() {
       )}
     >
       <Logo animated className="pointer-events-none size-8 shrink-0" />
-      {page === "overview" ? (
-        <div className="pointer-events-none hidden min-w-0 leading-tight lg:block">
-          <div className="truncate font-medium tracking-tight">Lamp<span className="text-accent-text">Rabit</span></div>
-          <div className="hidden text-xs text-muted xl:block">Local dev environment</div>
-        </div>
-      ) : (
-        <div className="pointer-events-none min-w-0 leading-tight">
-          <h1 className="truncate text-sm font-medium">{pageToolbar?.title ?? pageLabel(page)}</h1>
-          {pageToolbar?.subtitle && <div className="hidden max-w-96 truncate text-[11px] text-muted xl:block">{pageToolbar.subtitle}</div>}
-        </div>
-      )}
+      {/* Only what's the same on every page lives here; each page's title and actions are in its own header (PageHeader). */}
+      <div className="pointer-events-none hidden min-w-0 leading-tight sm:block">
+        <div className="truncate font-medium tracking-tight">Lamp<span className="text-accent-text">Rabit</span></div>
+      </div>
 
       <div className="ml-auto flex min-w-0 items-center gap-1 sm:gap-1.5">
-        {pageToolbar?.actions && pageToolbar.menuActions && <div className="hidden items-center gap-1 xl:flex">{pageToolbar.actions}</div>}
-        {pageToolbar?.actions && !pageToolbar.menuActions && <div className="flex min-w-0 items-center gap-1">{pageToolbar.actions}</div>}
-        {pageToolbar?.menuActions && (
-          <details key={page} ref={menu} className="group relative xl:hidden" onClick={(e) => (e.target as HTMLElement).closest("button") && menu.current?.removeAttribute("open")}>
-            <summary className="flex size-9 cursor-pointer list-none items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg [&::-webkit-details-marker]:hidden" aria-label={`${pageToolbar.title} actions`} title={`${pageToolbar.title} actions`}>
-              <MoreHorizontal size={18} />
-            </summary>
-            <div className="absolute top-full right-0 z-50 mt-1.5 flex min-w-48 flex-col gap-1 rounded-xl border border-line bg-surface p-2 shadow-float">
-              {pageToolbar.menuActions}
-            </div>
-          </details>
-        )}
-        {/* The page's own actions, then LampRabit's, which are the same on every page. */}
-        {(pageToolbar?.actions || pageToolbar?.menuActions) && <span className="mx-1 h-5 w-px shrink-0 bg-line" aria-hidden />}
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
         <button
           onClick={() => useAppStore.getState().setPaletteOpen(true)}
@@ -93,9 +61,6 @@ export default function Titlebar() {
           <kbd className="hidden rounded border border-line px-1 font-mono text-[11px] lg:inline">{os === "macos" ? "⌘K" : "Ctrl K"}</kbd>
         </button>
         <ThemeToggle />
-        <Button size="sm" variant="ghost" className="hidden sm:inline-flex" onClick={() => useAppStore.getState().setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
-          <Keyboard size={15} />
-        </Button>
         {update && (
           <button
             onClick={() => navigate("settings")}
@@ -188,8 +153,4 @@ function WindowControls() {
       </button>
     </div>
   );
-}
-
-function pageLabel(page: string) {
-  return ({ sites: "Sites", services: "Services", logs: "Logs", settings: "Settings" } as Record<string, string>)[page] ?? "LampRabit";
 }

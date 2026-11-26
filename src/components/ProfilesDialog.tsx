@@ -7,6 +7,7 @@ import { api, serviceLabels, type Release, type Runtime, type ServiceKind, type 
 import { useAppStore, notifyError } from "../lib/store";
 import { formatBytes } from "../lib/usage";
 import Dialog from "./Dialog";
+import Menu from "./Menu";
 import { InstallStep } from "./FirstRunDialog";
 import { Button, inputClass } from "./ui";
 
@@ -152,7 +153,8 @@ type Review = { incoming: StackProfile[]; missing: ServiceKind[]; versions: Reco
  * Services it knows but that aren't installed are reviewed first: each is installed, or
  * taken out of the profiles (see ImportReview).
  */
-export function ProfilesTransfer() {
+/** Import and export of the stack profiles; `menu` puts them in a ⋮ menu instead of two buttons. */
+export function ProfilesTransfer({ menu = false }: { menu?: boolean } = {}) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
@@ -249,12 +251,25 @@ export function ProfilesTransfer() {
           onNext={() => setInstalling(null)}
         />
       )}
-      <Button size="sm" variant="ghost" onClick={() => importFile.mutate()} disabled={importFile.isPending || !settings.data} title="Add profiles from a file exported on another machine">
-        <Upload size={13} /> Import
-      </Button>
-      <Button size="sm" variant="ghost" onClick={() => exportAll.mutate()} disabled={exportAll.isPending || profiles.length === 0} title="Save the profiles to a file">
-        <Download size={13} /> Export
-      </Button>
+      {menu ? (
+        <Menu
+          plain
+          label="Profile import and export"
+          items={[
+            { label: "Import profiles…", icon: <Upload size={14} />, onSelect: () => settings.data && importFile.mutate() },
+            { label: "Export profiles…", icon: <Download size={14} />, onSelect: () => (profiles.length ? exportAll.mutate() : notify("info", "No profiles of your own to export yet")) },
+          ]}
+        />
+      ) : (
+        <>
+          <Button size="sm" variant="ghost" onClick={() => importFile.mutate()} disabled={importFile.isPending || !settings.data} title="Add profiles from a file exported on another machine">
+            <Upload size={13} /> Import
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => exportAll.mutate()} disabled={exportAll.isPending || profiles.length === 0} title="Save the profiles to a file">
+            <Download size={13} /> Export
+          </Button>
+        </>
+      )}
     </div>
   );
 }

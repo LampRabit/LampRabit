@@ -5,7 +5,8 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import AddServiceDialog from "../components/AddServiceDialog";
 import ConfigFiles from "../components/ConfigFiles";
 import ExtensionsDialog from "../components/ExtensionsDialog";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { openUrl } from "../lib/open";
 import clsx from "clsx";
 import {
   api,
@@ -26,7 +27,10 @@ import { usePageToolbar } from "../components/PageToolbar";
 import NodeCard from "../components/NodeCard";
 import ServiceSettings from "../components/ServiceSettings";
 import RelatedPanel from "../components/RelatedPanel";
+import DbClientPanel from "../components/DbClientPanel";
+import NeedsRunning from "../components/NeedsRunning";
 import BackupsPanel from "../components/BackupsPanel";
+import PgExtensionsPanel from "../components/PgExtensionsPanel";
 import { ActiveTile, AvailableList, InstalledTile, InstalledTiles, NoActiveTile, VersionsLayout } from "../components/versions";
 import { TunnelsPanel } from "../components/Tunnels";
 
@@ -262,10 +266,13 @@ export default function Services() {
               }
             />
           ) : selected === "node" ? <NodeCard /> : <TunnelsPanel />}
+          {runtime && <NeedsRunning key={`needs-${runtime}`} runtime={runtime} installed={installed.data} />}
           {runtime && <RelatedPanel key={`related-${runtime}`} runtime={runtime} installed={installed.data} onSelect={setSelected} />}
+          {runtime && <DbClientPanel key={`clients-${runtime}`} runtime={runtime} installed={installed.data} onSelect={setSelected} />}
           {runtime && <ServiceSettings key={`settings-${runtime}`} runtime={runtime} />}
           {runtime && services.data?.some((s) => s.kind === runtime) && <ConfigFiles key={`config-${runtime}`} kind={runtime} docs={infoFor(catalog.data, runtime)?.docs ?? null} />}
           {/* SQLite databases are project files: they can be backed up without the shell installed. */}
+          {runtime === "postgres" && find("postgres")?.active && <PgExtensionsPanel />}
           {backup && (backup === "sqlite" || find(backup)?.active) && <BackupsPanel key={`backups-${backup}`} engine={backup} />}
           {selected === "tunnels" && <p className="mt-3 text-xs text-muted">Share a project from Sites or use this panel to share any local port.</p>}
           {runtime && infoFor(catalog.data, runtime)?.local && (

@@ -1,7 +1,7 @@
 schema: 1
 id: laravel
 name: Laravel
-description: Latest Laravel, configured for your database and Mailpit.
+description: Latest Laravel, bare or with a starter kit (React, Vue, Livewire), configured for your database and Mailpit.
 icon: flame
 color: red
 duration: Composer · about a minute
@@ -10,12 +10,30 @@ requires:
   extensions: [ctype, fileinfo, mbstring, openssl, tokenizer, xml]
 database: optional
 engines: [mariadb, mysql, postgres, sqlite]
+# What `laravel new` asks: a starter kit, and the testing framework.
+variables:
+  - id: starter
+    label: Starter kit
+    type: choice
+    default: laravel/laravel
+    options:
+      - { value: laravel/laravel, label: None (a bare Laravel app) }
+      - { value: laravel/react-starter-kit, label: "React (Inertia, TypeScript, Tailwind)" }
+      - { value: laravel/vue-starter-kit, label: "Vue (Inertia, TypeScript, Tailwind)" }
+      - { value: laravel/livewire-starter-kit, label: "Livewire (Flux UI, Tailwind)" }
+  - id: testing
+    label: Testing framework
+    type: choice
+    default: phpunit
+    options:
+      - { value: phpunit, label: PHPUnit }
+      - { value: pest, label: Pest }
 steps:
   # First, so a database name that's taken stops everything before the long download.
   - create_database: {}
-  - name: Creating the project with Composer (laravel/laravel)
+  - name: Creating the project with Composer ({{vars.starter}})
     cwd: www
-    composer: [create-project, laravel/laravel, "{{project}}", --prefer-dist, --no-interaction, --no-progress]
+    composer: [create-project, "{{vars.starter}}", "{{project}}", --prefer-dist, --no-interaction, --no-progress]
   - name: Configuring the environment
     env:
       values:
@@ -36,13 +54,23 @@ steps:
   - name: Running database migrations
     if: database
     php: [artisan, migrate, --force]
+  - name: Switching the tests to Pest
+    if: vars.testing == pest
+    composer: [remove, phpunit/phpunit, --dev, --no-update, --no-interaction]
+  - name: Installing Pest
+    if: vars.testing == pest
+    composer: [require, pestphp/pest, pestphp/pest-plugin-laravel, --dev, --with-all-dependencies, --no-interaction, --no-progress]
+  - name: Setting up Pest
+    if: vars.testing == pest
+    php: [vendor/bin/pest, --init]
+  # The starter kits' pages need their assets built; a bare app doesn't.
   - id: frontend
     optional: true
     default: false
-    label: Install and build the frontend with npm
+    label: Install and build the frontend (needed by the starter kits)
     needs: [node]
-    name: Building the frontend with npm
-    run: npm install && npm run build
+    name: Building the frontend with {{pm}}
+    run: "{{pm.install}} && {{pm.run}} build"
   - id: git
     optional: true
     default: false
@@ -60,6 +88,10 @@ commands:
     - name: Rebuild the database with seed data
       run: php artisan migrate:fresh --seed --force
       description: Drops every table, migrates again and runs the seeders.
+    - name: List the routes
+      run: php artisan route:list
+    - name: Link storage to public
+      run: php artisan storage:link
 processes:
   # Laravel's queue runs jobs in the background; start it from Commands → Keep running.
   - name: queue

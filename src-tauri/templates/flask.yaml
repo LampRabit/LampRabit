@@ -4,14 +4,25 @@ name: Flask
 description: A small Flask app in app.py, in its own virtual environment, reloaded when you save.
 icon: terminal
 color: zinc
-duration: pip · seconds
+duration: pip, uv or conda · seconds
 requires:
   python: "3.10"
+variables:
+  - id: db
+    label: Database layer
+    type: choice
+    default: none
+    options:
+      - { value: none, label: None }
+      - { value: sqlalchemy, label: Flask-SQLAlchemy (SQLite to start) }
 steps:
-  - name: Creating a virtual environment (.venv)
-    run: python -m venv .venv
+  - name: Creating the environment (.venv) with {{py}}
+    run: "{{py.venv}}"
   - name: Installing Flask
-    run: "{{venv.python}} -m pip install --disable-pip-version-check flask"
+    run: "{{py.add}} flask"
+  - name: Installing Flask-SQLAlchemy
+    if: vars.db == sqlalchemy
+    run: "{{py.add}} flask-sqlalchemy"
   - name: Creating app.py
     write:
       path: app.py
@@ -24,11 +35,29 @@ steps:
         @app.get("/")
         def index():
             return jsonify(message="Hello from {{project}}")
-  - name: Writing requirements.txt
+  # uv records the packages in pyproject.toml and uv.lock instead.
+  - name: Connecting Flask-SQLAlchemy
+    if: vars.db == sqlalchemy
     write:
-      path: requirements.txt
+      path: db.py
       content: |
-        flask
+        """The database: SQLite in instance/app.db until DATABASE_URL says otherwise."""
+        import os
+
+        from flask_sqlalchemy import SQLAlchemy
+
+        db = SQLAlchemy()
+
+
+        def init_db(app):
+            app.config.setdefault("SQLALCHEMY_DATABASE_URI", os.environ.get("DATABASE_URL", "sqlite:///app.db"))
+            db.init_app(app)
+            with app.app_context():
+                db.create_all()
+  # uv records the packages in pyproject.toml and uv.lock instead.
+  - name: Writing requirements.txt
+    if: py != uv
+    run: "{{venv.python}} -m pip freeze --disable-pip-version-check > requirements.txt"
   - name: Ignoring the virtual environment in Git
     write:
       path: .gitignore

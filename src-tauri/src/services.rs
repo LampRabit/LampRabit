@@ -787,6 +787,9 @@ impl Supervisor {
 
     pub async fn list(&self, settings: &Settings, layout: &Layout) -> Vec<ServiceInfo> {
         let running = self.running.lock().await;
+        // A port conflict is over once its port is free again or no longer the service's
+        // (changed in Settings): the error goes without a restart.
+        self.problems.lock().unwrap().retain(|&kind, p| p.port.is_none_or(|port| !port_free(port) && required_ports(kind, settings, layout).contains(&port)));
         let problems = self.problems.lock().unwrap().clone();
         let health = self.health.lock().unwrap().clone();
         ServiceKind::all()

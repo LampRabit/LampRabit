@@ -54,6 +54,9 @@ pub struct NewProject {
     /// Node templates: the package manager to create and run the project with.
     #[serde(default)]
     pub package_manager: Option<crate::config::PackageManager>,
+    /// Python templates: pip (a venv), uv or conda.
+    #[serde(default)]
+    pub python_manager: Option<crate::config::PythonManager>,
 }
 
 /// What a finished template leaves for the app to save.
@@ -418,6 +421,36 @@ pub(crate) fn set_env(path: &Path, values: &[(String, String)]) -> Result<()> {
     Ok(())
 }
 
+/// How a Python template makes its environment and adds packages, for the chosen manager:
+/// `py.venv` creates .venv, `py.add <packages>` installs into it, `venv.python` is its
+/// Python. pip and conda (through the environment's pip) keep a requirements.txt; uv keeps
+/// pyproject.toml and uv.lock, so templates write requirements.txt only `if: py != uv`.
+fn python_values(manager: crate::config::PythonManager, python: Option<&str>, project: &str, windows: bool) -> Vec<(String, String)> {
+    use crate::config::PythonManager;
+    // The active Python's major.minor, so uv and conda make the same line LampRabit runs.
+    let line = python.map(|v| v.split('.').take(2).collect::<Vec<_>>().join(".")).filter(|l| l.contains('.'));
+    // A conda environment on Windows has python.exe at its root, not in Scripts\.
+    let venv_python = match (manager, windows) {
+        (PythonManager::Conda, true) => r".venv\python.exe",
+        (_, true) => r".venv\Scripts\python.exe",
+        (_, false) => ".venv/bin/python",
+    };
+    let pip = format!("{venv_python} -m pip install --disable-pip-version-check");
+    let (create, add) = match manager {
+        PythonManager::Pip => ("python -m venv .venv".to_string(), pip),
+        PythonManager::Uv => {
+            // uv wants a valid package name; folder names can have spaces or capitals.
+            let name: String = project.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+            let name = name.trim_matches('-');
+            let name = if name.is_empty() { "app" } else { name };
+            let pin = line.as_ref().map(|l| format!(" --python {l}")).unwrap_or_default();
+            (format!("uv init --bare --no-workspace --name {name}{pin}"), "uv add".to_string())
+        }
+        PythonManager::Conda => (format!("conda create --yes --quiet --prefix .venv python={} pip", line.as_deref().unwrap_or("3")), pip),
+    };
+    vec![("venv.python".into(), venv_python.into()), ("py".into(), manager.id().into()), ("py.venv".into(), create), ("py.add".into(), add)]
+}
+
 /// Values for a template's placeholders: the project, its database and Mailpit.
 fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: Option<&str>, node: Option<(&str, &crate::apps::PmCommands)>) -> Values {
     use crate::templates::DbEngine;
@@ -464,15 +497,16 @@ fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: 
             (_, DbEngine::Sqlite) => "sqlite",
             _ => "mysql",
         }.into()),
-        // A project's virtual environment's Python, as each OS lays it out.
-        ("venv.python".into(), if cfg!(windows) { r".venv\Scripts\python.exe".into() } else { ".venv/bin/python".into() }),
         // Maven's wrapper: a .cmd on Windows; elsewhere through sh, since zips drop the
         // executable bit.
         ("mvnw".into(), if cfg!(windows) { "mvnw.cmd".into() } else { "sh mvnw".into() }),
+        ("gradlew".into(), if cfg!(windows) { "gradlew.bat".into() } else { "sh gradlew".into() }),
         ("java_major".into(), ctx.settings.versions.get("java").and_then(|v| v.split('.').next().map(str::to_string)).unwrap_or_else(|| "21".into())),
         ("mail.host".into(), "127.0.0.1".into()),
         ("mail.port".into(), ctx.settings.ports.service("mailpit.smtp").to_string()),
     ]);
+    let python = ctx.settings.versions.get("python").map(String::as_str);
+    map.extend(python_values(req.python_manager.unwrap_or_default(), python, ctx.name, cfg!(windows)));
     if let Some((version, pm)) = node {
         map.extend([
             ("node_version".to_string(), version.to_string()),
@@ -584,6 +618,20 @@ async fn check_requirements(ctx: &Ctx<'_>, req: &NewProject, template: &Template
                 return Err(Error::msg(format!("{} needs {label} {minimum} or newer, and the active {label} is {have}. Switch to a newer one on the Services page.", template.name)));
             }
             None => return Err(Error::msg(format!("{} needs {label} {minimum} or newer. Install it on the Services page (Languages → {label}) first.", template.name))),
+        }
+    }
+    // uv or conda for a Python template: LampRabit's own (a command shim) or one on PATH.
+    if template.requires.python.is_some() {
+        let tool = match req.python_manager.unwrap_or_default() {
+            crate::config::PythonManager::Uv => Some(("uv", "uv")),
+            crate::config::PythonManager::Conda => Some(("conda", "Conda (Miniforge)")),
+            crate::config::PythonManager::Pip => None,
+        };
+        if let Some((program, label)) = tool
+            && !crate::apps::on_path(program, path)
+            && !has_tool(program).await
+        {
+            return Err(Error::msg(format!("{label} isn't installed. Install it on the Services page, or create the project with pip.")));
         }
     }
     let needs: std::collections::BTreeSet<&str> = steps.iter().flat_map(|&i| template.steps[i].needs.iter().map(String::as_str)).collect();
@@ -700,12 +748,14 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source:
         false => None,
     };
     let node_bin: Option<PathBuf> = node.as_ref().map(|(_, bin)| bin.clone());
-    let pm_commands = match (&node_bin, template.uses_node()) {
-        (Some(bin), true) => {
+    // The chosen package manager for Node templates and for other templates' Node steps
+    // (Laravel's frontend build).
+    let pm_commands = match &node_bin {
+        Some(bin) => {
             let path = crate::apps::node_path(bin, ctx.layout);
             Some(crate::apps::pm_commands(req.package_manager.unwrap_or_default(), &path)?)
         }
-        _ => None,
+        None => None,
     };
     let values = values(
         ctx,
@@ -899,6 +949,22 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn python_projects_with_pip_uv_or_conda() {
+        use crate::config::PythonManager;
+        let get = |m, windows| python_values(m, Some("3.13.9"), "My Shop", windows).into_iter().collect::<BTreeMap<_, _>>();
+        let pip = get(PythonManager::Pip, true);
+        assert_eq!(pip["py.venv"], "python -m venv .venv");
+        assert_eq!(pip["py.add"], r".venv\Scripts\python.exe -m pip install --disable-pip-version-check");
+        let uv = get(PythonManager::Uv, false);
+        assert_eq!(uv["py.venv"], "uv init --bare --no-workspace --name my-shop --python 3.13");
+        assert_eq!((uv["py.add"].as_str(), uv["venv.python"].as_str(), uv["py"].as_str()), ("uv add", ".venv/bin/python", "uv"));
+        // conda's environment keeps python.exe at its root on Windows.
+        let conda = get(PythonManager::Conda, true);
+        assert_eq!(conda["py.venv"], "conda create --yes --quiet --prefix .venv python=3.13 pip");
+        assert_eq!(conda["venv.python"], r".venv\python.exe");
+    }
 
     #[test]
     fn env_files_keep_their_style_and_commented_keys() {

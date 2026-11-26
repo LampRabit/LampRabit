@@ -203,7 +203,14 @@ pub(crate) async fn project_doctor(state: State<'_, AppState>, name: String) -> 
         let file = [".nvmrc", ".node-version"].into_iter().find(|f| dir.join(f).is_file()).map_or("its .nvmrc", |f| if f == ".nvmrc" { "its .nvmrc" } else { "its .node-version" });
         let wanted = chosen.clone().map(|v| (v, "its settings")).or_else(|| node::project_version(&dir).map(|v| (v, file)));
         doctor::NodeInput {
-            installed: node::installed_versions(),
+            // A Node on PATH that NVM doesn't list (Volta, the nodejs.org installer) counts too.
+            installed: {
+                let mut list = node::installed_versions();
+                if list.is_empty() {
+                    list.extend(node::system_node().map(|(v, _)| v));
+                }
+                list
+            },
             nvm: node::nvm_installed(),
             wanted,
             version: node::for_project(chosen.as_deref(), &dir).ok().map(|(v, _)| v),

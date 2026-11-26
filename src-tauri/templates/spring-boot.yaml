@@ -12,11 +12,27 @@ variables:
     label: Java package
     default: com.example.app
     required: true
+  # Spring Initializr's dependencies; web and DevTools are always in.
+  - id: deps
+    label: Dependencies
+    type: multi
+    separator: ","
+    flag: ",{value}"
+    options:
+      - { value: validation, label: Validation }
+      - { value: data-jpa, label: Spring Data JPA }
+      - { value: security, label: Spring Security }
+      - { value: actuator, label: Actuator (health and metrics) }
+      - { value: thymeleaf, label: Thymeleaf }
+      - { value: lombok, label: Lombok }
+      - { value: mysql, label: MySQL / MariaDB driver }
+      - { value: postgresql, label: PostgreSQL driver }
+      - { value: h2, label: H2 (in-memory database) }
 steps:
   # Spring Initializr builds the project; the zip holds it in a folder named after it.
   - name: Generating the project with Spring Initializr
     download:
-      url: "https://start.spring.io/starter.zip?type=maven-project&language=java&groupId=com.example&artifactId={{project}}&name={{project}}&packageName={{vars.package}}&javaVersion={{java_major}}&dependencies=web,devtools&baseDir={{project}}"
+      url: "https://start.spring.io/starter.zip?type=maven-project&language=java&groupId=com.example&artifactId={{project}}&name={{project}}&packageName={{vars.package}}&javaVersion={{java_major}}&dependencies=web,devtools{{vars.deps}}&baseDir={{project}}"
       extract: true
       strip: "{{project}}"
   - name: Using the port LampRabit picks

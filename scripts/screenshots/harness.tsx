@@ -12,6 +12,7 @@ const q = new URLSearchParams(location.search);
 const now = Math.floor(Date.now() / 1000);
 const settings = structuredClone(fixtures.settings) as Record<string, unknown> & { versions: Record<string, string>; sites: Record<string, unknown> };
 settings.rootDir = "C:\\lampRabit";
+if (q.get("profiles")) settings.profiles = [{ name: "Laravel", services: ["apache", "mariadb", "redis", "mailpit"] }, { name: "API", services: ["mysql", "redis"] }];
 settings.versions = { ...settings.versions, apache: "2.4.65", php: "8.4.14", mariadb: "11.8.3", mysql: "8.4.7", mailpit: "1.27.10", redis: "8.2.2", composer: "2.8.12", phpmyadmin: "5.2.3" };
 
 const site = (name: string, framework: string | null, language: string, extra: Record<string, unknown> = {}) => ({
@@ -66,6 +67,11 @@ const services = [
   service("mailpit", "Mailpit", "stopped", 8025, "1.27.10"),
   service("redis", "Redis", "stopped", 6379, "8.2.2"),
 ];
+// PostgreSQL running, for its Services page (extensions).
+if (q.get("pg")) {
+  services.push(service("postgres", "PostgreSQL", "running", 5432, "18.1"));
+  settings.versions.postgres = "18.1";
+}
 // Home with problems: MySQL stopped answering, Redis's port is held by another program.
 if (q.get("issues")) {
   Object.assign(services[2], { health: { status: "degraded", detail: "No answer on port 3307 for 30 s", checkedAt: Date.now(), failures: 3 } });
@@ -223,6 +229,12 @@ const answers: Record<string, unknown> = {
   },
   git_commit_file_diff: edit,
   git_repo_settings: { pull: null, prune: false, autoSetupRemote: false },
+  git_tags: [
+    { name: "v1.2.0", commit: "2e8a8fd", subject: "Release 1.2.0", time: Date.now() / 1000 - 3600 },
+    { name: "v1.1.0", commit: "9b1c0d2", subject: "Release 1.1.0", time: Date.now() / 1000 - 86400 * 9 },
+    { name: "v1.0.0", commit: "41f7aa0", subject: "First release", time: Date.now() / 1000 - 86400 * 40 },
+  ],
+  git_remote_tags: ["v1.0.0", "v1.1.0", "v0.9.0"],
   installed_runtimes: Object.entries(settings.versions).map(([runtime, active]) => ({ runtime, active, versions: [active] })),
   runtime_catalog: [{ runtime: "php", version: "8.4.14", url: "https://example.com/php.zip", sha256: null, archive: "zip", label: null }],
   runtime_requirements: [],
@@ -277,7 +289,25 @@ const answers: Record<string, unknown> = {
   command_history: [],
   php_extensions: [],
   list_backups: [],
-  list_databases: [],
+  list_databases: q.get("pg") ? ["postgres", "shop"] : [],
+  pg_extensions: [
+    { name: "citext", defaultVersion: "1.6", installedVersion: null, comment: "data type for case-insensitive character strings", schema: null },
+    { name: "hstore", defaultVersion: "1.8", installedVersion: null, comment: "data type for storing sets of (key, value) pairs", schema: null },
+    { name: "pg_stat_statements", defaultVersion: "1.11", installedVersion: null, comment: "track planning and execution statistics of all SQL statements executed", schema: null },
+    { name: "pg_trgm", defaultVersion: "1.6", installedVersion: "1.5", comment: "text similarity measurement and index searching based on trigrams", schema: "public" },
+    { name: "pgcrypto", defaultVersion: "1.3", installedVersion: "1.3", comment: "cryptographic functions", schema: "public" },
+    { name: "plpgsql", defaultVersion: "1.0", installedVersion: "1.0", comment: "PL/pgSQL procedural language", schema: "pg_catalog" },
+    { name: "unaccent", defaultVersion: "1.1", installedVersion: null, comment: "text search dictionary that removes accents", schema: null },
+  ],
+  git_stashes: [
+    { index: 0, message: "On master: half-done checkout form", time: Math.floor(Date.now() / 1000) - 3600 },
+    { index: 1, message: "WIP on master: 2e8a8fd Add the hero image", time: Math.floor(Date.now() / 1000) - 86400 * 3 },
+  ],
+  git_stash_files: [
+    { path: "src/App.tsx", from: null, status: "M", additions: 14, deletions: 3, binary: false, untracked: false },
+    { path: "src/App.css", from: null, status: "M", additions: 6, deletions: 0, binary: false, untracked: false },
+    { path: "src/Checkout.tsx", from: null, status: "A", additions: 42, deletions: 0, binary: false, untracked: true },
+  ],
   project_file: null,
   ports_listening: [],
   check_port: true,
@@ -299,6 +329,7 @@ if (theme) document.documentElement.dataset.theme = theme;
 localStorage.clear();
 if (q.get("all")) localStorage.setItem("services-scope", "all");
 if (q.get("nav")) localStorage.setItem("navPosition", q.get("nav")!);
+if (q.get("layout")) localStorage.setItem("home-services-layout", q.get("layout")!);
 
 const { useAppStore } = await import("../../src/lib/store");
 const page = q.get("page");
@@ -307,6 +338,8 @@ const guide = q.get("guide");
 if (guide === "guide" || guide === "import") useAppStore.setState({ setupGuideOpen: guide });
 if (q.get("templateEditor")) useAppStore.setState({ templateEditor: {} });
 if (q.get("palette")) useAppStore.setState({ paletteOpen: true });
+// One service on the Services page (its database client choice, what it needs running).
+if (q.get("service")) useAppStore.setState({ serviceFocus: q.get("service") as never });
 await import("../../src/main");
 
 // Click through to deeper views once the page has drawn: a tab, then a Git view.

@@ -310,10 +310,10 @@ export default function Logs() {
     actions: (
       <>
         <Button size="sm" variant="ghost" onClick={() => copyText(asText(), `${matched.length} log ${matched.length === 1 ? "line" : "lines"}`)} aria-label={`Copy ${matched.length} matching log lines`} title={`Copy ${matched.length} matching lines`}>
-          <Copy size={14} /> <span className="hidden xl:inline">Copy</span>
+          <Copy size={14} /> <span className="hidden lg:inline">Copy</span>
         </Button>
         <Button size="sm" variant="ghost" onClick={() => void exportLogs()} aria-label="Export logs" title="Export logs">
-          <Download size={14} /> <span className="hidden xl:inline">Export</span>
+          <Download size={14} /> <span className="hidden lg:inline">Export</span>
         </Button>
         {clearLogsAction}
       </>
@@ -367,7 +367,7 @@ export default function Logs() {
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden motion-stagger">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden motion-stagger">
       <Card className="mb-3 shrink-0 space-y-2.5 p-3">
         <div className="flex flex-wrap items-center gap-2">
           {/* On narrow screens the sources are a menu; wider ones have the sidebar. */}

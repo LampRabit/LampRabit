@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "../lib/open";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, ExternalLink, Loader2, Radio, Share2, Square } from "lucide-react";
 import clsx from "clsx";
@@ -7,17 +7,20 @@ import { api, type Site, type Tunnel, type TunnelProvider } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
 import { Button, Card, inputClass } from "./ui";
 
-const providerLabel: Record<TunnelProvider, string> = { ngrok: "Ngrok", cloudflare: "Cloudflare" };
+const providerLabel: Record<TunnelProvider, string> = { ngrok: "Ngrok", cloudflare: "Cloudflare", "cloudflare-domain": "your domain" };
 
 export function useTunnels() {
   return useQuery({ queryKey: ["tunnels"], queryFn: api.tunnelList, refetchInterval: 10_000 });
 }
 
-/** Which tunnel tools are installed. */
+/** Which tunnel tools are installed; sharing on your domain also needs Cloudflare connected and the domain set. */
 function useProviders() {
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
+  const connected = useQuery({ queryKey: ["cloudflare-connected"], queryFn: api.cloudflareConnected });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const has = (r: string) => !!installed.data?.find((i) => i.runtime === r)?.active;
-  return { ngrok: has("ngrok"), cloudflare: has("cloudflared") };
+  const domain = settings.data?.cloudflareDomain ?? "";
+  return { ngrok: has("ngrok"), cloudflare: has("cloudflared"), "cloudflare-domain": has("cloudflared") && !!connected.data && !!domain, domain };
 }
 
 function useTunnelActions() {
@@ -95,11 +98,10 @@ export function useProjectTunnel(site: Site) {
 /** "Share" button on a project card: pick a provider to put the project on a public URL. */
 export function ShareButton({ site }: { site: Site }) {
   const providers = useProviders();
-  const navigate = useAppStore((s) => s.navigate);
   const { start } = useTunnelActions();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  const available = (["cloudflare", "ngrok"] as const).filter((p) => providers[p]);
+  const available = (["cloudflare-domain", "cloudflare", "ngrok"] as const).filter((p) => providers[p]);
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
@@ -119,7 +121,7 @@ export function ShareButton({ site }: { site: Site }) {
         >
           <div className="px-2.5 pt-1.5 pb-1 text-xs text-muted">Put {site.domain} on a public URL</div>
           {available.length === 0 ? (
-            <button role="menuitem" onClick={() => navigate("services")} className="w-full rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2">
+            <button role="menuitem" onClick={() => useAppStore.getState().openService("tunnels")} className="w-full rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2">
               Install Cloudflare Tunnel or Ngrok first
             </button>
           ) : (
@@ -134,8 +136,10 @@ export function ShareButton({ site }: { site: Site }) {
                 }}
                 className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
               >
-                {providerLabel[p]}
-                <span className="text-xs text-muted">{p === "cloudflare" ? "No account needed" : "Your ngrok account"}</span>
+                {p === "cloudflare-domain" ? "Your domain" : providerLabel[p]}
+                <span className="truncate pl-2 text-xs text-muted">
+                  {p === "cloudflare-domain" ? `${site.name.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/^-+|-+$/g, "")}.${providers.domain}` : p === "cloudflare" ? "No account needed" : "Your ngrok account"}
+                </span>
               </button>
             ))
           )}
@@ -170,6 +174,7 @@ export function TunnelsPanel() {
               className="h-8 rounded-lg border border-line bg-surface px-2 text-sm"
               aria-label="Tunnel provider"
             >
+              {providers["cloudflare-domain"] && <option value="cloudflare-domain">Your domain</option>}
               {providers.cloudflare && <option value="cloudflare">Cloudflare</option>}
               {providers.ngrok && <option value="ngrok">Ngrok</option>}
             </select>

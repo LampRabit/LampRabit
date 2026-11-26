@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, Copy, FileCode2, FolderOpen } from "lucide-react";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { openUrl } from "../lib/open";
 import { api, type ServiceKind } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
 import { Button, Card } from "./ui";

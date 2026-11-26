@@ -17,6 +17,8 @@ pub(crate) struct AppInfo {
     pub(crate) project_node: Option<String>,
     pub(crate) framework: Option<&'static str>,
     pub(crate) status: apps::AppStatus,
+    /// Ready-made dev server commands (Laravel's, package.json's dev scripts).
+    pub(crate) serve_commands: Vec<apps::ServeCommand>,
 }
 
 /// How a Node project runs, for its panel on the Sites page.
@@ -34,6 +36,7 @@ pub(crate) async fn app_info(state: State<'_, AppState>, name: String) -> Result
         project_node: node::project_version(&dir),
         framework: apps::framework(&dir),
         status: state.apps.status(&name).await,
+        serve_commands: apps::serve_commands(&dir),
     })
 }
 

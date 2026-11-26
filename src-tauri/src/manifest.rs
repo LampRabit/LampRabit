@@ -615,6 +615,11 @@ pub struct Source {
     /// How many lines to offer (`per-line`; 4 when not given).
     #[serde(default)]
     pub keep: Option<usize>,
+    /// Versions never offered, for releases published broken upstream (`json` and `page`
+    /// sources): the next one down is offered instead. pgAdmin 9.19's wheel lacks its
+    /// JavaScript bundles, so its pages never load.
+    #[serde(default)]
+    pub skip: Vec<String>,
     /// Only tags ending with one of these suffixes, which the version drops; the value is
     /// the label shown next to it (ClickHouse's `-lts`, `-stable`).
     #[serde(default)]

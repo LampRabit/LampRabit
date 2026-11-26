@@ -78,6 +78,17 @@ pub(crate) async fn control_command(app: AppHandle, cmd: &str, args: serde_json:
             Ok(to_value(create_project(app.clone(), state.clone(), request).await?)?)
         }
         "templates" => Ok(to_value(list_templates(state.clone()).await?)?),
+        // Templates from the CLI and MCP: an assistant drafts one from a project (or from an
+        // existing template, or the annotated example), then saves it after the same checks
+        // the template editor runs.
+        "template.from_project" => Ok(json!(template_from_project(state.clone(), text("name")?).await?)),
+        "template.show" => {
+            let id = text("id")?;
+            let (_, layout) = state.snapshot().await;
+            Ok(json!(templates::source(&layout, &id).ok_or_else(|| Error::msg(format!("There's no template {id}. `lamprabit templates` lists them.")))?))
+        }
+        "template.example" => Ok(json!(templates::EXAMPLE)),
+        "template.save" => Ok(json!(save_template(app.clone(), state.clone(), text("yaml")?, args["replace"].as_bool().unwrap_or(false)).await?)),
         "runtimes" => Ok(to_value(installed_runtimes(state.clone()).await?)?),
         "runtime.available" => Ok(to_value(runtime_catalog(state.clone(), runtime("name")?, None).await?)?),
         "runtime.install" => {

@@ -27,6 +27,11 @@ Usage: lamprabit <command> [arguments] [--json] [--no-launch] [--yes] [--dry-run
   terminal [<project>]           A terminal in the project (or www), with LampRabit's commands
   project create <name> --template <id> [--php <version>] [--database <name>]
   templates                      Project templates
+  template show <id>             A template's YAML (yours or built-in), to start a new one from
+  template example               The annotated example: every step and placeholder
+  template from <project>        Draft a template that recreates a project's setup
+  template save <file.yaml> [--replace]
+                                 Check a template and add it to your templates (- reads stdin)
 
   runtimes [--available <id>]    Installed runtimes, or what <id> can install
   runtime install <id> [version] Download and use it (a line like 8.4 picks its newest)
@@ -76,6 +81,7 @@ fn parse(raw: Vec<String>) -> Args {
             "--dry-run" => a.dry_run = true,
             "--follow" | "-f" => a.follow = true,
             "--fix-all" => a.options.push(("fix-all".into(), String::new())),
+            "--replace" => a.options.push(("replace".into(), String::new())),
             s if s.starts_with("--") => {
                 let key = s.trim_start_matches("--").to_string();
                 let (key, value) = match key.split_once('=') {
@@ -256,6 +262,20 @@ async fn run(a: &Args) -> Result<(), Failure> {
             ("project.create", req, print_value)
         }
         ("templates", _) => ("templates", json!({}), print_templates),
+        ("template", Some("show")) => ("template.show", json!({"id": need(2, "the template id (lamprabit templates lists them)")?}), print_value),
+        ("template", Some("example")) => ("template.example", json!({}), print_value),
+        ("template", Some("from")) => ("template.from_project", json!({"name": need(2, "the project's name")?}), print_value),
+        ("template", Some("save")) => {
+            let file = need(2, "the template file (or - for stdin)")?;
+            let yaml = if file == "-" {
+                let mut text = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut text).map_err(|e| Failure::Failed(format!("Couldn't read stdin: {e}")))?;
+                text
+            } else {
+                std::fs::read_to_string(&file).map_err(|e| Failure::Failed(format!("Couldn't read {file}: {e}")))?
+            };
+            ("template.save", json!({"yaml": yaml, "replace": a.opt("replace").is_some()}), print_saved_template)
+        }
         ("runtimes", _) => match a.opt("available") {
             Some(id) => ("runtime.available", json!({"name": id}), print_releases),
             None => ("runtimes", json!({}), print_runtimes),
@@ -276,7 +296,7 @@ async fn run(a: &Args) -> Result<(), Failure> {
         (other, _) => return Err(Failure::Usage(format!("Unknown command \"{other}\"."))),
     };
     // A dry run of a change says what it would send, and stops.
-    let changes = !matches!(cmd, "status" | "services" | "profiles" | "projects" | "templates" | "runtimes" | "runtime.available" | "logs" | "doctor" | "git.status" | "config" | "files" | "php.extensions");
+    let changes = !matches!(cmd, "status" | "services" | "profiles" | "projects" | "templates" | "template.show" | "template.example" | "template.from_project" | "runtimes" | "runtime.available" | "logs" | "doctor" | "git.status" | "config" | "files" | "php.extensions");
     if a.dry_run && changes {
         println!("Would run {cmd} with {req}");
         return Ok(());
@@ -339,6 +359,10 @@ async fn run(a: &Args) -> Result<(), Failure> {
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
+}
+
+fn print_saved_template(v: &Value) {
+    println!("Saved template {}. It's in New project now; `lamprabit project create <name> --template {}` uses it.", v.as_str().unwrap_or_default(), v.as_str().unwrap_or_default());
 }
 
 fn print_value(v: &Value) {

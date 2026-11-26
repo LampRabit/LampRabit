@@ -1,4 +1,5 @@
-//! Public tunnels (Ngrok, Cloudflare quick tunnels) for sharing a site or a local port.
+//! Public tunnels (Ngrok, Cloudflare quick tunnels, Cloudflare named tunnels on the user's
+//! own domain) for sharing a site or a local port.
 //! Requests are forwarded to the site's HTTP port with its own Host header, so virtual
 //! hosts keep working behind the public URL.
 
@@ -28,6 +29,9 @@ const KEYRING_NGROK: &str = "ngrok-authtoken";
 pub enum Provider {
     Ngrok,
     Cloudflare,
+    /// A named tunnel at <name>.<the user's domain>, after `cloudflared tunnel login`.
+    #[serde(rename = "cloudflare-domain")]
+    CloudflareDomain,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -122,13 +126,19 @@ impl Tunnels {
             return Err(Error::msg(format!("{target} is already being shared.")));
         }
 
-        let (runtime, version) = match provider {
-            Provider::Ngrok => ("ngrok", settings.versions.ngrok.clone()),
-            Provider::Cloudflare => ("cloudflared", settings.versions.cloudflared.clone()),
-        };
         let label = if provider == Provider::Ngrok { "Ngrok" } else { "Cloudflare Tunnel (cloudflared)" };
-        let version = version.ok_or_else(|| Error::msg(format!("Install {label} from Services → Developer tools first.")))?;
-        let program = layout.bin(runtime, &version).join(exe(runtime));
+        let program = match provider {
+            Provider::Ngrok => {
+                let version = settings.versions.ngrok.clone().ok_or_else(|| Error::msg("Install Ngrok from Services → Developer tools first."))?;
+                layout.bin("ngrok", &version).join(exe("ngrok"))
+            }
+            _ => cloudflared(settings, layout)?,
+        };
+        // A named tunnel is ready before it runs: its address is known, its DNS record set.
+        let named = match provider {
+            Provider::CloudflareDomain => Some(prepare_named(app, settings, layout, &program, &id).await?),
+            _ => None,
+        };
 
         let mut cmd = tokio::process::Command::new(&program);
         match provider {
@@ -148,13 +158,23 @@ impl Tunnels {
                     cmd.args(["--http-host-header", h]);
                 }
             }
+            Provider::CloudflareDomain => {
+                let n = named.as_ref().expect("prepared above");
+                cmd.args(["tunnel", "--no-autoupdate", "run", "--url", &upstream]);
+                if let Some(h) = &host {
+                    cmd.args(["--http-host-header", h]);
+                }
+                cmd.arg("--cred-file").arg(&n.credentials).arg(&n.name);
+            }
         }
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
         procgroup::prepare(&mut cmd);
         let mut child = cmd.spawn().map_err(|e| Error::msg(format!("Couldn't start {label}: {e}")))?;
         let group = ProcGroup::attach(&child).ok();
 
-        let info = Tunnel { id: id.clone(), provider, site: site.map(|s| s.name.clone()), target: target.clone(), url: None, status: "starting", error: None };
+        // A named tunnel's address is known up front; it's online once a connection registers.
+        let url = named.map(|n| format!("https://{}", n.hostname));
+        let info = Tunnel { id: id.clone(), provider, site: site.map(|s| s.name.clone()), target: target.clone(), url, status: "starting", error: None };
         let (stop_tx, stop_rx) = oneshot::channel();
         self.entries.lock().await.insert(id.clone(), Entry { info: info.clone(), stop: Some(stop_tx) });
         logs::system(app, Level::Info, format!("Sharing {target} with {label}"));
@@ -208,12 +228,18 @@ fn watch_output(app: AppHandle, entries: Arc<Mutex<HashMap<String, Entry>>>, id:
             let (url, error) = match provider {
                 Provider::Ngrok => parse_ngrok(&line),
                 Provider::Cloudflare => (parse_cloudflare(&line), None),
+                Provider::CloudflareDomain => (None, None),
             };
-            if url.is_none() && error.is_none() {
+            let registered = provider == Provider::CloudflareDomain && line.contains("Registered tunnel connection");
+            if url.is_none() && error.is_none() && !registered {
                 continue;
             }
             let mut map = entries.lock().await;
             if let Some(e) = map.get_mut(&id) {
+                if registered && e.info.status != "online" {
+                    e.info.status = "online";
+                    logs::system(&app, Level::Info, format!("{} is public at {}", e.info.target, e.info.url.clone().unwrap_or_default()));
+                }
                 if let Some(url) = url {
                     e.info.url = Some(url.clone());
                     e.info.status = "online";
@@ -227,6 +253,99 @@ fn watch_output(app: AppHandle, entries: Arc<Mutex<HashMap<String, Entry>>>, id:
             emit(&app);
         }
     });
+}
+
+/// The installed cloudflared.
+fn cloudflared(settings: &Settings, layout: &Layout) -> Result<std::path::PathBuf> {
+    let version = settings.versions.cloudflared.clone().ok_or_else(|| Error::msg("Install Cloudflare Tunnel (cloudflared) from Services → Developer tools first."))?;
+    Ok(layout.bin("cloudflared", &version).join(exe("cloudflared")))
+}
+
+/// The account certificate `cloudflared tunnel login` saves; it authorises one domain.
+pub fn cloudflare_cert() -> Option<std::path::PathBuf> {
+    std::env::var_os("TUNNEL_ORIGIN_CERT").map(Into::into).or_else(|| dirs::home_dir().map(|h| h.join(".cloudflared").join("cert.pem")))
+}
+
+pub fn cloudflare_connected() -> bool {
+    cloudflare_cert().is_some_and(|c| c.is_file())
+}
+
+/// Connects Cloudflare: cloudflared opens the browser, the user signs in and picks the
+/// domain, and cloudflared saves the certificate. Waits until that's done (or 10 minutes).
+pub async fn cloudflare_login(app: &AppHandle, settings: &Settings, layout: &Layout) -> Result<()> {
+    if cloudflare_connected() {
+        return Ok(());
+    }
+    let mut cmd = tokio::process::Command::new(cloudflared(settings, layout)?);
+    cmd.args(["tunnel", "login"]).stdin(Stdio::null()).kill_on_drop(true);
+    procgroup::prepare(&mut cmd);
+    logs::system(app, Level::Info, "Connecting Cloudflare: sign in and choose your domain in the browser");
+    let out = tokio::time::timeout(std::time::Duration::from_secs(600), cmd.output())
+        .await
+        .map_err(|_| Error::msg("Connecting Cloudflare timed out. Try again and finish signing in within 10 minutes."))??;
+    for line in String::from_utf8_lossy(&out.stderr).lines().chain(String::from_utf8_lossy(&out.stdout).lines()) {
+        logs::push(app, "system", "output", format!("[cloudflared] {line}"));
+    }
+    if !cloudflare_connected() {
+        return Err(Error::msg(format!("Cloudflare wasn't connected: {}", crate::error::last_line(&out.stderr).unwrap_or_else(|| "the sign-in didn't finish".into()))));
+    }
+    logs::system(app, Level::Info, "Cloudflare connected");
+    Ok(())
+}
+
+struct Named {
+    name: String,
+    hostname: String,
+    credentials: std::path::PathBuf,
+}
+
+/// The public name for a share: the project's folder name (or `port-3000`) as one DNS label.
+fn label(id: &str) -> String {
+    let l: String = id.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    l.trim_matches('-').chars().take(63).collect()
+}
+
+/// Runs a cloudflared tunnel subcommand with the account certificate; (succeeded, output).
+async fn cloudflared_tunnel(program: &std::path::Path, cert: &std::path::Path, args: &[&std::ffi::OsStr]) -> Result<(bool, String)> {
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.arg("--origincert").arg(cert).arg("tunnel").args(args).stdin(Stdio::null());
+    procgroup::prepare(&mut cmd);
+    let out = cmd.output().await.map_err(|e| Error::msg(format!("Couldn't run cloudflared: {e}")))?;
+    Ok((out.status.success(), format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))))
+}
+
+/// Gets a share's named tunnel ready: `lamprabit-<label>`, created once (its credentials
+/// kept in etc/cloudflared), and its DNS record <label>.<domain> pointed at it.
+async fn prepare_named(app: &AppHandle, settings: &Settings, layout: &Layout, program: &std::path::Path, id: &str) -> Result<Named> {
+    use std::ffi::OsStr;
+    let domain = settings.cloudflare_domain.trim().trim_matches('.').to_lowercase();
+    if domain.is_empty() {
+        return Err(Error::msg("Set your Cloudflare domain in Settings → Sharing first."));
+    }
+    let cert = cloudflare_cert().filter(|c| c.is_file()).ok_or_else(|| Error::msg("Connect Cloudflare in Settings → Sharing first."))?;
+    let label = label(id);
+    let name = format!("lamprabit-{label}");
+    let hostname = format!("{label}.{domain}");
+    let dir = layout.etc("cloudflared");
+    std::fs::create_dir_all(&dir)?;
+    let credentials = dir.join(format!("{name}.json"));
+    let last = |t: &str| t.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("unknown error").to_string();
+    if !credentials.is_file() {
+        let (ok, text) = cloudflared_tunnel(program, &cert, &[OsStr::new("create"), OsStr::new("--credentials-file"), credentials.as_os_str(), OsStr::new(&name)]).await?;
+        if !ok {
+            // Made before (another install, a lost folder): fetch its credentials instead.
+            let (ok, _) = cloudflared_tunnel(program, &cert, &[OsStr::new("token"), OsStr::new("--cred-file"), credentials.as_os_str(), OsStr::new(&name)]).await?;
+            if !ok {
+                return Err(Error::msg(format!("Couldn't create the Cloudflare tunnel {name}: {}", last(&text))));
+            }
+        }
+        logs::system(app, Level::Info, format!("Cloudflare tunnel {name} is ready"));
+    }
+    let (ok, text) = cloudflared_tunnel(program, &cert, &[OsStr::new("route"), OsStr::new("dns"), OsStr::new("--overwrite-dns"), OsStr::new(&name), OsStr::new(&hostname)]).await?;
+    if !ok {
+        return Err(Error::msg(format!("Couldn't point {hostname} at the tunnel: {}. Is {domain} the domain you picked when connecting Cloudflare?", last(&text))));
+    }
+    Ok(Named { name, hostname, credentials })
 }
 
 /// ngrok logs JSON lines; "started tunnel" carries the URL, "eror"/"crit" levels the reason.
@@ -256,6 +375,14 @@ mod tests {
         assert_eq!(parse_ngrok(ok).0.as_deref(), Some("https://ab12.ngrok-free.app"));
         let bad = r#"{"lvl":"eror","msg":"session closing","err":"authentication failed: The authtoken you specified is invalid.\n\nERR_NGROK_107"}"#;
         assert_eq!(parse_ngrok(bad).1.as_deref(), Some("authentication failed: The authtoken you specified is invalid."));
+    }
+
+    #[test]
+    fn makes_dns_labels() {
+        assert_eq!(label("My_Shop"), "my-shop");
+        assert_eq!(label("port-3000"), "port-3000");
+        assert_eq!(label("-x.y-"), "x-y");
+        assert_eq!(label(&"a".repeat(80)).len(), 63);
     }
 
     #[test]

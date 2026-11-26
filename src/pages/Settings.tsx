@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { openUrl } from "../lib/open";
 import {
   CheckCircle2,
   CircleSlash,
@@ -22,6 +23,7 @@ import {
 import clsx from "clsx";
 import { allServers, api, runtimeLabels, type EnvPaths, type PortStatus, type Runtime, type Server, type Settings as SettingsT } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
+import { DB_KINDS, dbTools, preferredTool } from "../lib/tools";
 import { sections } from "../lib/settingsSections";
 import { useTheme } from "../lib/theme";
 import { useMotion } from "../lib/motion";
@@ -37,6 +39,7 @@ import { portFields, portShown, serverNotes, type PortKey } from "../lib/setting
 import { useCatalog } from "../lib/catalog";
 import { Button, Card, Segmented, Switch, inputClass } from "../components/ui";
 import { usePageToolbar } from "../components/PageToolbar";
+import { FreePort } from "../components/HomeStatus";
 
 type Os = EnvPaths["os"];
 
@@ -54,7 +57,6 @@ const numberInput = clsx(inputClass.replace("w-full", ""), "w-24 font-mono tabul
 export default function Settings() {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
-  const navigate = useAppStore((s) => s.navigate);
   const { theme, setTheme } = useTheme();
   const { motion, setMotion } = useMotion();
   const navEdge = useAppStore((s) => s.navPosition);
@@ -161,7 +163,7 @@ export default function Settings() {
       // controls, so they come from the latest copy.
       const latest = await api.getSettings();
       // Switches that apply at once (dumps, the MCP server) keep their saved value.
-      await api.saveSettings({ ...draft, versions: latest.versions, sites: latest.sites, profiles: latest.profiles, catchDumps: latest.catchDumps, mcpServer: latest.mcpServer });
+      await api.saveSettings({ ...draft, versions: latest.versions, sites: latest.sites, profiles: latest.profiles, catchDumps: latest.catchDumps, mcpServer: latest.mcpServer, cloudflareDomain: latest.cloudflareDomain, dbClients: latest.dbClients });
       for (const runtime of Object.keys(versions ?? {}) as Runtime[]) {
         const version = versions?.[runtime];
         if (version && version !== activeVersions?.[runtime]) await api.setActiveVersion(runtime, version);
@@ -429,6 +431,7 @@ export default function Settings() {
                 {draft.defaultDatabase === "mysql" ? "MySQL" : "MariaDB"} isn't installed, so {dbInstalled.mariadb ? "MariaDB" : "MySQL"} is used until it is.
               </p>
             )}
+            <DefaultDbTools />
           </Section>
 
           <Section id="versions" title="Active versions" subtitle="Which installed version each service runs. Sites can pick their own PHP.">
@@ -461,7 +464,7 @@ export default function Settings() {
                       </select>
                     ) : (
                       <button
-                        onClick={() => navigate("services")}
+                        onClick={() => useAppStore.getState().openService(runtime)}
                         className="w-full rounded-lg border border-dashed border-line px-3 py-2 text-left text-sm text-muted hover:border-accent hover:text-accent-text"
                       >
                         Not installed. Install from Services
@@ -520,7 +523,7 @@ export default function Settings() {
           <Section id="email" title="Email" subtitle="Mail your apps send lands in Mailpit instead of real inboxes.">
             {!draft.versions.mailpit && (
               <Row label="Mailpit" hint="Not installed yet.">
-                <Button size="sm" variant="soft" onClick={() => navigate("services")}>
+                <Button size="sm" variant="soft" onClick={() => useAppStore.getState().openService("mailpit")}>
                   Install from Services
                 </Button>
               </Row>
@@ -761,6 +764,30 @@ function ToggleRow({ label, hint, checked, onChange }: { label: string; hint: st
   );
 }
 
+/**
+ * Which tool each database opens in from Home and the Sites page, for databases that more
+ * than one installed tool can open. Applies at once; the same choice is on each database's
+ * page in Services.
+ */
+function DefaultDbTools() {
+  const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const choose = useMutation({ mutationFn: ({ kind, tool }: { kind: string; tool: string }) => api.setDbClient(kind, tool), onError: notifyError });
+  return DB_KINDS.filter((kind) => settings.data?.versions[kind]).map((kind) => {
+    const tools = dbTools(kind, sites.data, settings.data);
+    if (tools.length < 2) return null;
+    return (
+      <Row key={kind} label={`Open ${runtimeLabels[kind]} in`} hint="The app its Open button uses on Home, and for projects' databases. The ⋯ menu still offers the others.">
+        <Segmented
+          value={preferredTool(kind, tools, settings.data)!.tool}
+          onChange={(tool) => choose.mutate({ kind, tool })}
+          options={tools.map((t) => ({ value: t.tool, label: runtimeLabels[t.tool] ?? t.tool }))}
+        />
+      </Row>
+    );
+  });
+}
+
 /** Live status of a port field: free, LampRabit's own, or taken by another program. */
 function PortState({ port, saved, status, hint }: { port: number; saved?: number; status?: PortStatus; hint: string }) {
   const edited = saved !== undefined && port !== saved;
@@ -787,14 +814,23 @@ function PortState({ port, saved, status, hint }: { port: number; saved?: number
     text = status.owner ? `Taken by ${status.owner.name} (PID ${status.owner.pid})` : "Taken by another program";
   }
 
+  const taken = !edited && status && !status.free && !status.usedByService;
   return (
-    <span
-      className={clsx("mt-0.5 flex items-center gap-1.5 text-xs", tone === "ok" && "text-muted", tone === "muted" && "text-muted", tone === "warn" && "text-warn")}
-      title={status?.owner?.note ?? undefined}
-    >
-      <span className={clsx("size-1.5 shrink-0 rounded-full", tone === "ok" ? "bg-ok" : tone === "warn" ? "bg-warn" : "bg-muted/60")} />
-      <span className="truncate">{text}</span>
-    </span>
+    <>
+      <span
+        className={clsx("mt-0.5 flex items-center gap-1.5 text-xs", tone === "ok" && "text-muted", tone === "muted" && "text-muted", tone === "warn" && "text-warn")}
+        title={status?.owner?.note ?? undefined}
+      >
+        <span className={clsx("size-1.5 shrink-0 rounded-full", tone === "ok" ? "bg-ok" : tone === "warn" ? "bg-warn" : "bg-muted/60")} />
+        <span className="truncate">{text}</span>
+      </span>
+      {taken && status.owner && (
+        <span className="mt-1 flex flex-col items-start gap-1">
+          {status.owner.note && <span className="text-xs text-muted">{status.owner.note}</span>}
+          <FreePort owner={status.owner} />
+        </span>
+      )}
+    </>
   );
 }
 
@@ -842,7 +878,58 @@ function SharingSection() {
         </div>
       </Row>
       <Row label="Cloudflare quick tunnels" hint="No account or token: install Cloudflare Tunnel from Services. Each share gets a random trycloudflare.com address until you stop it." />
+      <CloudflareDomainRows />
     </Section>
+  );
+}
+
+/**
+ * Sharing on the user's own domain: connect Cloudflare once (sign in through the browser,
+ * pick the domain), then each project shares at <project>.<domain>.
+ */
+function CloudflareDomainRows() {
+  const notify = useAppStore((s) => s.notify);
+  const connected = useQuery({ queryKey: ["cloudflare-connected"], queryFn: api.cloudflareConnected });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const [domain, setDomain] = useState<string | null>(null);
+  const shown = domain ?? settings.data?.cloudflareDomain ?? "";
+  const login = useMutation({ mutationFn: api.cloudflareLogin, onSuccess: () => notify("info", "Cloudflare connected"), onError: notifyError });
+  const save = useMutation({
+    // Only this field: the rest of the page has its own Apply.
+    mutationFn: async () => api.saveSettings({ ...(await api.getSettings()), cloudflareDomain: shown }),
+    onSuccess: () => {
+      setDomain(null);
+      notify("info", shown ? `Projects share at <project>.${shown.trim().toLowerCase()}` : "Cloudflare domain removed");
+    },
+    onError: notifyError,
+  });
+  return (
+    <>
+      <Row
+        label="Cloudflare account"
+        hint={
+          connected.data
+            ? "Connected. To use another domain, run cloudflared tunnel login again or remove .cloudflared/cert.pem in your home folder."
+            : "Share projects on your own domain. Your browser opens Cloudflare: sign in and pick the domain to use. Needs Cloudflare Tunnel from Services."
+        }
+      >
+        {connected.data ? (
+          <span className="text-sm text-ok">Connected</span>
+        ) : (
+          <Button onClick={() => login.mutate()} disabled={login.isPending}>
+            {login.isPending ? "Waiting for the browser…" : "Connect Cloudflare"}
+          </Button>
+        )}
+      </Row>
+      <Row label="Your domain" hint="The domain you picked when connecting, for example example.com. A project called shop shares at shop.example.com." wide>
+        <div className="flex gap-2">
+          <input className={inputClass} placeholder="example.com" value={shown} onChange={(e) => setDomain(e.target.value)} autoComplete="off" aria-label="Your Cloudflare domain" />
+          <Button variant="primary" className="h-auto" onClick={() => save.mutate()} disabled={domain === null || save.isPending}>
+            Save
+          </Button>
+        </div>
+      </Row>
+    </>
   );
 }
 

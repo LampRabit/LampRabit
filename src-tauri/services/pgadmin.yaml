@@ -8,15 +8,21 @@ blurb: PostgreSQL admin
 origin: "PostgreSQL's official admin tool from PyPI, in its own Python environment (needs Python 3.10–3.14); LampRabit's PostgreSQL is added for you"
 homepage: https://www.pgadmin.org
 license: PostgreSQL
-# PyPI's latest pgAdmin 4: one wheel for every platform, with PyPI's SHA-256.
+# PyPI's newest pgAdmin 4: one wheel for every platform, with PyPI's SHA-256.
 source:
   json:
     url: https://pypi.org/pypi/pgadmin4/json
-    version: info.version
-    files: urls
-    file: { filename: "*.whl" }
+    # Every release (keyed by version), so a skipped one falls back to the one before.
+    items: releases.*
+    version: "@key"
+    files: ""
+    file: { filename: "*.whl", yanked: "false" }
     download: "{file.url}"
     sha256: "{file.digests.sha256}"
+  versions: newest
+  # 9.19's wheel on PyPI has no static/js/generated bundles: pgadmin.test stays on
+  # "Loading pgAdmin 4…" with 404s (checked 2026-11-24; 9.18 has all 49 files).
+  skip: ["9.19"]
   archive: file
   # pip only installs a wheel under its real file name.
   save_as: "pgadmin4-{version}-py3-none-any.whl"

@@ -70,6 +70,44 @@ pub fn scripts(dir: &Path) -> BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
+/// composer.json's scripts (Laravel's `dev` runs serve, the queue, logs and Vite together).
+pub fn composer_scripts(dir: &Path) -> BTreeMap<String, String> {
+    let json: Option<serde_json::Value> = std::fs::read_to_string(dir.join("composer.json")).ok().and_then(|t| serde_json::from_str(&t).ok());
+    json.and_then(|j| j["scripts"].as_object().cloned())
+        .map(|m| m.into_iter().map(|(k, v)| (k, v.to_string())).collect())
+        .unwrap_or_default()
+}
+
+/// A ready-made way to run a project's dev server, for the Start button's menu.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServeCommand {
+    pub label: String,
+    pub command: String,
+}
+
+/// The ways a project can run its dev server: Laravel's `composer run dev` and `php artisan
+/// serve` (both listen on the port LampRabit picks, through SERVER_PORT), then package.json's
+/// dev scripts.
+pub fn serve_commands(dir: &Path) -> Vec<ServeCommand> {
+    let mut out = Vec::new();
+    if dir.join("artisan").is_file() {
+        if composer_scripts(dir).contains_key("dev") {
+            out.push(ServeCommand { label: "Laravel: serve, queue, logs and Vite".into(), command: "composer run dev".into() });
+        }
+        out.push(ServeCommand { label: "Laravel: PHP's server".into(), command: "php artisan serve".into() });
+    }
+    let pm = detect_package_manager(dir);
+    let flag = matches!(framework(dir), Some("Vite" | "Astro" | "SvelteKit" | "Nuxt")) && crate::sites::language(dir) != crate::sites::Language::Php;
+    let separator = if pm == PackageManager::Npm { " --" } else { "" };
+    for name in DEV_SCRIPTS.into_iter().filter(|s| scripts(dir).contains_key(*s)) {
+        let port_arg = if flag { format!("{separator} --host 127.0.0.1 --port {{port}}") } else { String::new() };
+        let label = if crate::sites::language(dir) == crate::sites::Language::Php { format!("Assets: {name} script") } else { format!("{name} script") };
+        out.push(ServeCommand { label, command: format!("{} run {name}{port_arg}", pm.id()) });
+    }
+    out
+}
+
 fn depends_on(pkg: &serde_json::Value, name: &str) -> bool {
     ["dependencies", "devDependencies"].iter().any(|d| pkg[*d].get(name).is_some())
 }
@@ -151,7 +189,7 @@ pub fn pm_commands(pm: PackageManager, path: &OsString) -> Result<PmCommands> {
 
 /// PATH for a project's Node processes: its Node version first, then LampRabit's commands.
 pub fn node_path(bin: &Path, layout: &Layout) -> OsString {
-    let existing = std::env::var_os("PATH").unwrap_or_default();
+    let existing = crate::overrides::fresh_path();
     std::env::join_paths([bin.to_path_buf(), shims::dir(layout)].into_iter().chain(std::env::split_paths(&existing))).unwrap_or(existing)
 }
 
@@ -177,6 +215,12 @@ pub fn suggest(dir: &Path, port: u16) -> NodeApp {
     let script = DEV_SCRIPTS.into_iter().find(|s| scripts.contains_key(*s));
     let file = SERVER_FILES.into_iter().find(|f| dir.join(f).exists());
     let php = crate::sites::language(dir) == crate::sites::Language::Php;
+    // Laravel runs its own dev servers: `composer run dev` when the project has it (Laravel 11
+    // and later), else `php artisan serve`; the Vite script is in the Start button's menu.
+    if php && dir.join("artisan").is_file() {
+        let command = if composer_scripts(dir).contains_key("dev") { "composer run dev" } else { "php artisan serve" };
+        return NodeApp { mode: AppMode::Command, command: command.into(), file: "server.js".into(), watch: true, port, node: None, package_manager: None, serve: false };
+    }
     let (mode, command) = match (script, file) {
         (Some(s), _) => {
             let port_arg = if flag && !php { format!(" {separator} --host 127.0.0.1 --port {{port}}").replace("  ", " ") } else { String::new() };
@@ -506,6 +550,9 @@ impl Apps {
             .env("PORT", config.port.to_string())
             // Dev servers that read HOST bind where the proxy looks.
             .env("HOST", "127.0.0.1")
+            // `php artisan serve` (and `composer run dev`, which runs it) listen on these.
+            .env("SERVER_PORT", config.port.to_string())
+            .env("SERVER_HOST", "127.0.0.1")
             // Dev servers otherwise try to open a browser or colour their output.
             .env("BROWSER", "none")
             .env("FORCE_COLOR", "0")
@@ -821,7 +868,7 @@ impl Apps {
         match node::for_project(chosen.as_deref(), &dir) {
             Ok((_, bin)) => node_path(&bin, layout),
             Err(_) => {
-                let existing = std::env::var_os("PATH").unwrap_or_default();
+                let existing = crate::overrides::fresh_path();
                 std::env::join_paths(std::iter::once(shims::dir(layout)).chain(std::env::split_paths(&existing))).unwrap_or(existing)
             }
         }
@@ -951,12 +998,18 @@ mod tests {
         assert_eq!(framework(&vite), Some("Vite"));
         assert_eq!(crate::sites::language(&vite), crate::sites::Language::Node);
 
-        // Laravel's Vite is an asset server: it runs, but the domain stays PHP's.
+        // Laravel runs its own server next to the site (the domain stays PHP's): composer run
+        // dev when composer.json has it, php artisan serve otherwise; Vite is in the menu.
         let laravel = project(&[("package.json", r#"{"scripts":{"dev":"vite"},"devDependencies":{"vite":"^7"}}"#), ("artisan", "")]);
         let s = suggest(&laravel, 0);
         assert_eq!(crate::sites::language(&laravel), crate::sites::Language::Php);
         assert!(!s.serve);
-        assert_eq!(s.command, "npm run dev");
+        assert_eq!(s.command, "php artisan serve");
+        let menu: Vec<String> = serve_commands(&laravel).into_iter().map(|c| c.command).collect();
+        assert_eq!(menu, ["php artisan serve", "npm run dev"]);
+        let laravel11 = project(&[("artisan", ""), ("composer.json", r#"{"scripts":{"dev":["npx concurrently \"php artisan serve\""]}}"#)]);
+        assert_eq!(suggest(&laravel11, 0).command, "composer run dev");
+        assert_eq!(serve_commands(&laravel11)[0].command, "composer run dev");
 
         let library = project(&[("package.json", r#"{"scripts":{"test":"vitest"}}"#)]);
         assert!(!runnable(&library), "nothing starts a server");

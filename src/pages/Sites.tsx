@@ -1,10 +1,13 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { openUrl } from "../lib/open";
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
+  Settings2,
   Code2,
   Copy,
   Database,
@@ -29,7 +32,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
-import { api, runtimeLabels, serviceLabels, type AppStatus, type CommandRun, type Language, type ProjectFacts, type ProjectFile, type ProjectProcess, type Server, type DomainTarget, type ServiceKind, type Settings, type Site, type SitesInfo } from "../lib/api";
+import { api, runtimeLabels, serviceLabels, type AppInfo, type AppStatus, type CommandRun, type Language, type ProjectFacts, type ProjectFile, type ProjectProcess, type Server, type DomainTarget, type ServiceKind, type Settings, type Site, type SitesInfo } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
 import Dialog from "../components/Dialog";
 import ProjectDomains from "../components/ProjectDomains";
@@ -38,12 +41,12 @@ import ProjectGit, { CloneDialog } from "../components/ProjectGit";
 import ProjectDoctor from "../components/ProjectDoctor";
 import ProjectProcesses, { processFrom } from "../components/ProjectProcesses";
 import { usePageToolbar } from "../components/PageToolbar";
-import { toolUrl } from "../lib/tools";
+import { databaseUrl } from "../lib/tools";
 import { useHotkeys } from "../lib/shortcuts";
 import { formatAgo, useNow } from "../lib/time";
 import { Button, Card, Switch, inputClass } from "../components/ui";
 import { ShareButton, TunnelRow, useProjectTunnel } from "../components/Tunnels";
-import { AppControls, CommandPrompt, CommandsPanel, OutputPanel, Row, ServeSettings, appCommand, isActive, stateStyle, useAppActions, useAppInfo, useAppStatuses, useUnreadOutput } from "../components/ProjectRun";
+import { AppControls, CommandPrompt, CommandsPanel, OutputPanel, Row, ServeSettings, appCommand, isActive, isLaravel, stateStyle, useAppActions, useAppInfo, useAppStatuses, useUnreadOutput } from "../components/ProjectRun";
 
 const languageLabel: Record<Language, string> = { php: "PHP", node: "Node.js", java: "Java", python: "Python", go: "Go", rust: "Rust", static: "Static" };
 
@@ -102,10 +105,10 @@ export default function Sites() {
   const siteToolbarActions = (
     <>
       <Button size="sm" variant="ghost" onClick={() => setCloning(true)} title="Clone a Git repository into www" aria-label="Clone repository">
-        <GitBranch size={15} /> <span className="hidden xl:inline">Clone</span>
+        <GitBranch size={15} /> <span className="hidden lg:inline">Clone</span>
       </Button>
       <Button size="sm" variant="primary" onClick={() => openNewProject(true)} title="New project (N)" aria-label="New project">
-        <FolderPlus size={15} /> <span className="hidden xl:inline">New project</span>
+        <FolderPlus size={15} /> <span className="hidden lg:inline">New project</span>
       </Button>
       <Button size="sm" variant="ghost" onClick={() => info.refetch()} disabled={info.isFetching} aria-label="Refresh sites" title="Refresh sites">
         <RefreshCw size={15} className={clsx(info.isFetching && "animate-spin")} />
@@ -431,8 +434,21 @@ function ProjectRow({ site, status, selected, onSelect }: { site: Site; status?:
  * The project's dev server in the header: one clear "Start dev server" button, and while it
  * runs a compact group with its state and port, restart and stop.
  */
-function DevServerButton({ name, status }: { name: string; status?: AppStatus }) {
+function DevServerButton({ name, status, info, onConfigure }: { name: string; status?: AppStatus; info?: AppInfo; onConfigure: () => void }) {
   const { start, stop, restart } = useAppActions(name);
+  const queryClient = useQueryClient();
+  // Picking a command from the menu makes it the project's, then starts it.
+  const startWith = useMutation({
+    mutationFn: async (command: string) => {
+      if (info && (info.config.mode !== "command" || info.config.command !== command)) await api.appSave(name, { ...info.config, mode: "command", command });
+      return api.appStart(name);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["app-info", name] });
+      queryClient.invalidateQueries({ queryKey: ["sites"] });
+    },
+    onError: notifyError,
+  });
   if (isActive(status)) {
     const starting = status?.state === "starting";
     return (
@@ -463,15 +479,81 @@ function DevServerButton({ name, status }: { name: string; status?: AppStatus })
       </div>
     );
   }
+  const current = info ? appCommand(info.config) : "";
+  const pending = start.isPending || startWith.isPending;
   return (
-    <Button variant="primary" onClick={() => start.mutate()} disabled={start.isPending} title="Start the project's dev server">
-      <Play size={13} className="fill-current" /> {start.isPending ? "Starting…" : "Start dev server"}
-    </Button>
+    <div className="flex items-stretch">
+      <Button variant="primary" className="rounded-r-none" onClick={() => start.mutate()} disabled={pending} title={current ? `Runs ${current}` : "Start the project's dev server"}>
+        <Play size={13} className="fill-current" /> {pending ? "Starting…" : "Start dev server"}
+      </Button>
+      <DevServerMenu commands={info?.serveCommands ?? []} current={current} disabled={pending} onPick={(c) => startWith.mutate(c)} onConfigure={onConfigure} />
+    </div>
+  );
+}
+
+/** The arrow next to Start dev server: the ready-made commands, and where to set your own. */
+function DevServerMenu({ commands, current, disabled, onPick, onConfigure }: { commands: { label: string; command: string }[]; current: string; disabled: boolean; onPick: (command: string) => void; onConfigure: () => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [open]);
+  // The saved command shows even when it's none of the ready-made ones.
+  const list = current && !commands.some((c) => c.command === current) ? [{ label: "Your command", command: current }, ...commands] : commands;
+  return (
+    <div ref={root} className="relative">
+      <Button variant="primary" className="h-full rounded-l-none border-l border-white/25 px-2" onClick={() => setOpen(!open)} disabled={disabled} aria-haspopup="menu" aria-expanded={open} aria-label="Choose how the dev server runs" title="Choose how the dev server runs">
+        <ChevronDown size={14} />
+      </Button>
+      {open && (
+        <div role="menu" className="motion-pop absolute right-0 bottom-full z-30 mb-1.5 w-80 rounded-xl border border-line bg-surface p-1 shadow-float">
+          <div className="px-2.5 pt-1.5 pb-1 text-xs text-muted">Start with</div>
+          {list.map((c) => (
+            <button
+              key={c.command}
+              role="menuitem"
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onPick(c.command);
+              }}
+              className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-surface-2"
+            >
+              <Check size={14} className={clsx("mt-0.5 shrink-0 text-accent-text", c.command !== current && "invisible")} aria-hidden />
+              <span className="min-w-0">
+                <span className="block text-sm">{c.label}</span>
+                <code className="block truncate font-mono text-xs text-muted">{c.command}</code>
+              </span>
+            </button>
+          ))}
+          <div className="my-1 border-t border-line" />
+          <button
+            role="menuitem"
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onConfigure();
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-accent-text hover:bg-surface-2"
+          >
+            <Settings2 size={14} aria-hidden /> Configure in project settings
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
 function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Site; info?: SitesInfo; status?: AppStatus; tab: Tab; setTab: (t: Tab) => void; onSelect: (path: string) => void }) {
-  const notify = useAppStore((s) => s.notify);
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const app = useAppInfo(site);
   const active = usePageActive();
@@ -481,17 +563,10 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
   // Running from your own terminal (or anything else LampRabit didn't start).
   const external = !!site.route && !isActive(status);
   // PHP projects with a package.json have an asset dev server (Vite) next to the site.
-  const devServer = !dynamic && site.nodeProject && !!app.data && !!appCommand(app.data.config);
+  // Laravel has its own (composer run dev, php artisan serve), with or without a package.json.
+  const devServer = !dynamic && (site.nodeProject || isLaravel(site)) && !!app.data && !!appCommand(app.data.config);
   const php = site.php ?? settings.data?.versions.php ?? null;
-  const pmaUrl = toolUrl("phpmyadmin", info, settings.data?.ports.services["mailpit.ui"]);
-  const adminerUrl = toolUrl("adminer", info, settings.data?.ports.services["mailpit.ui"]);
-  // KarotX, LampRabit's own client, first: it lists every local database already.
-  const karotxUrl = toolUrl("karotx", info, settings.data?.ports.services["mailpit.ui"], settings.data?.ports.services["karotx.http"]);
-  const targetDbUrl =
-    karotxUrl ??
-    (site.database
-      ? (pmaUrl ? `${pmaUrl}?server=1&db=${encodeURIComponent(site.database)}` : adminerUrl ? `${adminerUrl}?db=${encodeURIComponent(site.database)}` : null)
-      : (pmaUrl ?? adminerUrl ?? null));
+  const targetDbUrl = databaseUrl(site.database, info, settings.data);
   // The Commands tab's dot: a crashed process (red) outranks something running.
   const statuses = useAppStatuses();
   const processStates = Object.values(statuses).filter((s) => s.name.startsWith(`${site.name}/`));
@@ -650,8 +725,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
                 if (targetDbUrl) {
                   openUrl(targetDbUrl).catch(notifyError);
                 } else {
-                  useAppStore.getState().navigate("services");
-                  notify("info", "Install KarotX in Services to manage databases");
+                  useAppStore.getState().openService("karotx");
                 }
               }}
               title={site.database ? `Open database "${site.database}"` : "Open database manager"}
@@ -673,7 +747,7 @@ function ProjectDetail({ site, info, status, tab, setTab, onSelect }: { site: Si
           <span className="flex-1" />
 
           {!tunnel && <ShareButton site={site} />}
-          {devServer && <DevServerButton name={site.name} status={status} />}
+          {devServer && <DevServerButton name={site.name} status={status} info={app.data} onConfigure={() => setTab("settings")} />}
         </div>
         {tunnel && (
           <div className="mt-3">
@@ -862,7 +936,6 @@ function Overview({
 function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; dbUrl: string | null }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
-  const navigate = useAppStore((s) => s.navigate);
   const active = usePageActive();
   const status = useQuery({ queryKey: ["database-status", site.name], queryFn: () => api.databaseStatus(site.name), refetchInterval: active ? 10_000 : false });
   const create = useMutation({
@@ -916,7 +989,7 @@ function DatabaseRow({ site, database, dbUrl }: { site: Site; database: string; 
             Use {s.alternative.label}
           </Button>
         )}
-        <Button size="sm" onClick={() => navigate("services")}>
+        <Button size="sm" onClick={() => useAppStore.getState().openService(s.engine)} title={`Open ${s.label} on the Services page to install it`}>
           Install {s.label}
         </Button>
       </div>
@@ -1234,9 +1307,9 @@ function SettingsTab({ site, settings, status, onRenamed }: { site: Site; settin
         </div>
       </Section>
 
-      {site.nodeProject && app.data && (
+      {(site.nodeProject || isLaravel(site)) && app.data && (
         <Section
-          title={site.language === "node" ? "Dev server" : "Asset dev server"}
+          title={site.language === "node" || isLaravel(site) ? "Dev server" : "Asset dev server"}
           action={
             isActive(status) ? (
               <Button size="sm" variant="ghost" onClick={() => restart.mutate()}>
@@ -1706,10 +1779,3 @@ function RecentRuns({ site, status, onShow }: { site: Site; status?: AppStatus; 
   );
 }
 
-/** KarotX when it's installed, else phpMyAdmin opened on the project's database. */
-function databaseUrl(db: string, info?: SitesInfo, settings?: Settings) {
-  const karotx = toolUrl("karotx", info, settings?.ports.services["mailpit.ui"], settings?.ports.services["karotx.http"]);
-  if (karotx) return karotx;
-  const base = toolUrl("phpmyadmin", info, settings?.ports.services["mailpit.ui"]);
-  return base ? `${base}?server=1&db=${encodeURIComponent(db)}` : null;
-}

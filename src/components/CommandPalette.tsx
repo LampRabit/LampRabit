@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { openUrl } from "../lib/open";
 import { Search } from "lucide-react";
 import clsx from "clsx";
 import { api, type ServiceKind } from "../lib/api";

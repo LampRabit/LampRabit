@@ -4,14 +4,22 @@ name: Django
 description: A Django project in its own virtual environment, with the admin and SQLite ready.
 icon: leaf
 color: green
-duration: pip · under a minute
+duration: pip, uv or conda · under a minute
 requires:
   python: "3.10"
+variables:
+  - id: api
+    label: API
+    type: choice
+    default: none
+    options:
+      - { value: none, label: None }
+      - { value: drf, label: Django REST framework }
 steps:
-  - name: Creating a virtual environment (.venv)
-    run: python -m venv .venv
+  - name: Creating the environment (.venv) with {{py}}
+    run: "{{py.venv}}"
   - name: Installing Django
-    run: "{{venv.python}} -m pip install --disable-pip-version-check django"
+    run: "{{py.add}} django"
   - name: Creating the project
     run: "{{venv.python}} -m django startproject config ."
   - name: Allowing {{domain}}
@@ -22,9 +30,22 @@ steps:
         # Added by LampRabit: the project is served at {{url}}, through its web server.
         ALLOWED_HOSTS = ["127.0.0.1", "localhost", "{{domain}}", ".{{domain}}"]
         CSRF_TRUSTED_ORIGINS = ["{{url}}"]
+  - name: Installing Django REST framework
+    if: vars.api == drf
+    run: "{{py.add}} djangorestframework"
+  - name: Turning on Django REST framework
+    if: vars.api == drf
+    append:
+      path: config/settings.py
+      content: |
+
+        # Added by LampRabit: Django REST framework, with its browsable API.
+        INSTALLED_APPS += ["rest_framework"]
   - name: Creating the database (SQLite)
     run: "{{venv.python}} manage.py migrate"
+  # uv records the packages in pyproject.toml and uv.lock instead.
   - name: Writing requirements.txt
+    if: py != uv
     run: "{{venv.python}} -m pip freeze --disable-pip-version-check > requirements.txt"
   - name: Ignoring the virtual environment in Git
     write:

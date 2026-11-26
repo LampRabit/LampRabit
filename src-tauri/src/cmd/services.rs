@@ -57,19 +57,118 @@ pub(crate) async fn start_service(app: AppHandle, state: State<'_, AppState>, ki
     Ok(())
 }
 
-/// Services with a web UI of their own at a .test domain (n8n.test, pgadmin.test…), which
-/// the primary web server proxies.
+/// Services with a web UI of their own at a .test domain (n8n.test, pgadmin.test, a console
+/// at minio.test…), which the primary web server proxies.
 pub(crate) fn tool_domain_service(kind: ServiceKind) -> bool {
-    matches!(kind, ServiceKind::N8n | ServiceKind::Pgadmin | ServiceKind::Neo4j | ServiceKind::Mailpit)
+    let m = kind.manifest();
+    m.ui.is_some() || m.open.is_some()
 }
 
 /// Makes a just-started service's .test domain answer: the primary web server is started
 /// when it isn't running (which also brings the hosts file up to date), or reloaded when
 /// its config doesn't have the domain yet. A failure is logged; the service itself runs.
 pub(crate) async fn serve_tool_domain(app: &AppHandle, state: &AppState, kind: ServiceKind) {
-    if !tool_domain_service(kind) {
-        return;
+    if tool_domain_service(kind) {
+        serve_domains(app, state, &format!("{}'s", kind.label())).await;
     }
+}
+
+/// Before a .test address opens in the browser (a project, pgadmin.test…): the web server
+/// that answers it runs and knows the domain, and a tool's domain has its service running
+/// (KarotX for karotx.test, pgAdmin and PostgreSQL for pgadmin.test, a database for
+/// phpMyAdmin), or the browser lands on "service unavailable". Returns the services it
+/// started, so the caller can say why opening took a moment.
+#[tauri::command]
+pub(crate) async fn prepare_url(app: AppHandle, state: State<'_, AppState>, url: String) -> Result<Vec<String>> {
+    let tld = state.settings.read().await.tld.clone();
+    let host = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest).split(['/', ':', '?', '#']).next().unwrap_or_default().to_lowercase();
+    let local = host == "localhost" || host == "127.0.0.1";
+    if !host.ends_with(&format!(".{tld}")) && !local {
+        return Ok(Vec::new());
+    }
+    let (started, wait_for) = {
+        let _op = state.ops.lock().await;
+        let behind = start_behind(&app, &state, &url, &host).await;
+        serve_domains(&app, &state, &host).await;
+        behind
+    };
+    // Outside the lock: a slow service (pgAdmin) mustn't hold up everything else.
+    if let Some(port) = wait_for {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(45);
+        while tokio::time::Instant::now() < deadline && std::net::TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), std::time::Duration::from_millis(200)).is_err() {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+    }
+    Ok(started)
+}
+
+/// What a tool's domain needs running, from the tool's own service and its manifest's
+/// `needs:` (pgAdmin: PostgreSQL) to the database a PHP client opens. Installed services that
+/// are stopped get started; returns their names and the port to wait for when the tool is
+/// its own web server.
+async fn start_behind(app: &AppHandle, state: &AppState, url: &str, host: &str) -> (Vec<String>, Option<u16>) {
+    let (settings, layout) = state.snapshot().await;
+    // Without the hosts file a tool opens at localhost:<its port>/ or localhost/<tool>/.
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let port: Option<u16> = rest.split(['/', '?', '#']).next().and_then(|h| h.rsplit_once(':')).and_then(|(_, p)| p.parse().ok());
+    let first = rest.split_once('/').map(|(_, p)| p.split(['/', '?', '#']).next().unwrap_or_default()).unwrap_or_default();
+    let proxy_port = |t: &sites::Site| t.proxy.as_deref().and_then(|p| p.trim_end_matches('/').rsplit(':').next()?.parse::<u16>().ok());
+    let local = host == "localhost" || host == "127.0.0.1";
+    let Some(tool) = sites::tools(&settings, &layout)
+        .into_iter()
+        .find(|t| t.domain == host || (local && (port.is_some() && proxy_port(t) == port || port.is_none() && t.proxy.is_none() && first == t.name)))
+    else {
+        return (Vec::new(), None);
+    };
+    let mut wanted: Vec<ServiceKind> = Vec::new();
+    match ServiceKind::from_id(&tool.name) {
+        Some(kind) => {
+            wanted.extend(kind.manifest().needs.iter().filter_map(|n| ServiceKind::from_id(&n.runtime)));
+            wanted.push(kind);
+        }
+        // The PHP clients are served by the web server; they need a database to show.
+        None => {
+            let dbs: Vec<&str> = match tool.name.as_str() {
+                "phpmyadmin" | "adminer" => vec![settings.default_database.id(), settings.default_database.other().id()],
+                "phppgadmin" => vec!["postgres"],
+                "phpredisadmin" => vec!["redis"],
+                _ => vec![],
+            };
+            let kinds: Vec<ServiceKind> = dbs.into_iter().filter_map(ServiceKind::from_id).collect();
+            let mut any_up = false;
+            for &k in &kinds {
+                any_up |= state.supervisor.is_running(k).await;
+            }
+            if !any_up {
+                wanted.extend(kinds);
+            }
+        }
+    }
+    let services = state.supervisor.list(&settings, &layout).await;
+    let mut started = Vec::new();
+    let mut one_db = false;
+    for kind in wanted {
+        let installed = services.iter().any(|s| s.kind == kind && s.installed);
+        // One of the PHP clients' databases is enough (the default one when it's installed).
+        let db_client = ServiceKind::from_id(&tool.name).is_none();
+        if !installed || state.supervisor.is_running(kind).await || (db_client && one_db) {
+            continue;
+        }
+        logs::system(app, logs::Level::Info, format!("Starting {} so {host} opens", kind.label()));
+        match state.supervisor.start(app, kind, &settings, &layout).await {
+            Ok(()) => {
+                started.push(kind.label().to_string());
+                one_db = true;
+            }
+            Err(e) => logs::system(app, logs::Level::Warn, format!("{host} may not work: {} didn't start: {e}", kind.label())),
+        }
+    }
+    (started, proxy_port(&tool).filter(|_| ServiceKind::from_id(&tool.name).is_some()))
+}
+
+/// Starts the primary web server, or reloads it when its config lacks a domain. `who` names
+/// the address in the log ("pgAdmin's", "shop.test").
+async fn serve_domains(app: &AppHandle, state: &AppState, who: &str) {
     let (settings, layout) = state.snapshot().await;
     let web = server_kind(settings.primary_server());
     let result = if !state.supervisor.is_running(web).await {
@@ -77,7 +176,7 @@ pub(crate) async fn serve_tool_domain(app: &AppHandle, state: &AppState, kind: S
         if !installed {
             return;
         }
-        logs::system(app, logs::Level::Info, format!("Starting {} so {}'s .test address works", web.label(), kind.label()));
+        logs::system(app, logs::Level::Info, format!("Starting {} so {who} address works", web.label()));
         state.supervisor.start(app, web, &settings, &layout).await
     } else {
         let served = sites::served(&settings, &layout);
@@ -99,7 +198,7 @@ pub(crate) async fn serve_tool_domain(app: &AppHandle, state: &AppState, kind: S
         }
     };
     if let Err(e) = result {
-        logs::system(app, logs::Level::Warn, format!("{}'s .test address may not work yet: {e}", kind.label()));
+        logs::system(app, logs::Level::Warn, format!("{who} address may not work yet: {e}"));
     }
 }
 
@@ -514,11 +613,20 @@ pub(crate) async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortSt
     Ok(out)
 }
 
-/// Stops a process that is blocking a port. Refuses system processes and LampRabit's own.
+/// Stops a process that is blocking a port, asking for administrator rights when a plain
+/// kill isn't allowed. PID 4 on Windows is http.sys: its HTTP service is stopped instead.
+/// Refuses PID 0 and LampRabit's own processes.
 #[tauri::command]
 pub(crate) async fn stop_process(app: AppHandle, state: State<'_, AppState>, pid: u32) -> Result<()> {
-    if pid == 0 || pid == 4 || pid == std::process::id() || state.supervisor.pids().await.contains_key(&pid) {
+    if pid == 0 || pid == std::process::id() || state.supervisor.pids().await.contains_key(&pid) {
         return Err(Error::msg("LampRabit won't stop that process."));
+    }
+    let (_, layout) = state.snapshot().await;
+    if cfg!(windows) && pid == 4 {
+        // Also stops what is built on it (IIS, SQL Server Reporting Services…) until the next boot.
+        overrides::elevated(&layout, "net stop http /y; if ($LASTEXITCODE) { throw 'net stop http /y failed' }", "Stopping Windows' HTTP service").await?;
+        logs::system(&app, logs::Level::Info, "Stopped Windows' HTTP service (http.sys) to free its ports");
+        return Ok(());
     }
     let status = if cfg!(windows) {
         let mut cmd = tokio::process::Command::new("taskkill");
@@ -529,9 +637,19 @@ pub(crate) async fn stop_process(app: AppHandle, state: State<'_, AppState>, pid
         tokio::process::Command::new("kill").arg(pid.to_string()).status().await?
     };
     if !status.success() {
-        return Err(Error::msg(format!(
-            "Couldn't stop process {pid}. It may belong to another user or need administrator rights."
-        )));
+        // Another user's or an elevated process: the same, as administrator (one prompt).
+        if cfg!(windows) {
+            overrides::elevated(&layout, &format!("Stop-Process -Id {pid} -Force"), &format!("Stopping process {pid}")).await?;
+        } else {
+            let elevated = if cfg!(target_os = "macos") {
+                tokio::process::Command::new("osascript").args(["-e", &format!("do shell script \"kill {pid}\" with administrator privileges")]).status().await?
+            } else {
+                tokio::process::Command::new("pkexec").args(["kill", &pid.to_string()]).status().await?
+            };
+            if !elevated.success() {
+                return Err(Error::msg(format!("Couldn't stop process {pid}: administrator approval was refused or the process can't be stopped.")));
+            }
+        }
     }
     logs::system(&app, logs::Level::Info, format!("Stopped process {pid} to free its port"));
     Ok(())

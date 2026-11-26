@@ -149,6 +149,11 @@ pub(crate) fn check_values(settings: &mut Settings) -> Result<()> {
         )));
     }
     settings.tld = tld;
+    let domain = settings.cloudflare_domain.trim().trim_matches('.').to_lowercase();
+    if !domain.is_empty() && (!domain.contains('.') || !domain.split('.').all(valid_label)) {
+        return Err(Error::msg("Your Cloudflare domain should look like example.com."));
+    }
+    settings.cloudflare_domain = domain;
     settings.normalize();
     if !(1..=32).contains(&settings.php_workers) {
         return Err(Error::msg("PHP workers must be between 1 and 32."));

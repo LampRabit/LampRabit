@@ -428,9 +428,14 @@ pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {
     }
     // Services with a web interface (their manifest's `ui`), proxied to its port.
     for m in crate::manifest::built_ins().iter().chain(crate::manifest::extras()).filter(|m| v.get(&m.id).is_some()) {
-        let Some(ui) = &m.ui else { continue };
-        let port = ui.port.as_deref().or(m.main_port()).and_then(|p| m.port(settings, p)).unwrap_or_default();
-        add(&m.id, &ui.domain, None, Some(format!("http://127.0.0.1:{port}/")));
+        // A console of its own (`open:`, MinIO, RabbitMQ…) is served at <id>.test too.
+        let (domain, port) = match (&m.ui, &m.open) {
+            (Some(ui), _) => (ui.domain.as_str(), ui.port.as_deref().or(m.main_port())),
+            (None, Some(open)) => (m.id.as_str(), Some(open.port.as_str())),
+            _ => continue,
+        };
+        let port = port.and_then(|p| m.port(settings, p)).unwrap_or_default();
+        add(&m.id, domain, None, Some(format!("http://127.0.0.1:{port}/")));
     }
     tools
 }

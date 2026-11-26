@@ -1,7 +1,7 @@
 schema: 1
 id: symfony
 name: Symfony
-description: Symfony skeleton with database and mailer set up.
+description: A Symfony web app or a bare skeleton for APIs and microservices, with database and mailer set up.
 icon: boxes
 color: zinc
 duration: Composer · about a minute
@@ -10,11 +10,23 @@ requires:
   extensions: [ctype, mbstring, tokenizer, xml]
 database: optional
 engines: [mariadb, mysql, postgres]
+# Symfony's own two starting points (symfony new --webapp, or not).
+variables:
+  - id: kind
+    label: Project type
+    type: choice
+    default: webapp
+    options:
+      - { value: webapp, label: "Web app (Twig, Doctrine, forms, security, mailer)" }
+      - { value: skeleton, label: "Skeleton (APIs, microservices, console apps)" }
 steps:
   - create_database: {}
   - name: Creating the project with Composer (symfony/skeleton)
     cwd: www
     composer: [create-project, symfony/skeleton, "{{project}}", --prefer-dist, --no-interaction, --no-progress]
+  - name: Adding the web app packages (symfony/webapp-pack)
+    if: vars.kind == webapp
+    composer: [require, webapp, --no-interaction, --no-progress]
   - name: Configuring the mailer
     env:
       file: .env.local
@@ -39,3 +51,7 @@ commands:
   list:
     - name: Clear the cache
       run: php bin/console cache:clear
+    - name: List the routes
+      run: php bin/console debug:router
+    - name: Run the migrations
+      run: php bin/console doctrine:migrations:migrate --no-interaction

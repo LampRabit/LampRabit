@@ -320,6 +320,7 @@ fn candidates(asset: Option<&manifest::Asset>, version: &str) -> Vec<String> {
 /// one version (its fallback files) all stay, in order.
 pub fn choose(src: &Source, found: Vec<Found>) -> Vec<Found> {
     let key = |v: &str| crate::version::numbers(v);
+    let found: Vec<Found> = found.into_iter().filter(|f| !src.skip.contains(&f.version)).collect();
     let mut versions: Vec<String> = Vec::new();
     for f in &found {
         if !versions.contains(&f.version) {
@@ -752,11 +753,16 @@ mod tests {
     fn pgadmin_wheel_from_pypi() {
         let (m, src) = source_of("pgadmin", false);
         let j = src.json.as_ref().unwrap();
-        let answer = serde_json::json!({"info": {"version": "9.10"}, "urls": [
-            {"filename": "pgadmin4-9.10.tar.gz", "url": "https://files.pythonhosted.org/a.tar.gz", "digests": {"sha256": "aa"}},
-            {"filename": "pgadmin4-9.10-py3-none-any.whl", "url": "https://files.pythonhosted.org/b.whl", "digests": {"sha256": "bb"}}]});
+        let wheel = |v: &str, yanked: bool| serde_json::json!({"filename": format!("pgadmin4-{v}-py3-none-any.whl"), "url": format!("https://files.pythonhosted.org/{v}.whl"), "digests": {"sha256": "bb"}, "yanked": yanked});
+        // 9.19 is skipped (published without its JavaScript), 9.20's only wheel was yanked.
+        let answer = serde_json::json!({"info": {"version": "9.20"}, "releases": {
+            "9.10": [{"filename": "pgadmin4-9.10.tar.gz", "url": "https://files.pythonhosted.org/a.tar.gz", "digests": {"sha256": "aa"}, "yanked": false}, wheel("9.10", false)],
+            "9.18": [wheel("9.18", false)],
+            "9.19": [wheel("9.19", false)],
+            "9.20": [wheel("9.20", true)]}});
         let found = from_json(m, src, j, &Vars::new(m).unwrap(), entries(&answer, &j.items)).unwrap();
-        assert_eq!((found[0].version.as_str(), found[0].url.as_str(), found[0].sha256.as_deref()), ("9.10", "https://files.pythonhosted.org/b.whl", Some("bb")));
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].version.as_str(), found[0].url.as_str(), found[0].sha256.as_deref()), ("9.18", "https://files.pythonhosted.org/9.18.whl", Some("bb")));
         assert!(matches!(found[0].archive, Archive::File));
     }
 

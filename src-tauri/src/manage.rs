@@ -180,6 +180,85 @@ fn psql(settings: &Settings, layout: &Layout) -> Result<(PathBuf, PathBuf, Vec<S
     Ok((home.join("bin").join(exe("psql")), home, args))
 }
 
+/// A PostgreSQL extension one database can use: those shipped with the server (contrib:
+/// pgcrypto, pg_trgm, hstore, uuid-ossp…) and any added to its share/extension folder.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PgExtension {
+    pub name: String,
+    pub default_version: String,
+    /// Set when the extension is created in this database.
+    pub installed_version: Option<String>,
+    pub comment: String,
+    pub schema: Option<String>,
+}
+
+/// What can be done to an extension in one database.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PgExtensionAction {
+    Enable,
+    Disable,
+    Update,
+}
+
+/// Extension names as PostgreSQL ships them: lowercase letters, digits, _ and - (uuid-ossp).
+fn check_extension(name: &str) -> Result<()> {
+    if name.is_empty() || name.len() > 63 || !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-')) {
+        return Err(Error::msg(format!("\"{name}\" isn't an extension name PostgreSQL ships.")));
+    }
+    Ok(())
+}
+
+/// psql connected to one database, fields split by the unit separator.
+fn psql_on(settings: &Settings, layout: &Layout, database: &str) -> Result<(PathBuf, PathBuf, Vec<String>)> {
+    check_name(database)?;
+    let (client, home, mut args) = psql(settings, layout)?;
+    if let Some(i) = args.iter().position(|a| a == "-d") {
+        args[i + 1] = database.to_string();
+    }
+    let last = args.len() - 1;
+    args.insert(last, "-F\u{1f}".into());
+    Ok((client, home, args))
+}
+
+fn parse_extensions(out: &str) -> Vec<PgExtension> {
+    let some = |s: &str| (!s.is_empty()).then(|| s.to_string());
+    out.lines()
+        .filter_map(|line| {
+            let f: Vec<&str> = line.split('\u{1f}').collect();
+            if f.len() < 5 || f[0].is_empty() {
+                return None;
+            }
+            Some(PgExtension { name: f[0].to_string(), default_version: f[1].to_string(), installed_version: some(f[2]), comment: f[3].to_string(), schema: some(f[4]) })
+        })
+        .collect()
+}
+
+/// Every extension the server offers, with whether (and at which version) `database` has it.
+pub async fn pg_extensions(settings: &Settings, layout: &Layout, database: &str) -> Result<Vec<PgExtension>> {
+    let (client, home, mut args) = psql_on(settings, layout, database)?;
+    args.push(
+        "SELECT a.name, coalesce(a.default_version, ''), coalesce(e.extversion, ''), coalesce(replace(a.comment, E'\\n', ' '), ''), coalesce(n.nspname, '') \
+         FROM pg_available_extensions a LEFT JOIN pg_extension e ON e.extname = a.name LEFT JOIN pg_namespace n ON n.oid = e.extnamespace ORDER BY a.name"
+            .into(),
+    );
+    Ok(parse_extensions(&run(&client, &args, &home).await?))
+}
+
+/// Creates (with what it needs), drops or updates an extension in one database. Dropping
+/// doesn't cascade: when tables use it, PostgreSQL's refusal says which.
+pub async fn set_pg_extension(settings: &Settings, layout: &Layout, database: &str, name: &str, action: PgExtensionAction) -> Result<()> {
+    check_extension(name)?;
+    let (client, home, mut args) = psql_on(settings, layout, database)?;
+    args.push(match action {
+        PgExtensionAction::Enable => format!("CREATE EXTENSION IF NOT EXISTS \"{name}\" CASCADE"),
+        PgExtensionAction::Disable => format!("DROP EXTENSION IF EXISTS \"{name}\""),
+        PgExtensionAction::Update => format!("ALTER EXTENSION \"{name}\" UPDATE"),
+    });
+    run(&client, &args, &home).await.map(|_| ())
+}
+
 /// Runs a database client and returns what it printed.
 async fn run(program: &Path, args: &[String], cwd: &Path) -> Result<String> {
     let mut cmd = tokio::process::Command::new(program);
@@ -405,6 +484,18 @@ pub fn listening(ports: &[u16]) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_postgres_extensions() {
+        let out = "citext\u{1f}1.6\u{1f}\u{1f}case-insensitive character string type\u{1f}\npgcrypto\u{1f}1.3\u{1f}1.3\u{1f}cryptographic functions\u{1f}public\n";
+        let list = parse_extensions(out);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].installed_version, None);
+        assert_eq!(list[1].installed_version.as_deref(), Some("1.3"));
+        assert_eq!(list[1].schema.as_deref(), Some("public"));
+        assert!(check_extension("uuid-ossp").is_ok());
+        assert!(check_extension("x\"; DROP TABLE t; --").is_err());
+    }
 
     #[test]
     fn moves_database_urls_to_another_port() {

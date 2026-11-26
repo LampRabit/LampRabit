@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "../lib/open";
 import { ArrowRight, Check, ExternalLink, Plus, Trash2, X } from "lucide-react";
 import clsx from "clsx";
 import { api, type DomainTarget, type Settings, type Site } from "../lib/api";

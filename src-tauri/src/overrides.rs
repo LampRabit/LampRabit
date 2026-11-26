@@ -76,6 +76,22 @@ pub fn shadows(shims: &Path) -> Vec<Shadow> {
     out
 }
 
+/// Another Node.js (an installer's C:\Program Files\nodejs) that answers `node` from the
+/// system PATH before NVM's symlink, so `nvm use` seems to do nothing.
+pub fn node_shadow(symlink: &Path) -> Option<Shadow> {
+    let path = system_path()?;
+    for dir in path.split(';').filter(|p| !p.trim().is_empty()).map(|p| PathBuf::from(expand(p.trim()))) {
+        if same_dir(&dir, symlink) {
+            return None;
+        }
+        let hit = dir.join("node.exe");
+        if hit.is_file() {
+            return Some(Shadow { command: "node".into(), path: hit.to_string_lossy().into_owned() });
+        }
+    }
+    None
+}
+
 /// Puts LampRabit's command folder first in the system PATH, or takes it out. Entries like
 /// %SystemRoot% stay unexpanded.
 pub async fn system_path_first(layout: &Layout, shims: &Path, on: bool) -> Result<()> {
@@ -142,6 +158,66 @@ fn expand(entry: &str) -> String {
     out + rest
 }
 
+/// PATH as a new terminal would see it now, for the commands LampRabit runs. The app's own
+/// PATH is the one it started with: a tool installed since (NVM writing NVM_SYMLINK into the
+/// user PATH, Git, Python) is missing from it, so a project's command said "Node.js isn't
+/// installed" while every terminal found node. On Windows that's the system then the user
+/// PATH from the registry; elsewhere the login shell's PATH (a GUI app on macOS gets none of
+/// what .zshrc adds). The app's own entries follow, so nothing it had goes missing.
+pub fn fresh_path() -> std::ffi::OsString {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    #[cfg(windows)]
+    for raw in [system_path(), user_path()].into_iter().flatten() {
+        dirs.extend(raw.split(';').map(str::trim).filter(|e| !e.is_empty()).map(|e| PathBuf::from(expand(e))));
+    }
+    #[cfg(not(windows))]
+    dirs.extend(login_shell_path().iter().flat_map(|p| std::env::split_paths(p).collect::<Vec<_>>()));
+    dirs.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+    #[cfg(not(windows))]
+    {
+        // Where version managers and Homebrew put their commands, for a shell that doesn't say.
+        let home = dirs::home_dir().unwrap_or_default();
+        dirs.extend([home.join(".volta/bin"), home.join(".local/bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().filter(|d| d.is_dir()));
+    }
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|d| seen.insert(d.to_string_lossy().trim_end_matches(['\\', '/']).to_lowercase()));
+    std::env::join_paths(dirs).unwrap_or_else(|_| std::env::var_os("PATH").unwrap_or_default())
+}
+
+/// The PATH an interactive login shell ends up with (nvm, fnm, asdf and Homebrew set it up
+/// there), read once; a shell that takes longer than a few seconds is given up on.
+#[cfg(not(windows))]
+fn login_shell_path() -> Option<std::ffi::OsString> {
+    static CACHE: std::sync::OnceLock<Option<std::ffi::OsString>> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let out = std::process::Command::new(shell)
+                    .args(["-ilc", "printf '__LR_PATH__%s__LR_PATH__' \"$PATH\""])
+                    .stdin(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .output();
+                let _ = tx.send(out);
+            });
+            let out = rx.recv_timeout(std::time::Duration::from_secs(4)).ok()?.ok()?;
+            let text = String::from_utf8_lossy(&out.stdout);
+            let path = text.split("__LR_PATH__").nth(1)?.trim().to_string();
+            (!path.is_empty()).then(|| path.into())
+        })
+        .clone()
+}
+
+#[cfg(windows)]
+fn user_path() -> Option<String> {
+    use winreg::{enums::*, RegKey};
+    let env = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags("Environment", KEY_READ).ok()?;
+    let raw = env.get_raw_value("Path").ok()?;
+    let wide: Vec<u16> = raw.bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    Some(String::from_utf16_lossy(&wide).trim_end_matches('\0').to_string())
+}
+
 #[cfg(windows)]
 fn system_path() -> Option<String> {
     use winreg::{enums::*, RegKey};
@@ -178,7 +254,7 @@ async fn output(program: &str, args: &[&str]) -> Option<String> {
 
 /// Runs a PowerShell script as administrator (one UAC prompt); its error message, if any,
 /// comes back through a file, since an elevated process's output can't be read.
-async fn elevated(layout: &Layout, script: &str, what: &str) -> Result<()> {
+pub(crate) async fn elevated(layout: &Layout, script: &str, what: &str) -> Result<()> {
     if !cfg!(windows) {
         return Err(Error::msg(format!("{what} is only needed on Windows")));
     }

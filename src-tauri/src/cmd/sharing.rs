@@ -41,6 +41,19 @@ pub(crate) async fn tunnel_list(state: State<'_, AppState>) -> Result<Vec<tunnel
     Ok(state.tunnels.list().await)
 }
 
+/// Whether Cloudflare is connected (`cloudflared tunnel login` done) for sharing on your domain.
+#[tauri::command]
+pub(crate) fn cloudflare_connected() -> bool {
+    tunnels::cloudflare_connected()
+}
+
+/// Connects Cloudflare through the browser; returns once the sign-in is finished.
+#[tauri::command]
+pub(crate) async fn cloudflare_login(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    tunnels::cloudflare_login(&app, &settings, &layout).await
+}
+
 #[tauri::command]
 pub(crate) fn ngrok_token_saved() -> bool {
     tunnels::ngrok_token().is_some()

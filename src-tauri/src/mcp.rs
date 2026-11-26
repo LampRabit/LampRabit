@@ -103,6 +103,41 @@ fn tools() -> Vec<Tool> {
             false,
         ),
         t(
+            "get_template",
+            "A project template's YAML (yours or built-in), to base a new template on. Templates are LampRabit's recipe for a new project: requires, variables (wizard fields), steps (composer, php, run, env, write, append, replace, download, create_database, git_init), serve, commands and processes.",
+            "template.show",
+            json!({"type": "object", "properties": {"id": {"type": "string", "description": "Template id (see list_templates)"}}, "required": ["id"]}),
+            true,
+            false,
+        ),
+        t(
+            "template_format",
+            "The annotated example template: every field, step kind and {{placeholder}} a LampRabit template can use. Read it before writing one with save_template.",
+            "template.example",
+            json!({"type": "object", "properties": {}}),
+            true,
+            false,
+        ),
+        t(
+            "draft_template_from_project",
+            "Draft a template that recreates an existing project in www: its Git remote, Composer/Node packages, .env, database, PHP version, processes, subdomains, dev server and commands. Review and adjust the YAML, then save it with save_template.",
+            "template.from_project",
+            json!({"type": "object", "properties": {"project": {"type": "string"}}, "required": ["project"]}),
+            true,
+            false,
+        ),
+        t(
+            "save_template",
+            "Save a project template (YAML, see template_format) so it shows in New project and works with create_project. It's checked the way the template editor checks it; an existing id is only replaced with replace: true. Wrap the setup the user describes (the commands they'd run, the files they'd write, the .env values) into steps.",
+            "template.save",
+            json!({"type": "object", "properties": {
+                "yaml": {"type": "string", "description": "The whole template"},
+                "replace": {"type": "boolean", "description": "Replace your template with the same id"}
+            }, "required": ["yaml"]}),
+            false,
+            false,
+        ),
+        t(
             "install_runtime",
             "Download and use a runtime version (checksum checked), such as php 8.4, mariadb, redis. Without a version, the LTS or newest.",
             "runtime.install",
@@ -125,6 +160,9 @@ fn request(tool: &Tool, args: &Value) -> Value {
         "php.extension" => json!({"name": args["extension"], "enabled": args["enabled"], "version": args["version"]}),
         "doctor.fix" => json!({"name": args["project"], "id": args["id"]}),
         "runtime.install" => json!({"name": args["runtime"], "version": args["version"]}),
+        "template.show" => json!({"id": args["id"]}),
+        "template.from_project" => json!({"name": args["project"]}),
+        "template.save" => json!({"yaml": args["yaml"], "replace": args["replace"].as_bool().unwrap_or(false)}),
         "logs" => json!({"source": args["source"], "lines": args["lines"].as_u64().unwrap_or(100).min(1000)}),
         "project.create" => json!({
             "name": args["name"], "template": args["template"], "php": args["php"], "server": null, "ssl": true,

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { openUrl } from "../lib/open";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -32,7 +33,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
-import { api, runtimeLabels, type DbEngine, type PackageManager, type ProjectProgress, type ProjectTemplate, type Server } from "../lib/api";
+import { api, runtimeLabels, type DbEngine, type PackageManager, type PythonManager, type ProjectProgress, type ProjectTemplate, type Server } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
 import { Button, Segmented, Switch, inputClass } from "./ui";
 
@@ -129,6 +130,7 @@ export default function NewProject() {
   const [approved, setApproved] = useState(false);
   const [nodeVersion, setNodeVersion] = useState<string | null>(null);
   const [packageManager, setPackageManager] = useState<PackageManager>("npm");
+  const [pythonManager, setPythonManager] = useState<PythonManager>("pip");
   const [phase, setPhase] = useState<Phase>({ kind: "form" });
   const [stepAt, setStepAt] = useState(0);
   const [steps, setSteps] = useState<string[]>([]);
@@ -291,7 +293,8 @@ export default function NewProject() {
         ["Address", `${ssl ? "https" : "http"}://${domain}`],
         ...(template.usesPhp ? [["PHP", php ?? `Default (${settings.data?.versions.php ?? "none"})`] as [string, string]] : []),
         ...(template.usesNode ? [["Node.js", `${nodeVersion ?? "NVM's default"} · ${packageManager}`] as [string, string]] : []),
-        ...(template.python ? [["Python", settings.data?.versions.python ?? "not installed"] as [string, string]] : []),
+        ...(!template.usesNode && template.nodeSteps ? [["Package manager", packageManager] as [string, string]] : []),
+        ...(template.python ? [["Python", `${settings.data?.versions.python ?? "not installed"} · ${pythonManager}`] as [string, string]] : []),
         ...(template.java ? [["Java", settings.data?.versions.java ?? "not installed"] as [string, string]] : []),
         ...(template.go ? [["Go", settings.data?.versions.go ?? "not installed"] as [string, string]] : []),
         ...(template.rust ? [["Rust", settings.data?.versions.rust ?? "not installed"] as [string, string]] : []),
@@ -323,7 +326,8 @@ export default function NewProject() {
         optional,
         approveRisky: approved,
         node: template.usesNode ? nodeVersion : null,
-        packageManager: template.usesNode ? packageManager : null,
+        packageManager: template.usesNode || template.nodeSteps ? packageManager : null,
+        pythonManager: template.python ? pythonManager : null,
       });
       setPhase({ kind: "done", url: created.url, note: created.note });
     } catch (e) {
@@ -506,7 +510,7 @@ export default function NewProject() {
                 </div>
 
                 {/* 2. Stack & Runtime */}
-                {(template?.usesPhp || template?.usesNode || languageMissing || (settings.data && settings.data.webServers.length > 1)) && (
+                {(template?.usesPhp || template?.usesNode || template?.python || template?.nodeSteps || languageMissing || (settings.data && settings.data.webServers.length > 1)) && (
                   <div className="space-y-3">
                     <h3 className="text-xs font-medium text-muted">2. Stack and runtime</h3>
                     <div className="space-y-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
@@ -537,6 +541,31 @@ export default function NewProject() {
                             ) : (
                               template.minPhp && <span className="mt-1.5 block text-xs text-muted">Needs PHP {template.minPhp} or newer.</span>
                             )}
+                          </label>
+                        )}
+                        {template?.python && (
+                          <label className="block">
+                            <span className="mb-1.5 block text-sm font-medium">Python environment</span>
+                            <select className={inputClass} value={pythonManager} onChange={(e) => setPythonManager(e.target.value as PythonManager)}>
+                              <option value="pip">venv and pip (requirements.txt)</option>
+                              <option value="uv">uv (pyproject.toml and uv.lock){settings.data?.versions.uv ? "" : ", not installed"}</option>
+                              <option value="conda">Conda environment{settings.data?.versions.conda ? "" : ", not installed"}</option>
+                            </select>
+                            {pythonManager !== "pip" && !settings.data?.versions[pythonManager] && (
+                              <span className="mt-1.5 block text-xs text-muted">Install {pythonManager === "uv" ? "uv" : "Conda"} on the Services page first, unless it's already on your PATH.</span>
+                            )}
+                          </label>
+                        )}
+                        {template && !template.usesNode && template.nodeSteps && (
+                          <label className="block">
+                            <span className="mb-1.5 block text-sm font-medium">Package manager</span>
+                            <select className={inputClass} value={packageManager} onChange={(e) => setPackageManager(e.target.value as PackageManager)}>
+                              <option value="npm">npm</option>
+                              <option value="pnpm">pnpm</option>
+                              <option value="yarn">Yarn</option>
+                              <option value="bun">Bun</option>
+                            </select>
+                            <span className="mt-1.5 block text-xs text-muted">For the frontend build, when you tick it below.</span>
                           </label>
                         )}
                         {template?.usesNode && (

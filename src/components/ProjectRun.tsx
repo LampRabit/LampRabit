@@ -43,8 +43,11 @@ export const isActive = (s?: AppStatus) => s?.state === "starting" || s?.state =
 
 /** How a project with a package.json runs: its saved setup or what package.json suggests. */
 export function useAppInfo(site: Site) {
-  return useQuery({ queryKey: ["app-info", site.name], queryFn: () => api.appInfo(site.name), enabled: site.nodeProject });
+  return useQuery({ queryKey: ["app-info", site.name], queryFn: () => api.appInfo(site.name), enabled: site.nodeProject || isLaravel(site) });
 }
+
+/** Laravel runs a dev server of its own (composer run dev, php artisan serve), with or without a package.json. */
+export const isLaravel = (site: Site) => site.framework?.toLowerCase() === "laravel";
 
 /** The command line a project's process runs, as shown to people. */
 export function appCommand(config: NodeApp) {
@@ -144,7 +147,10 @@ export function ServeSettings({ site, info, status }: { site: Site; info: AppInf
 
       {(draft.serve || !node) && (
         <>
-          <Row title={node ? "Start command" : "Dev server"} hint={node ? "From the project's template or package.json." : "Runs next to the site, e.g. Vite for assets; the site itself stays on PHP."}>
+          <Row
+            title={node ? "Start command" : "Dev server"}
+            hint={node ? "From the project's template or package.json." : isLaravel(site) ? "Laravel's own server (composer run dev or php artisan serve) on the port LampRabit picks; the domain stays on the web server." : "Runs next to the site, e.g. Vite for assets; the site itself stays on PHP."}
+          >
             {customising ? null : (
               <span className="flex min-w-0 items-center gap-2">
                 <code className="truncate rounded-md bg-surface-2 px-2 py-1 font-mono text-xs">{appCommand(draft) || "none"}</code>
@@ -168,6 +174,22 @@ export function ServeSettings({ site, info, status }: { site: Site; info: AppInf
               <p className="text-xs text-muted">
                 <code className="font-mono">{"{port}"}</code> becomes the port LampRabit picks; $PORT and $HOST are set too.
               </p>
+              {(info.serveCommands ?? []).length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-muted">Ready-made:</span>
+                  {info.serveCommands.map((c) => (
+                    <button
+                      key={c.command}
+                      type="button"
+                      title={c.label}
+                      onClick={() => set({ command: c.command })}
+                      className="rounded-md border border-line px-2 py-0.5 font-mono text-xs text-muted hover:border-accent/40 hover:text-fg"
+                    >
+                      {c.command}
+                    </button>
+                  ))}
+                </div>
+              )}
               {Object.keys(info.scripts).length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-xs text-muted">Scripts:</span>

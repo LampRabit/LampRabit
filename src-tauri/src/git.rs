@@ -841,13 +841,66 @@ pub struct Stash {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum StashAction {
-    /// Sets the working tree's changes aside (new files too when `untracked`).
-    Save { message: String, untracked: bool },
+    /// Sets the working tree's changes aside (new files too when `untracked`), or only the
+    /// staged ones when `staged` (git 2.35+).
+    Save {
+        message: String,
+        untracked: bool,
+        #[serde(default)]
+        staged: bool,
+    },
     /// Brings a stash back and keeps it in the list.
     Apply { index: u32 },
     /// Brings a stash back and removes it.
     Pop { index: u32 },
     Drop { index: u32 },
+    /// Makes a new branch at the commit the stash was made on, checks it out, applies the
+    /// stash there and removes it: the way out when the stash no longer applies cleanly.
+    Branch { index: u32, name: String },
+    /// Removes every stash.
+    Clear,
+}
+
+/// A file in a stash, with whether it was a new (untracked) file when it was stashed.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StashFile {
+    #[serde(flatten)]
+    pub file: CommitFile,
+    pub untracked: bool,
+}
+
+fn stash_ref(index: u32) -> String {
+    format!("stash@{{{index}}}")
+}
+
+/// A stash's files: its tracked changes (against the commit it was made on), then the new
+/// files it holds, which git keeps in the stash's third parent when they were included.
+pub async fn stash_files(dir: &Path, index: u32) -> Result<Vec<StashFile>> {
+    let rev = stash_ref(index);
+    let base = format!("{rev}^1");
+    let numstat = git(dir, &["diff", "--numstat", "-z", "-M", &base, &rev], QUICK).await?;
+    let names = git(dir, &["diff", "--name-status", "-z", "-M", &base, &rev], QUICK).await?;
+    let mut files: Vec<StashFile> = parse_commit_files(&numstat, &names).into_iter().map(|file| StashFile { file, untracked: false }).collect();
+    let third = format!("{rev}^3");
+    if git(dir, &["rev-parse", "--verify", "--quiet", &third], QUICK).await.is_ok() {
+        let numstat = git(dir, &["show", "--format=", "--numstat", "-z", &third], QUICK).await?;
+        let names = git(dir, &["show", "--format=", "--name-status", "-z", &third], QUICK).await?;
+        files.extend(parse_commit_files(&numstat, &names).into_iter().map(|file| StashFile { file, untracked: true }));
+    }
+    Ok(files)
+}
+
+/// One file's change inside a stash.
+pub async fn stash_file_diff(dir: &Path, index: u32, path: &str, untracked: bool) -> Result<String> {
+    check_paths(&[path.to_string()])?;
+    let rev = stash_ref(index);
+    let out = if untracked {
+        git(dir, &["show", "--format=", "--no-color", &format!("{rev}^3"), "--", path], QUICK).await?
+    } else {
+        git(dir, &["diff", "--no-color", "-M", &format!("{rev}^1"), &rev, "--", path], QUICK).await?
+    };
+    Ok(cut(out))
 }
 
 pub async fn stashes(dir: &Path) -> Result<Vec<Stash>> {
@@ -864,9 +917,11 @@ pub async fn stashes(dir: &Path) -> Result<Vec<Stash>> {
 
 pub async fn stash(dir: &Path, action: StashAction) -> Result<String> {
     match action {
-        StashAction::Save { message, untracked } => {
+        StashAction::Save { message, untracked, staged } => {
             let mut args = vec!["stash", "push"];
-            if untracked {
+            if staged {
+                args.push("--staged");
+            } else if untracked {
                 args.push("--include-untracked");
             }
             let message = message.trim().to_string();
@@ -878,6 +933,12 @@ pub async fn stash(dir: &Path, action: StashAction) -> Result<String> {
         StashAction::Apply { index } => git(dir, &["stash", "apply", &format!("stash@{{{index}}}")], QUICK).await,
         StashAction::Pop { index } => git(dir, &["stash", "pop", &format!("stash@{{{index}}}")], QUICK).await,
         StashAction::Drop { index } => git(dir, &["stash", "drop", &format!("stash@{{{index}}}")], QUICK).await,
+        StashAction::Branch { index, name } => {
+            let name = name.trim().to_string();
+            check_name(dir, &name, "branch").await?;
+            git(dir, &["stash", "branch", &name, &stash_ref(index)], QUICK).await
+        }
+        StashAction::Clear => git(dir, &["stash", "clear"], QUICK).await,
     }
 }
 
@@ -950,6 +1011,14 @@ pub enum TagAction {
     Delete { name: String },
     /// Sends one tag to a remote (pushes don't carry tags by default).
     Push { name: String, remote: String },
+    /// Sends every tag to a remote.
+    PushAll { remote: String },
+    /// Takes a tag off a remote (the local one stays).
+    DeleteRemote { name: String, remote: String },
+    /// Gets a remote's tags.
+    Fetch { remote: String },
+    /// Starts a branch at a tag and switches to it (a tag itself can't be committed on).
+    Branch { name: String, branch: String },
 }
 
 pub async fn tags(dir: &Path) -> Result<Vec<Tag>> {
@@ -969,14 +1038,19 @@ pub async fn tag(dir: &Path, action: TagAction) -> Result<String> {
             if name.starts_with('-') || git(dir, &["check-ref-format", &format!("refs/tags/{name}")], QUICK).await.is_err() {
                 return Err(Error::msg(format!("\"{name}\" isn't a valid tag name (like v1.2.0).")));
             }
+            // On HEAD, a commit or a branch: whatever names a commit.
+            if let Some(c) = commit.as_deref().map(str::trim).filter(|c| !c.is_empty())
+                && (c.starts_with('-') || git(dir, &["rev-parse", "--verify", "--quiet", &format!("{c}^{{commit}}")], QUICK).await.is_err())
+            {
+                return Err(Error::msg(format!("\"{c}\" isn't a commit or branch here.")));
+            }
             let mut args = vec!["tag"];
             let message = message.trim().to_string();
             if !message.is_empty() {
                 args.extend(["-a", "-m", message.as_str()]);
             }
             args.push(&name);
-            if let Some(c) = commit.as_deref() {
-                check_hash(c)?;
+            if let Some(c) = commit.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
                 args.push(c);
             }
             git(dir, &args, QUICK).await
@@ -993,7 +1067,61 @@ pub async fn tag(dir: &Path, action: TagAction) -> Result<String> {
             }
             git(dir, &["push", &remote, &format!("refs/tags/{name}")], NETWORK).await
         }
+        TagAction::PushAll { remote } => {
+            if remote.starts_with('-') {
+                return Err(Error::msg("That isn't a remote."));
+            }
+            git(dir, &["push", &remote, "--tags"], NETWORK).await
+        }
+        TagAction::DeleteRemote { name, remote } => {
+            if name.starts_with('-') || remote.starts_with('-') {
+                return Err(Error::msg("That isn't a tag."));
+            }
+            git(dir, &["push", &remote, "--delete", &format!("refs/tags/{name}")], NETWORK).await
+        }
+        TagAction::Fetch { remote } => {
+            if remote.starts_with('-') {
+                return Err(Error::msg("That isn't a remote."));
+            }
+            git(dir, &["fetch", &remote, "--tags"], NETWORK).await
+        }
+        TagAction::Branch { name, branch } => {
+            if name.starts_with('-') {
+                return Err(Error::msg("That isn't a tag."));
+            }
+            check_name(dir, &branch, "branch").await?;
+            git(dir, &["switch", "-c", &branch, &format!("refs/tags/{name}")], QUICK).await
+        }
     }
+}
+
+/// The tags a remote has, by name (one network call, for showing which aren't pushed).
+pub async fn remote_tags(dir: &Path, remote: &str) -> Result<Vec<String>> {
+    if remote.starts_with('-') {
+        return Err(Error::msg("That isn't a remote."));
+    }
+    let out = git(dir, &["ls-remote", "--tags", "--refs", remote], NETWORK).await?;
+    Ok(out.lines().filter_map(|l| l.split_once("refs/tags/").map(|(_, n)| n.trim().to_string())).collect())
+}
+
+/// Pulls a named branch of a remote into the current one, or pushes the current branch to
+/// a named branch of a remote (a different name, or a remote it doesn't track).
+pub async fn sync_branch(app: &tauri::AppHandle, op: &str, dir: &Path, pull: bool, remote: &str, branch: &str) -> Result<String> {
+    if remote.starts_with('-') || branch.starts_with('-') {
+        return Err(Error::msg("That isn't a remote branch."));
+    }
+    check_name(dir, branch, "branch").await?;
+    let status = status(dir).await?;
+    if !status.remotes.iter().any(|r| r.name == remote) {
+        return Err(Error::msg(format!("There's no remote called {remote}.")));
+    }
+    let out = if pull {
+        streamed(app, op, dir, &["pull", "--no-edit", "--progress", remote, branch], NETWORK).await?
+    } else {
+        status.branch.as_ref().ok_or_else(|| Error::msg("HEAD is detached: switch to a branch before pushing."))?;
+        streamed(app, op, dir, &["push", "--progress", remote, &format!("HEAD:refs/heads/{branch}")], NETWORK).await?
+    };
+    Ok(without_secrets(&out))
 }
 
 /// Undoes a commit with a new commit that reverses it (history stays as it is).
@@ -1287,11 +1415,25 @@ u UU N... 100644 100644 100644 100644 f1 f2 f3 conflict.txt\0\
         stage_hunk(&dir, "long.txt", 0, true).await.unwrap();
         assert!(diff(&dir, "long.txt", true, false).await.unwrap().is_empty());
         // Stash it away and back.
-        stash(&dir, StashAction::Save { message: "wip".into(), untracked: true }).await.unwrap();
+        std::fs::write(dir.join("fresh.txt"), "new\n").unwrap();
+        stash(&dir, StashAction::Save { message: "wip".into(), untracked: true, staged: false }).await.unwrap();
         assert!(status(&dir).await.unwrap().files.is_empty());
         assert_eq!(stashes(&dir).await.unwrap()[0].index, 0);
+        // Its files: the tracked change, and the new file from the stash's third parent.
+        let inside = stash_files(&dir, 0).await.unwrap();
+        assert!(inside.iter().any(|f| f.file.path == "long.txt" && !f.untracked));
+        assert!(inside.iter().any(|f| f.file.path == "fresh.txt" && f.untracked));
+        assert!(stash_file_diff(&dir, 0, "fresh.txt", true).await.unwrap().contains("+new"));
+        assert!(stash_file_diff(&dir, 0, "long.txt", false).await.unwrap().contains("+line two"));
         stash(&dir, StashAction::Pop { index: 0 }).await.unwrap();
         assert!(stashes(&dir).await.unwrap().is_empty());
+        std::fs::remove_file(dir.join("fresh.txt")).unwrap();
+        // Clear removes every stash.
+        stash(&dir, StashAction::Save { message: String::new(), untracked: false, staged: false }).await.unwrap();
+        stash(&dir, StashAction::Clear).await.unwrap();
+        assert!(stashes(&dir).await.unwrap().is_empty());
+        assert!(status(&dir).await.unwrap().files.is_empty());
+        std::fs::write(dir.join("long.txt"), lines.replace("line 2\n", "line two\n")).unwrap();
         discard(&dir, &["long.txt".into()]).await.unwrap();
         // Tags.
         tag(&dir, TagAction::Create { name: "v1.0".into(), message: "First".into(), commit: None }).await.unwrap();

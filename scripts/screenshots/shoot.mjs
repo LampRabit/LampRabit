@@ -1,6 +1,6 @@
 // Captures every main view of the app with a fake backend (harness.tsx) in headless Edge
 // or Chrome, into scripts/screenshots/out/. Start `npx vite --port 1430` first, or pass
-// --serve to have this script start it. Usage: node scripts/screenshots/shoot.mjs [name…]
+// --serve to have this script start it. Usage: node scripts/screenshots/shoot.mjs [nameâ€¦]
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,6 +25,10 @@ const views = {
   home: "page=overview",
   "home-dark": "page=overview&theme=dark",
   "home-issues": "page=overview&issues=1",
+  "home-tiles": "page=overview&layout=tiles&profiles=1",
+  "home-compact": "page=overview&layout=compact&profiles=1&theme=dark",
+  "home-compact-light": "page=overview&layout=compact&profiles=1",
+  "home-list": "page=overview&profiles=1",
   palette: "page=overview&palette=1",
   "palette-dark": "page=overview&palette=1&theme=dark",
   sites: "page=sites",
@@ -36,7 +40,12 @@ const views = {
   "git-history-file": "page=sites&tab=git&gitView=history&file=.editorconfig",
   "git-branches": "page=sites&tab=git&gitView=branches",
   "git-remotes": "page=sites&tab=git&gitView=remotes",
+  "git-tags": "page=sites&tab=git&gitView=tags",
+  "git-stashes": "page=sites&tab=git&gitView=stashes",
+  "services-postgres": "page=services&service=postgres&pg=1&height=2200",
   services: "page=services",
+  "services-database": "page=services&service=mariadb",
+  "services-client": "page=services&service=phpmyadmin",
   logs: "page=logs",
   "logs-filters": "page=logs&filters=1",
   "logs-dark": "page=logs&theme=dark",
@@ -72,7 +81,7 @@ for (const [name, query] of Object.entries(views)) {
   if (only.length && !only.includes(name)) continue;
   const width = /width=(\d+)/.exec(query)?.[1] ?? "1440";
   const file = join(out, `${name}.png`);
-  execFileSync(browser, ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--window-size=${width},900`, `--user-data-dir=${profile}`, "--virtual-time-budget=6000", `--screenshot=${file}`, `http://localhost:1430/scripts/screenshots/index.html?${query}`], { stdio: "ignore" });
+  execFileSync(browser, ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--window-size=${width},${new URLSearchParams(query).get("height") ?? 900}`, `--user-data-dir=${profile}`, "--virtual-time-budget=6000", `--screenshot=${file}`, `http://localhost:1430/scripts/screenshots/index.html?${query}`], { stdio: "ignore" });
   console.log(file);
 }
 server?.kill();

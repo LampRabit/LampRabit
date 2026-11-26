@@ -126,6 +126,24 @@ pub(crate) async fn git_sync(app: AppHandle, state: State<'_, AppState>, name: S
     Ok(out)
 }
 
+/// Pull from, or push to, a branch the current one doesn't track.
+#[tauri::command]
+pub(crate) async fn git_sync_branch(app: AppHandle, state: State<'_, AppState>, name: String, pull: bool, remote: String, branch: String, op: Option<String>) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    let op = op.unwrap_or_else(|| format!("{name}:{}:{branch}", if pull { "pull" } else { "push" }));
+    let out = git::sync_branch(&app, &op, &project_dir(&layout, &name)?, pull, &remote, &branch).await?;
+    logs::system(&app, logs::Level::Info, format!("Git {} {remote}/{branch} in {name} finished", if pull { "pull from" } else { "push to" }));
+    Ok(out)
+}
+
+#[tauri::command]
+pub(crate) async fn git_remote_tags(state: State<'_, AppState>, name: String, remote: String) -> Result<Vec<String>> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::remote_tags(&project_dir(&layout, &name)?, &remote).await
+}
+
 #[tauri::command]
 pub(crate) async fn git_remote(state: State<'_, AppState>, name: String, action: git::RemoteAction) -> Result<()> {
     let (settings, layout) = state.snapshot().await;
@@ -165,6 +183,20 @@ pub(crate) async fn git_stashes(state: State<'_, AppState>, name: String) -> Res
     let (settings, layout) = state.snapshot().await;
     git::configure(&settings, &layout);
     git::stashes(&project_dir(&layout, &name)?).await
+}
+
+#[tauri::command]
+pub(crate) async fn git_stash_files(state: State<'_, AppState>, name: String, index: u32) -> Result<Vec<git::StashFile>> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::stash_files(&project_dir(&layout, &name)?, index).await
+}
+
+#[tauri::command]
+pub(crate) async fn git_stash_file_diff(state: State<'_, AppState>, name: String, index: u32, path: String, untracked: bool) -> Result<String> {
+    let (settings, layout) = state.snapshot().await;
+    git::configure(&settings, &layout);
+    git::stash_file_diff(&project_dir(&layout, &name)?, index, &path, untracked).await
 }
 
 #[tauri::command]

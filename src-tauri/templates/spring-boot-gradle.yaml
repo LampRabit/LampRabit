@@ -1,0 +1,56 @@
+schema: 1
+id: spring-boot-gradle
+name: Spring Boot (Gradle)
+description: A Spring Boot web app from Spring Initializr built with Gradle instead of Maven (with DevTools), run with its Gradle wrapper.
+icon: coffee
+color: green
+duration: Gradle · a few minutes the first time
+requires:
+  java: "17"
+variables:
+  - id: package
+    label: Java package
+    default: com.example.app
+    required: true
+  - id: dsl
+    label: Build script
+    type: choice
+    default: gradle-project
+    options:
+      - { value: gradle-project, label: Groovy (build.gradle) }
+      - { value: gradle-project-kotlin, label: Kotlin (build.gradle.kts) }
+steps:
+  # Spring Initializr builds the project; the zip holds it in a folder named after it.
+  - name: Generating the project with Spring Initializr
+    download:
+      url: "https://start.spring.io/starter.zip?type={{vars.dsl}}&language=java&groupId=com.example&artifactId={{project}}&name={{project}}&packageName={{vars.package}}&javaVersion={{java_major}}&dependencies=web,devtools&baseDir={{project}}"
+      extract: true
+      strip: "{{project}}"
+  - name: Using the port LampRabit picks
+    write:
+      path: src/main/resources/application.properties
+      content: |
+        spring.application.name={{project}}
+        # LampRabit passes the port it serves {{domain}} from as PORT.
+        server.port=${PORT:8080}
+        server.address=127.0.0.1
+        server.forward-headers-strategy=framework
+  - name: Downloading Gradle and the dependencies (first build)
+    run: "{{gradlew}} --quiet build -x test"
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: New Spring Boot project
+serve:
+  mode: dynamic
+  command: "{{gradlew}} bootRun"
+commands:
+  list:
+    - name: Run the tests
+      run: "{{gradlew}} test"
+    - name: Build the jar
+      run: "{{gradlew}} bootJar"
+done: Start it from the Sites page (the first start compiles it); it's served at {{url}}.

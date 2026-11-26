@@ -4,14 +4,14 @@ name: FastAPI
 description: A FastAPI app in main.py with interactive docs, run by Uvicorn and reloaded when you save.
 icon: zap
 color: teal
-duration: pip · under a minute
+duration: pip, uv or conda · under a minute
 requires:
   python: "3.10"
 steps:
-  - name: Creating a virtual environment (.venv)
-    run: python -m venv .venv
+  - name: Creating the environment (.venv) with {{py}}
+    run: "{{py.venv}}"
   - name: Installing FastAPI and Uvicorn
-    run: '{{venv.python}} -m pip install --disable-pip-version-check fastapi "uvicorn[standard]"'
+    run: '{{py.add}} fastapi "uvicorn[standard]"'
   - name: Creating main.py
     write:
       path: main.py
@@ -24,7 +24,9 @@ steps:
         @app.get("/")
         def index():
             return {"message": "Hello from {{project}}"}
+  # uv records the packages in pyproject.toml and uv.lock instead.
   - name: Writing requirements.txt
+    if: py != uv
     write:
       path: requirements.txt
       content: |

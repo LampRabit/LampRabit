@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePageActive } from "../lib/pageActive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { openUrl } from "../lib/open";
 import {
   Activity as Pulse,
   AlertTriangle,
@@ -20,6 +21,10 @@ import {
   Keyboard,
   Layers,
   Layers3,
+  LayoutGrid,
+  LayoutList,
+  Grid3x3,
+  Save,
   Mail,
   Pencil,
   Play,
@@ -59,10 +64,9 @@ import {
   type Settings,
   type Site,
   type SitesInfo,
-  type Runtime,
 } from "../lib/api";
 import { readPref, useAppStore, writePref, type Activity, notifyError } from "../lib/store";
-import { toolUrl } from "../lib/tools";
+import { dbTools, preferredTool, toolUrl } from "../lib/tools";
 import { TILE, runtimeTiles, tileFor } from "../components/runtimes";
 import { formatClock, formatUptime, useNow } from "../lib/time";
 import { connection, copyText, envText } from "../lib/connections";
@@ -72,7 +76,7 @@ import { useHotkeys } from "../lib/shortcuts";
 import { Button, Card, Pill, Segmented } from "../components/ui";
 import Menu from "../components/Menu";
 import ProblemPanel from "../components/ProblemPanel";
-import { NeedsAttention, StatusStrip, conflictFor, useIssues } from "../components/HomeStatus";
+import { FreePort, NeedsAttention, StatusStrip, conflictFor, holder, useIssues } from "../components/HomeStatus";
 import { useTunnels } from "../components/Tunnels";
 import ProfilesDialog, { ProfilesTransfer } from "../components/ProfilesDialog";
 import Sparkline from "../components/Sparkline";
@@ -124,9 +128,10 @@ export default function Overview() {
   const connMode = useAppStore((s) => s.connMode);
   const setConnMode = useAppStore((s) => s.setConnMode);
   const openNewProject = useAppStore((s) => s.setNewProjectOpen);
-  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
-  // Pages stay mounted when hidden; they only poll while on screen.
+  // Pages stay mounted when hidden; they only poll while on screen. Services poll with the
+  // ports, so a conflict that ended (the other program quit) clears on its own.
   const active = usePageActive();
+  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices, refetchInterval: active ? 5000 : false });
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: active ? 15_000 : false });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const catalog = useCatalog();
@@ -138,6 +143,11 @@ export default function Overview() {
   const [selected, setSelected] = useState<Set<ServiceKind>>(new Set());
   const [focus, setFocus] = useState(0);
   const [profilesDialog, setProfilesDialog] = useState<{ initial?: ServiceKind[]; profile?: Settings["profiles"][number] } | null>(null);
+  const [layout, setLayoutState] = useState<ServiceLayout>(() => (LAYOUTS.find((l) => l.id === readPref("home-services-layout"))?.id ?? "list"));
+  const setLayout = (next: ServiceLayout) => {
+    setLayoutState(next);
+    writePref("home-services-layout", next);
+  };
   const rows = useRef<(HTMLElement | null)[]>([]);
   useUsageSampler(stack.running.length > 0);
 
@@ -154,6 +164,20 @@ export default function Overview() {
   useEffect(() => {
     if (stack.profile) setSelected(new Set(stack.profile.services));
   }, [stack.profile?.name, stack.profile?.services.join("|")]);
+
+  // Ticking services while a profile of your own is active edits that profile; with "All
+  // services" it starts a new one.
+  const updateProfile = useMutation({
+    mutationFn: async ({ name, services }: { name: string; services: ServiceKind[] }) => {
+      if (!settings.data) throw new Error("Settings are still loading");
+      return api.saveSettings({ ...settings.data, profiles: settings.data.profiles.map((p) => (p.name === name ? { ...p, services } : p)) });
+    },
+    onSuccess: (saved, { name }) => {
+      queryClient.setQueryData(["settings"], saved);
+      notify("info", `Updated the ${name} profile`);
+    },
+    onError: notifyError,
+  });
 
   const deleteProfile = useMutation({
     mutationFn: async (name: string) => {
@@ -264,7 +288,7 @@ export default function Overview() {
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <section aria-labelledby="services-heading">
-          <div className="mb-6">
+          <div className="mb-3 empty:mb-0">
             {installedCount > 0 && (
             <ProfileTiles
               profiles={settings.data?.profiles ?? []}
@@ -279,17 +303,16 @@ export default function Overview() {
               onDelete={(name) => {
                 if (window.confirm(`Delete the “${name}” profile?`)) deleteProfile.mutate(name);
               }}
-              onStartAll={stack.startAll}
-              onStartProfile={stack.startProfile}
               isUp={stack.isUp}
-              busy={stack.busy}
             />
           )}
           </div>
           <div className="mb-3 px-1">
-            <div className="flex items-center gap-3">
-              <h2 id="services-heading" className="text-base font-medium">Services</h2>
-            </div>
+            {installedCount === 0 && (
+              <h2 id="services-heading" className="mb-1 text-base font-medium">
+                Services
+              </h2>
+            )}
             <div className="flex flex-wrap items-center gap-2.5">
               <label className="flex cursor-pointer items-center gap-2 text-sm text-muted select-none">
                 <input
@@ -308,13 +331,25 @@ export default function Overview() {
               <span className="text-sm text-muted tabular-nums" aria-live="polite">
                 {chosen.length} selected
               </span>
-              <Button size="sm" variant="ghost" disabled={chosen.length === 0} onClick={() => setProfilesDialog({ initial: chosen })}>
-                <Layers size={13} /> Save as profile
-              </Button>
+              {/* Only with something ticked: "Profile" saves a new one; with a profile of your own active and the ticks changed, it updates that profile. */}
+              {chosen.length > 0 &&
+                (stack.profile ? (
+                  sameServices(chosen, stack.profile.services) ? null : (
+                    <Button size="sm" variant="ghost" onClick={() => updateProfile.mutate({ name: stack.profile!.name, services: chosen })} disabled={updateProfile.isPending} title={`Save the ticked services as the ${stack.profile.name} profile`}>
+                      <Save size={13} /> Update profile
+                    </Button>
+                  )
+                ) : (
+                  <Button size="sm" variant="ghost" onClick={() => setProfilesDialog({ initial: chosen })} title="Save the ticked services as a new profile">
+                    <Save size={13} /> Profile
+                  </Button>
+                ))}
+              <LayoutSwitch value={layout} onChange={setLayout} />
+              {installedCount > 0 && <ProfilesTransfer menu />}
             </div>
           </div>
 
-          <ul className="space-y-2.5" aria-label="Services">
+          <ul className={LAYOUTS.find((l) => l.id === layout)!.grid} aria-label="Services">
             {list.map((s, i) => (
               <li key={s.kind}>
                 <ServiceRow
@@ -334,6 +369,7 @@ export default function Overview() {
                   profileActive={!!stack.profile}
                   onCopy={copy}
                   revealAt={revealed?.kind === s.kind ? revealed.at : undefined}
+                  layout={layout}
                 />
               </li>
             ))}
@@ -358,6 +394,29 @@ export default function Overview() {
   );
 }
 
+type ServiceLayout = "list" | "tiles" | "compact";
+
+/** How Home lays out its services: rows (the default), big tiles three to a row, or compact tiles four to a row. Kept per device. */
+const LAYOUTS: { id: ServiceLayout; label: string; icon: typeof LayoutList; grid: string }[] = [
+  { id: "list", label: "List", icon: LayoutList, grid: "space-y-2.5" },
+  { id: "tiles", label: "Tiles", icon: LayoutGrid, grid: "grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-3" },
+  { id: "compact", label: "Compact tiles", icon: Grid3x3, grid: "grid items-start gap-2.5 grid-cols-2 md:grid-cols-3 lg:grid-cols-4" },
+];
+
+const sameServices = (a: ServiceKind[], b: ServiceKind[]) => a.length === b.length && a.every((k) => b.includes(k));
+
+/** One button that steps through the layouts; its icon is the current one. */
+function LayoutSwitch({ value, onChange }: { value: ServiceLayout; onChange: (l: ServiceLayout) => void }) {
+  const i = LAYOUTS.findIndex((l) => l.id === value);
+  const next = LAYOUTS[(i + 1) % LAYOUTS.length];
+  const Icon = LAYOUTS[i].icon;
+  return (
+    <Button size="sm" variant="ghost" onClick={() => onChange(next.id)} aria-label={`Layout: ${LAYOUTS[i].label}. Switch to ${next.label}`} title={`${LAYOUTS[i].label} · click for ${next.label.toLowerCase()}`}>
+      <Icon size={14} />
+    </Button>
+  );
+}
+
 function ProfileTiles({
   profiles,
   active,
@@ -365,10 +424,7 @@ function ProfileTiles({
   onManage,
   onEdit,
   onDelete,
-  onStartAll,
-  onStartProfile,
   isUp,
-  busy,
 }: {
   profiles: Settings["profiles"];
   active: string | null;
@@ -376,236 +432,97 @@ function ProfileTiles({
   onManage: () => void;
   onEdit: (profile: Settings["profiles"][number]) => void;
   onDelete: (name: string) => void;
-  onStartAll: () => void;
-  onStartProfile: (services: ServiceKind[]) => void;
   /** Whether a profile's services (all services for []) are already running. */
   isUp: (services: ServiceKind[]) => boolean;
-  busy: boolean;
 }) {
-  const profileList = [{ name: null, label: "All services", services: [] as ServiceKind[] }, ...profiles.map((p) => ({ ...p, label: p.name }))];
-  // Folded until there's a profile of your own: "All services" alone repeats the list below.
-  const [open, setOpen] = useState(() => {
-    const saved = readPref("home-profiles");
-    return saved === null ? profiles.length > 0 : saved === "open";
-  });
-  const toggle = () => {
-    setOpen(!open);
-    writePref("home-profiles", open ? "closed" : "open");
-  };
+  const profileList = [{ name: null as string | null, label: "All services", services: [] as ServiceKind[] }, ...profiles.map((p) => ({ ...p, label: p.name }))];
 
+  // One row of pills: picking one filters the list below and is what the header's Start
+  // starts, so the cards' own Start buttons (and their height) are gone.
   return (
-    <section aria-labelledby="profiles-heading">
-      <div className={clsx("flex items-center justify-between px-1", open && "mb-3")}>
-        <div>
-          <button type="button" onClick={toggle} aria-expanded={open} className="flex items-center gap-1.5 rounded">
-            <ChevronDown size={16} className={clsx("text-muted transition-transform", !open && "-rotate-90")} aria-hidden />
-            <h2 id="profiles-heading" className="text-base font-medium">Stack profiles</h2>
-            {!open && active && <span className="text-sm font-normal text-muted">· {active}</span>}
-          </button>
-          {open && <p className="text-xs text-muted">Select a profile to filter your stack, or start its services directly.</p>}
-        </div>
-        {open && <ProfilesTransfer />}
-      </div>
-      {open && (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3" role="radiogroup" aria-label="Service profiles">
+    // The section's heading: the pills are the services' presets, which needs no label of its own.
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-1">
+      <h2 id="services-heading" className="text-base font-medium">
+        Services
+      </h2>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Stack profiles">
         {profileList.map((profile) => {
           const selected = profile.name === active;
           const up = isUp(profile.services);
-          const shownServices = profile.services.slice(0, 3);
-          const extraCount = profile.services.length - shownServices.length;
-
+          const what = profile.name ? profile.services.map((k) => serviceLabels[k] ?? k).join(", ") : "Every installed service";
           return (
-            <article
+            <div
               key={profile.name ?? "all"}
-              onClick={() => onSelect(profile.name)}
               className={clsx(
-                "group relative flex min-h-[142px] cursor-pointer flex-col justify-between rounded-2xl border p-4 shadow-card transition-[border-color,background-color,box-shadow]",
-                selected
-                  ? "border-accent/70 bg-accent-soft/30 ring-1 ring-accent/30"
-                  : "border-line bg-surface hover:border-accent/40 hover:shadow-md",
+                "group flex h-8 items-center rounded-full border text-sm transition-colors",
+                selected ? "border-accent/60 bg-accent-soft/50 text-accent-text" : "border-line bg-surface text-fg hover:border-accent/40",
               )}
             >
-              {/* Card Header: Icon + Title + Status/Menu */}
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span
-                    className={clsx(
-                      "flex size-8 shrink-0 items-center justify-center rounded-xl transition-colors",
-                      selected ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted group-hover:text-fg",
-                    )}
-                  >
-                    <Layers size={16} />
-                  </span>
-                  <div className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-fg">
-                      {profile.name ?? profile.label}
-                    </span>
-                    <span className="block text-[11px] text-muted">
-                      {profile.name ? `${profile.services.length} ${profile.services.length === 1 ? "service" : "services"}` : "Full stack"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  {up && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[11px] font-medium text-ok">
-                      <span className="size-1.5 rounded-full bg-ok" />
-                      Running
-                    </span>
-                  )}
-                  {profile.name && (
-                    <Menu
-                      label={`${profile.name} profile actions`}
-                      plain
-                      items={[
-                        { label: "Edit profile", icon: <Pencil size={14} />, onSelect: () => onEdit(profile) },
-                        { label: "Delete profile", icon: <Trash2 size={14} />, onSelect: () => onDelete(profile.name) },
-                      ]}
-                    />
-                  )}
-                </div>
-              </div>
-
-              {/* Service Badges */}
-              <div className="my-2.5">
-                {profile.services.length > 0 ? (
-                  <div className="flex flex-wrap gap-1">
-                    {shownServices.map((kind) => (
-                      <span
-                        key={kind}
-                        className="rounded-md border border-line/60 bg-surface-2/80 px-1.5 py-0.5 text-[11px] font-medium text-fg"
-                      >
-                        {serviceLabels[kind]}
-                      </span>
-                    ))}
-                    {extraCount > 0 && (
-                      <span className="rounded-md border border-line/60 bg-surface-2/80 px-1.5 py-0.5 text-[11px] font-medium text-muted">
-                        +{extraCount} more
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <span className="text-xs text-muted">Runs all installed services together</span>
-                )}
-              </div>
-
-              {/* Card Footer: Selection Indicator & Action */}
-              <div className="flex items-center justify-between border-t border-line/50 pt-2.5">
-                <span className="text-xs">
-                  {selected ? (
-                    <span className="inline-flex items-center gap-1 font-medium text-accent-text">
-                      {/* "Active" read as "running" while its services were stopped. */}
-                      <Check size={12} strokeWidth={2.5} /> Selected
-                    </span>
-                  ) : (
-                    <span className="text-muted group-hover:text-fg">Click to select</span>
-                  )}
+              <button
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => onSelect(profile.name)}
+                title={`${what}${up ? " · running" : ""}`}
+                className={clsx("flex h-full items-center gap-1.5 rounded-full pl-3", profile.name ? "pr-1" : "pr-3")}
+              >
+                {selected ? <Check size={13} strokeWidth={2.5} aria-hidden /> : <Layers size={13} className="text-muted" aria-hidden />}
+                <span className="max-w-40 truncate font-medium">{profile.label}</span>
+                {profile.name && <span className="text-xs text-muted tabular-nums">{profile.services.length}</span>}
+                {up && <span className="size-1.5 rounded-full bg-ok" aria-label="Running" />}
+              </button>
+              {profile.name && (
+                <span className="pr-1">
+                  <Menu
+                    label={`${profile.name} profile actions`}
+                    plain
+                    items={[
+                      { label: "Edit profile", icon: <Pencil size={14} />, onSelect: () => onEdit(profile as Settings["profiles"][number]) },
+                      { label: "Delete profile", icon: <Trash2 size={14} />, onSelect: () => onDelete(profile.name!) },
+                    ]}
+                  />
                 </span>
-
-                <Button
-                  size="sm"
-                  variant={selected && !up ? "primary" : "secondary"}
-                  disabled={busy || up}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (profile.name) onStartProfile(profile.services);
-                    else onStartAll();
-                  }}
-                  className="h-7 px-2.5 text-xs"
-                >
-                  {up ? (
-                    <>
-                      <Check size={12} /> Running
-                    </>
-                  ) : (
-                    <>
-                      <Play size={11} /> Start
-                    </>
-                  )}
-                </Button>
-              </div>
-            </article>
+              )}
+            </div>
           );
         })}
-
         <button
           type="button"
           onClick={onManage}
-          className="flex min-h-[142px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-line bg-surface/40 p-4 text-sm font-medium text-muted transition-colors hover:border-accent/60 hover:bg-accent-soft/30 hover:text-accent-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="flex h-8 items-center gap-1 rounded-full border border-dashed border-line px-3 text-sm text-muted transition-colors hover:border-accent/60 hover:text-accent-text"
         >
-          <span className="flex size-9 items-center justify-center rounded-full border border-dashed border-current">
-            <Plus size={16} />
-          </span>
-          Add custom profile
+          <Plus size={13} /> New profile
         </button>
       </div>
-      )}
-    </section>
+    </div>
   );
 }
 
 /** What "Open" does for a service: its site, inbox or database tool. */
-/**
- * The installed web tools that open a database server, each with the URL that lands on
- * that server: phpMyAdmin numbers its servers (default database first, as configs.rs
- * writes them), Adminer takes the address, phpPgAdmin and pgAdmin have LampRabit's
- * PostgreSQL in their own lists.
- */
-function dbTools(service: ServiceInfo, sites: SitesInfo | undefined, settings: Settings | undefined): { tool: Runtime; url: string }[] {
-  const mailUi = settings?.ports.services["mailpit.ui"];
-  const at = (tool: Runtime, url: string | undefined, query = "") => (url ? [{ tool, url: `${url}${query}` }] : []);
-  // KarotX, LampRabit's own client, comes first: it lists every local database already.
-  const karotx = at("karotx", toolUrl("karotx", sites, mailUi, settings?.ports.services["karotx.http"]));
-  if (service.kind === "mongodb" || service.kind === "redis") return karotx;
-  if (service.kind === "mariadb" || service.kind === "mysql") {
-    const order = (["mariadb", "mysql"] as const)
-      .filter((d) => settings?.versions[d])
-      .sort((a, b) => Number(b === settings?.defaultDatabase) - Number(a === settings?.defaultDatabase));
-    return [
-      ...karotx,
-      ...at("phpmyadmin", toolUrl("phpmyadmin", sites, mailUi), `?server=${Math.max(1, order.findIndex((d) => d === service.kind) + 1)}`),
-      ...at("adminer", toolUrl("adminer", sites, mailUi), `?server=127.0.0.1:${service.port}&username=root`),
-    ];
-  }
-  if (service.kind === "postgres") {
-    return [
-      ...karotx,
-      ...at("adminer", toolUrl("adminer", sites, mailUi), `?pgsql=127.0.0.1:${service.port}&username=root&db=postgres`),
-      ...at("phppgadmin", toolUrl("phppgadmin", sites, mailUi)),
-      ...at("pgadmin", toolUrl("pgadmin", sites, mailUi, settings?.ports.services["pgadmin.http"])),
-    ];
-  }
-  return [];
-}
-
-/** The tool a database's Open button uses: the one picked last on this device, else the first installed. */
-const preferredTool = (kind: ServiceKind, tools: { tool: Runtime; url: string }[]) =>
-  tools.find((t) => t.tool === readPref(`dbTool.${kind}`)) ?? tools[0];
-
 function openAction(
   service: ServiceInfo,
   sites: SitesInfo | undefined,
   settings: Settings | undefined,
-  navigate: (p: "services") => void,
+  _navigate: (p: "services") => void,
   catalog?: { runtimes: RuntimeInfo[] },
 ): { label: string; icon: typeof ExternalLink; run: () => void; always?: boolean } | null {
   if (isServer(service.kind)) {
     return { label: "Open in browser", icon: ExternalLink, run: () => openUrl(connection(service).url + "/").catch(notifyError) };
   }
   if (service.kind === "mariadb" || service.kind === "mysql" || service.kind === "postgres") {
-    // The tool picked last for this database (the ⋯ menu lists the others).
-    const tool = preferredTool(service.kind, dbTools(service, sites, settings));
-    if (!tool) return { label: `Install ${runtimeLabels.karotx ?? "KarotX"}`, icon: Table2, run: () => navigate("services"), always: true };
+    // The database's default app, chosen on the Services page (the ⋯ menu lists the others).
+    const tool = preferredTool(service.kind, dbTools(service.kind, sites, settings), settings);
+    if (!tool) return { label: `Install ${runtimeLabels.karotx ?? "KarotX"}`, icon: Table2, run: () => useAppStore.getState().openService("karotx"), always: true };
     return { label: `Open ${runtimeLabels[tool.tool]}`, icon: Table2, run: () => openUrl(tool.url).catch(notifyError) };
   }
-  const karotx = dbTools(service, sites, settings)[0];
-  if ((service.kind === "mongodb" || service.kind === "redis") && karotx) {
-    return { label: `Open ${runtimeLabels.karotx ?? "KarotX"}`, icon: Table2, run: () => openUrl(karotx.url).catch(notifyError) };
+  const client = preferredTool(service.kind, dbTools(service.kind, sites, settings), settings);
+  if ((service.kind === "mongodb" || service.kind === "redis") && client) {
+    return { label: `Open ${runtimeLabels[client.tool]}`, icon: Table2, run: () => openUrl(client.url).catch(notifyError) };
   }
   if (service.kind === "mongodb") {
     return settings?.versions.compass
       ? { label: "Open Compass", icon: Table2, run: () => api.openCompass().catch(notifyError) }
-      : { label: `Install ${runtimeLabels.karotx ?? "KarotX"}`, icon: Table2, run: () => navigate("services"), always: true };
+      : { label: `Install ${runtimeLabels.karotx ?? "KarotX"}`, icon: Table2, run: () => useAppStore.getState().openService("karotx"), always: true };
   }
   // Its own page, from its manifest (a web interface, a console).
   const link = serviceLink(infoFor(catalog, service.kind), sites, settings);
@@ -630,9 +547,11 @@ function ServiceRow({
   profileActive,
   onCopy,
   revealAt,
+  layout = "list",
 }: {
   /** Set when Needs attention asks to show this row's fixes. */
   revealAt?: number;
+  layout?: ServiceLayout;
   ref: (el: HTMLElement | null) => void;
   service: ServiceInfo;
   now: number;
@@ -675,9 +594,6 @@ function ServiceRow({
   const degraded = running && service.health?.status === "degraded";
   const conflict = conflictFor(service, ports);
   const hasIssues = !!(conflict || degraded || (service.problem && !running));
-  // Re-renders the row when a different tool is picked from the menu (the choice itself
-  // lives in the device's preferences).
-  const [, setToolPick] = useState<string | null>(null);
   const action = openAction(service, sites, settings, navigate, catalog.data);
   const conn = connection(service);
   const connValue = copyText(conn, connMode);
@@ -688,27 +604,28 @@ function ServiceRow({
       ? { tone: "danger" as const, text: "Not responding" }
       : running
         ? { tone: "ok" as const, text: service.health?.status === "healthy" ? "Healthy" : "Running" }
-        : service.problem
-          ? { tone: "danger" as const, text: "Failed" }
-          : service.state === "starting" || service.state === "stopping"
-            ? { tone: "warn" as const, text: service.state === "starting" ? "Starting" : "Stopping" }
-            : { tone: "muted" as const, text: "Stopped" };
+        : service.problem?.port != null
+          ? { tone: "danger" as const, text: `Port ${service.problem.port} in use` }
+          : service.problem
+            ? { tone: "danger" as const, text: "Failed" }
+            : conflict
+              ? { tone: "warn" as const, text: `Port ${conflict.port} in use` }
+              : service.state === "starting" || service.state === "stopping"
+                ? { tone: "warn" as const, text: service.state === "starting" ? "Starting" : "Stopping" }
+                : { tone: "muted" as const, text: "Stopped" };
 
   const lastCpu = usage?.cpu?.length ? usage.cpu[usage.cpu.length - 1] : undefined;
   const lastMem = usage?.memory?.length ? usage.memory[usage.memory.length - 1] : undefined;
 
-  // Every installed web tool for this database; the one picked becomes its Open button's.
-  const tools = dbTools(service, sites, settings);
+  // Every installed web tool for this database. Opening one here doesn't change the default,
+  // which is chosen on the database's page in Services.
+  const tools = dbTools(service.kind, sites, settings);
   const toolMenu =
     tools.length > 1
       ? tools.map((t) => ({
-          label: `Open in ${runtimeLabels[t.tool]}${preferredTool(service.kind, tools)?.tool === t.tool ? " (default)" : ""}`,
+          label: `Open in ${runtimeLabels[t.tool]}${preferredTool(service.kind, tools, settings)?.tool === t.tool ? " (default)" : ""}`,
           icon: <Table2 size={15} />,
-          onSelect: () => {
-            writePref(`dbTool.${service.kind}`, t.tool);
-            setToolPick(t.tool);
-            openUrl(t.url).catch(notifyError);
-          },
+          onSelect: () => openUrl(t.url).catch(notifyError),
         }))
       : [];
   const dbMenu = [
@@ -717,6 +634,120 @@ function ServiceRow({
       ? [{ label: "Open command-line client", icon: <TerminalSquare size={15} />, onSelect: () => api.openDbClient(service.kind as DatabaseKind).catch(notifyError) }]
       : []),
   ];
+
+  const tile = layout !== "list";
+  const compact = layout === "compact";
+  // Controls keep their own clicks, and selecting text isn't a click.
+  const onRowClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button, a, input, select, label, [role=menu], [role=menuitem]")) return;
+    if (window.getSelection()?.toString()) return;
+    if (service.installed) setExpanded(!expanded);
+  };
+  const checkbox = (
+    <input
+      type="checkbox"
+      className="size-4 shrink-0 accent-(--accent) disabled:opacity-30 cursor-pointer"
+      checked={selected}
+      onChange={onToggle}
+      disabled={!service.installed}
+      aria-label={`Select ${service.label}`}
+      tabIndex={-1}
+    />
+  );
+  // Running: the service's icon and name turn the accent colour in every layout.
+  const iconBox = running ? "bg-accent-soft text-accent-text" : meta.tile;
+  const nameTone = running ? "text-accent-text" : "text-fg";
+  const startStop = !service.installed ? (
+    <Button size="sm" variant="primary" onClick={() => useAppStore.getState().openService(service.kind)}>
+      Install
+    </Button>
+  ) : service.external ? (
+    <span className="px-2 text-xs text-muted" title="Started by the Ollama app; quit it there to stop it.">
+      Ollama app
+    </span>
+  ) : running || loading || service.state === "stopping" ? (
+    <>
+      <Button size="sm" variant={tile ? "ghost" : "secondary"} onClick={() => stop.mutate()} disabled={busy && !loading} aria-label={`Stop ${service.label}`} title="Stop">
+        <Square size={11} className="fill-current" /> Stop
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => restart.mutate()} disabled={busy} aria-label={`Restart ${service.label}`} title="Restart (R)">
+        <RotateCw size={14} className={clsx(restart.isPending && "animate-spin")} />
+      </Button>
+    </>
+  ) : (
+    <Button size="sm" variant={tile ? "ghost" : "soft"} className={clsx(tile && "text-accent-text")} onClick={() => start.mutate()} disabled={busy} aria-label={`Start ${service.label}`} title="Start">
+      <Play size={12} /> Start
+    </Button>
+  );
+  const openButton = action && service.installed && (
+    <Button size="sm" variant="ghost" onClick={action.run} disabled={!running && !action.always} aria-label={action.label} title={`${action.label} (O)`}>
+      <action.icon size={14} />
+    </Button>
+  );
+  const copyButton = service.installed && (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => onCopy(connValue, `${service.label} ${connMode === "env" ? ".env" : "URL"}`)}
+      title={connMode === "env" ? envText(conn.env) : `Copy ${conn.url} (C)`}
+      aria-label={`Copy ${service.label} connection`}
+    >
+      <Copy size={13} className="text-muted" />
+    </Button>
+  );
+  const menu = (
+    <Menu
+      plain={tile}
+      items={[
+        ...dbMenu,
+        {
+          label: service.kind === "mailpit" ? "Open data folder" : "Open config file",
+          icon: <FileCog size={15} />,
+          onSelect: () => openPath(service.configPath).catch(() => notify("error", "Created on first start")),
+        },
+        {
+          label: "Open error log",
+          icon: <FileText size={15} />,
+          onSelect: () => openPath(service.logPath).catch(() => notify("error", "No log file yet")),
+        },
+        { label: "View logs", icon: <ScrollText size={15} />, onSelect: () => showLogs(service.kind) },
+      ]}
+    />
+  );
+  // Only rows fold out; tiles show their details only when something is wrong.
+  const chevron = service.installed && !tile && (
+    <button
+      type="button"
+      onClick={() => setExpanded(!expanded)}
+      aria-expanded={expanded}
+      aria-label={expanded ? `Collapse ${service.label} details` : `Expand ${service.label} details`}
+      className={clsx("cursor-pointer rounded-lg p-1.5 text-muted transition-transform duration-200 hover:bg-surface-2 hover:text-fg", (expanded || hasIssues) && "rotate-180 text-accent-text")}
+    >
+      <ChevronDown size={15} />
+    </button>
+  );
+  const selectName = (className: string) => (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={!service.installed}
+      tabIndex={-1}
+      title={service.installed ? (selected ? `Unselect ${service.label}` : `Select ${service.label}`) : undefined}
+      className={clsx("cursor-pointer rounded text-left text-[14px] font-medium hover:text-accent-text disabled:cursor-default", nameTone, className)}
+    >
+      {service.label}
+    </button>
+  );
+  // Compact tiles: a running service's name opens it (its site, inbox or tool), underlined.
+  const compactName =
+    running && action ? (
+      <button type="button" onClick={action.run} title={`${action.label} (O)`} className={clsx("flex max-w-full min-w-0 items-center gap-1 rounded text-left text-[14px] font-medium underline decoration-1 underline-offset-2 hover:decoration-2", nameTone)}>
+        <span className="truncate">{service.label}</span>
+        <ExternalLink size={12} className="shrink-0" aria-hidden />
+      </button>
+    ) : (
+      selectName("block max-w-full truncate")
+    );
 
   return (
     <article
@@ -732,39 +763,88 @@ function ServiceRow({
         profileActive && !inProfile && "opacity-75",
       )}
     >
-      {/* Compact Main Row: the name selects the service, the rest of the row opens its details. */}
+      {tile ? (
+        // A click anywhere on a tile (but its controls) ticks it.
+        <div
+          className={clsx("flex flex-col", compact ? "gap-2 p-3" : "gap-3 p-4", service.installed && "cursor-pointer")}
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest("button, a, input, select, label, [role=menu], [role=menuitem]")) return;
+            if (window.getSelection()?.toString()) return;
+            if (service.installed) onToggle();
+          }}
+        >
+          <div className="flex items-start gap-2.5">
+            <div className={clsx("flex shrink-0 items-center justify-center rounded-lg transition-colors", compact ? "size-8" : "size-10", iconBox)} aria-hidden>
+              <meta.icon size={compact ? 16 : 20} strokeWidth={1.75} />
+            </div>
+            <div className="min-w-0 flex-1">
+              {compact ? compactName : selectName("block max-w-full truncate")}
+              {compact ? (
+                <>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <Pill tone={status.tone}>{status.text}</Pill>
+                    {service.installed && service.port > 0 && <span className="font-mono text-xs text-muted tabular-nums">:{service.port}</span>}
+                  </div>
+                  {/* One quiet line of detail: live usage while running, otherwise the version or what it is. */}
+                  <p className="mt-1 truncate text-[11px] text-muted" title={running ? undefined : meta.blurb}>
+                    {running && lastCpu !== undefined && lastMem !== undefined ? (
+                      <span className="font-mono tabular-nums">
+                        CPU <span className="text-fg">{formatCpu(lastCpu)}</span> · <span className="text-fg">{formatBytes(lastMem)}</span>
+                      </span>
+                    ) : service.version ? (
+                      <span className="font-mono">v{service.version.replace(/^v/i, "")}</span>
+                    ) : (
+                      meta.blurb
+                    )}
+                  </p>
+                </>
+              ) : (
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <Pill tone={status.tone}>{status.text}</Pill>
+                  {service.installed && service.port > 0 && <span className="font-mono text-xs text-muted tabular-nums">:{service.port}</span>}
+                </div>
+              )}
+            </div>
+            {!compact && <span className="-mt-1.5 -mr-1">{openButton}</span>}
+            {checkbox}
+          </div>
+          {!compact && (
+            <p className="min-h-8 text-xs text-muted">
+              {running && lastCpu !== undefined && lastMem !== undefined ? (
+                <span className="font-mono tabular-nums">
+                  CPU <span className="text-fg">{formatCpu(lastCpu)}</span> · RAM <span className="text-fg">{formatBytes(lastMem)}</span>
+                  {service.version && <> · {service.version}</>}
+                </span>
+              ) : (
+                <span className="line-clamp-2">
+                  {meta.blurb}
+                  {service.version && <span className="font-mono"> · {service.version}</span>}
+                </span>
+              )}
+            </p>
+          )}
+          {/* Start/stop and restart on the left; copy and the menu on the right. */}
+          <div className={clsx("-mx-1.5 flex items-center gap-0.5 border-t border-line/60", compact ? "pt-2" : "pt-2.5")}>
+            {startStop}
+            <span className="ml-auto flex items-center gap-0.5">
+              {compact && running && openButton}
+              {copyButton}
+              {menu}
+            </span>
+          </div>
+        </div>
+      ) : (
+      // The row: the name selects the service, the rest of the row opens its details.
       <div
         className={clsx("flex items-center gap-3 px-4 py-3", service.installed && "cursor-pointer")}
-        onClick={(e) => {
-          // Controls keep their own clicks, and selecting text isn't a click.
-          if ((e.target as HTMLElement).closest("button, a, input, select, label, [role=menu], [role=menuitem]")) return;
-          if (window.getSelection()?.toString()) return;
-          if (service.installed) setExpanded(!expanded);
-        }}
+        onClick={onRowClick}
       >
-        <input
-          type="checkbox"
-          className="size-4 shrink-0 accent-(--accent) disabled:opacity-30 cursor-pointer"
-          checked={selected}
-          onChange={onToggle}
-          disabled={!service.installed}
-          aria-label={`Select ${service.label}`}
-          tabIndex={-1}
-        />
-        <div className={clsx("flex size-9 shrink-0 items-center justify-center rounded-lg", meta.tile)} aria-hidden>
+        {checkbox}
+        <div className={clsx("flex size-9 shrink-0 items-center justify-center rounded-lg transition-colors", iconBox)} aria-hidden>
           <meta.icon size={18} strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <button
-            type="button"
-            onClick={onToggle}
-            disabled={!service.installed}
-            tabIndex={-1}
-            title={service.installed ? (selected ? `Unselect ${service.label}` : `Select ${service.label}`) : undefined}
-            className="cursor-pointer rounded text-[14px] font-medium text-fg hover:text-accent-text disabled:cursor-default disabled:hover:text-fg"
-          >
-            {service.label}
-          </button>
+          {selectName("")}
           <Pill tone={status.tone}>{status.text}</Pill>
           {service.installed && service.port > 0 && (
             <span className="font-mono text-xs text-muted tabular-nums">:{service.port}</span>
@@ -780,92 +860,18 @@ function ServiceRow({
           )}
         </div>
 
-        {/* Action Controls */}
         <div className="flex shrink-0 items-center gap-1.5">
-          {!service.installed ? (
-            <Button size="sm" variant="primary" onClick={() => navigate("services")}>
-              Install
-            </Button>
-          ) : service.external ? (
-            <span className="px-2 text-xs text-muted" title="Started by the Ollama app; quit it there to stop it.">
-              Ollama app
-            </span>
-          ) : running || loading || service.state === "stopping" ? (
-            <>
-              <Button size="sm" onClick={() => stop.mutate()} disabled={busy && !loading} aria-label={`Stop ${service.label}`}>
-                <Square size={11} className="fill-current" /> Stop
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => restart.mutate()} disabled={busy} aria-label={`Restart ${service.label}`} title="Restart (R)">
-                <RotateCw size={14} className={clsx(restart.isPending && "animate-spin")} />
-              </Button>
-            </>
-          ) : (
-            <Button size="sm" variant="soft" onClick={() => start.mutate()} disabled={busy} aria-label={`Start ${service.label}`}>
-              <Play size={12} /> Start
-            </Button>
-          )}
-
-          {action && service.installed && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={action.run}
-              disabled={!running && !action.always}
-              aria-label={action.label}
-              title={`${action.label} (O)`}
-            >
-              <action.icon size={14} />
-            </Button>
-          )}
-
-          {service.installed && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => onCopy(connValue, `${service.label} ${connMode === "env" ? ".env" : "URL"}`)}
-              title={connMode === "env" ? envText(conn.env) : `Copy ${conn.url} (C)`}
-              aria-label={`Copy ${service.label} connection`}
-            >
-              <Copy size={13} className="text-muted" />
-            </Button>
-          )}
-
-          <Menu
-            items={[
-              ...dbMenu,
-              {
-                label: service.kind === "mailpit" ? "Open data folder" : "Open config file",
-                icon: <FileCog size={15} />,
-                onSelect: () => openPath(service.configPath).catch(() => notify("error", "Created on first start")),
-              },
-              {
-                label: "Open error log",
-                icon: <FileText size={15} />,
-                onSelect: () => openPath(service.logPath).catch(() => notify("error", "No log file yet")),
-              },
-              { label: "View logs", icon: <ScrollText size={15} />, onSelect: () => showLogs(service.kind) },
-            ]}
-          />
-
-          {service.installed && (
-            <button
-              type="button"
-              onClick={() => setExpanded(!expanded)}
-              aria-expanded={expanded}
-              aria-label={expanded ? `Collapse ${service.label} details` : `Expand ${service.label} details`}
-              className={clsx(
-                "p-1.5 rounded-lg text-muted hover:text-fg hover:bg-surface-2 transition-transform duration-200 cursor-pointer",
-                (expanded || hasIssues) && "rotate-180 text-accent-text"
-              )}
-            >
-              <ChevronDown size={15} />
-            </button>
-          )}
+          {startStop}
+          {openButton}
+          {copyButton}
+          {menu}
+          {chevron}
         </div>
       </div>
+      )}
 
       {/* Expandable Details Drawer */}
-      {service.installed && (expanded || hasIssues) && (
+      {service.installed && ((expanded && !tile) || hasIssues) && (
         <div className="border-t border-line/60 bg-surface-2/30 px-4 py-3 rounded-b-2xl space-y-3">
           <p className="text-xs text-muted">{meta.blurb}</p>
 
@@ -900,13 +906,20 @@ function ServiceRow({
           {conflict && (
             <div className="flex items-start gap-2.5 rounded-xl border border-line bg-surface-2/40 p-3 text-sm" role="status">
               <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden />
-              <div>
+              <div className="min-w-0 flex-1">
                 <span className="font-medium">Port {conflict.port} is in use</span>
                 <span className="text-muted">
                   {" "}
-                  by {conflict.owner ? `${conflict.owner.name} (PID ${conflict.owner.pid})` : "another program"}, so {service.label} can't start on it.
+                  by {holder(conflict)}, so {service.label} can't start on it.
                   Stop that program, or pick another port in Settings → Ports.
                 </span>
+                {conflict.owner?.note && <p className="mt-1 text-xs text-muted">{conflict.owner.note}</p>}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <FreePort owner={conflict.owner} />
+                  <Button size="sm" variant="ghost" onClick={() => navigate("settings")}>
+                    Change port
+                  </Button>
+                </div>
               </div>
             </div>
           )}
@@ -991,7 +1004,6 @@ function FoldCard({ id, defaultOpen, title, extra, children }: { id: string; def
 
 /** One-click tools, each saying what it needs before it can open. */
 function QuickShortcuts({ sites, services, settings }: { sites?: SitesInfo; services: ServiceInfo[]; settings?: Settings }) {
-  const navigate = useAppStore((s) => s.navigate);
   const mailUi = settings?.ports.services["mailpit.ui"];
   const up = (kind: ServiceKind) => services.some((s) => s.kind === kind && s.state === "running");
   const web = primaryServer(settings);
@@ -1003,10 +1015,10 @@ function QuickShortcuts({ sites, services, settings }: { sites?: SitesInfo; serv
     if (url) openUrl(url).catch(notifyError);
   };
   const tools = [
-    { tool: "mailpit" as const, label: "Mailpit inbox", ready: up("mailpit"), need: "Start Mailpit", readyText: "Open inbox", installed: installed("mailpit"), open: () => openUrl(toolUrl("mailpit", sites, mailUi) ?? "http://localhost:8025/").catch(notifyError) },
-    { tool: "phpmyadmin" as const, label: "phpMyAdmin", ready: up(web) && db, need: `Start ${serviceLabels[web]} and a database`, readyText: "Browse databases", installed: !!toolUrl("phpmyadmin", sites, mailUi), open: webTool("phpmyadmin") },
-    { tool: "adminer" as const, label: "Adminer", ready: up(web) && db, need: `Start ${serviceLabels[web]} and a database`, readyText: "Lightweight database admin", installed: !!toolUrl("adminer", sites, mailUi), open: webTool("adminer") },
-    { tool: "phpredisadmin" as const, label: "phpRedisAdmin", ready: up(web) && up("redis"), need: `Start ${serviceLabels[web]} and Redis`, readyText: "Browse Redis keys", installed: !!toolUrl("phpredisadmin", sites, mailUi), open: webTool("phpredisadmin") },
+    { tool: "mailpit" as const, label: "Mailpit inbox", ready: up("mailpit"), need: "Starts Mailpit, then opens", readyText: "Open inbox", installed: installed("mailpit"), open: () => openUrl(toolUrl("mailpit", sites, mailUi) ?? "http://localhost:8025/").catch(notifyError) },
+    { tool: "phpmyadmin" as const, label: "phpMyAdmin", ready: up(web) && db, need: `Starts ${serviceLabels[web]} and a database, then opens`, readyText: "Browse databases", installed: !!toolUrl("phpmyadmin", sites, mailUi), open: webTool("phpmyadmin") },
+    { tool: "adminer" as const, label: "Adminer", ready: up(web) && db, need: `Starts ${serviceLabels[web]} and a database, then opens`, readyText: "Lightweight database admin", installed: !!toolUrl("adminer", sites, mailUi), open: webTool("adminer") },
+    { tool: "phpredisadmin" as const, label: "phpRedisAdmin", ready: up(web) && up("redis"), need: `Starts ${serviceLabels[web]} and Redis, then opens`, readyText: "Browse Redis keys", installed: !!toolUrl("phpredisadmin", sites, mailUi), open: webTool("phpredisadmin") },
   ];
   const readyCount = tools.filter((t) => t.installed && t.ready).length;
 
@@ -1019,8 +1031,7 @@ function QuickShortcuts({ sites, services, settings }: { sites?: SitesInfo; serv
           return (
             <button
               key={t.tool}
-              onClick={() => (t.installed ? t.open() : navigate("services"))}
-              disabled={t.installed && !t.ready}
+              onClick={() => (t.installed ? t.open() : useAppStore.getState().openService(t.tool))}
               className="group flex w-full items-center gap-3 rounded-xl border border-transparent px-2 py-2 text-left hover:border-line hover:bg-surface-2/60 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:border-transparent disabled:hover:bg-transparent"
             >
               <span className={clsx("flex size-8 shrink-0 items-center justify-center rounded-lg", tiles.className)} aria-hidden>

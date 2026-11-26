@@ -19,7 +19,7 @@ import { useAppUpdate } from "./lib/updates";
 import Overview from "./pages/Overview";
 import Notices from "./components/Notices";
 import BottomNav, { navLayout } from "./components/BottomNav";
-import { PageToolbarProvider } from "./components/PageToolbar";
+import { PageHeader, PageToolbarProvider } from "./components/PageToolbar";
 import Titlebar from "./components/Titlebar";
 import Diagnostics from "./components/Diagnostics";
 import FirstRunDialog from "./components/FirstRunDialog";
@@ -202,10 +202,11 @@ export default function App() {
                 hidden={id !== page}
                 className={clsx(
                   "motion-page mx-auto px-6 pb-10 sm:px-10",
-                  id === "overview" ? "max-w-[90rem] pt-8" : id === "sites" ? "max-w-[90rem] pt-4" : id === "logs" ? "h-full min-h-0 max-w-7xl overflow-hidden pt-4 pb-3" : "max-w-7xl pt-4",
+                  id === "overview" ? "max-w-[90rem] pt-8" : id === "sites" ? "max-w-[90rem] pt-4" : id === "logs" ? "flex h-full min-h-0 max-w-7xl flex-col overflow-hidden pt-4 pb-3" : "max-w-7xl pt-4",
                 )}
               >
                 <PageActiveContext.Provider value={id === page}>
+                  {id !== "overview" && <PageHeader page={id} />}
                   <PageBoundary>
                     <Suspense fallback={null}>{pages[id]}</Suspense>
                   </PageBoundary>

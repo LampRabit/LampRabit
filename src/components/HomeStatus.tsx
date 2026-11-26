@@ -1,16 +1,46 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { api, type PortStatus, type ServiceInfo, type ServiceKind, type SitesInfo, type Tunnel } from "../lib/api";
+import { api, type PortOwner, type PortStatus, type ServiceInfo, type ServiceKind, type SitesInfo, type Tunnel } from "../lib/api";
 import { notifyError, useAppStore } from "../lib/store";
+import { infoFor, useCatalog } from "../lib/catalog";
+import { names, stoppedNeeds } from "../lib/dependencies";
 import { formatBytes, formatCpu, useUsage } from "../lib/usage";
 import { useAppStatuses } from "./ProjectRun";
 import { Button } from "./ui";
 
-/** A port another program holds, found before the service is started. */
+/**
+ * A port of this service that another program (or another LampRabit service) holds, found
+ * before the service is started. Its ports: the main one, `<kind>.<name>` keys, a second
+ * server's `apacheHttps`, and the primary server's https next to its http.
+ */
 export function conflictFor(service: ServiceInfo, ports?: PortStatus[]) {
   if (service.state === "running" || service.state === "starting") return null;
-  return ports?.find((p) => p.port === service.port && !p.free && !p.usedByService) ?? null;
+  const primaryHttps = ports?.find((p) => p.key === "http")?.port === service.port;
+  const mine = (p: PortStatus) => p.port === service.port || p.key.startsWith(`${service.kind}.`) || p.key.startsWith(`${service.kind}Http`) || (primaryHttps && p.key === "https");
+  return ports?.find((p) => mine(p) && !p.free && p.usedByService !== service.label) ?? null;
+}
+
+/** Who holds a taken port, in words. */
+export const holder = (p: PortStatus) => (p.owner ? `${p.owner.name} (PID ${p.owner.pid})` : p.usedByService ? `LampRabit's ${p.usedByService}` : "Another program");
+
+/**
+ * Frees a port from the program holding it: another stack's Windows service is stopped as a
+ * service (Windows would restart a killed process); anything else is stopped, with an
+ * administrator prompt when needed. PID 4 is Windows' own HTTP service.
+ */
+export function FreePort({ owner, onDone }: { owner?: PortOwner | null; onDone?: () => void }) {
+  if (owner?.service) return <Confirm label={`Stop the ${owner.service} service`} run={() => api.stopWindowsService(owner.service!)} onDone={onDone} title="Stops it and sets it to start by hand; Windows asks for administrator approval" />;
+  if (!owner?.stoppable) return null;
+  const http = owner.pid === 4;
+  return (
+    <Confirm
+      label={http ? "Stop Windows' HTTP service" : `Stop ${owner.name}`}
+      run={() => api.stopProcess(owner.pid)}
+      onDone={onDone}
+      title={http ? "Runs net stop http /y as administrator; it also stops IIS and other programs built on it until the next restart" : `Stops PID ${owner.pid}; asks for administrator approval if it needs it`}
+    />
+  );
 }
 
 export type Issue = { id: string; tone: "danger" | "warn"; title: string; detail?: string; kind?: ServiceKind; actions: ReactNode };
@@ -32,10 +62,26 @@ export function useIssues(
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["services"] });
   const restart = useMutation({ mutationFn: (kind: ServiceKind) => api.restartService(kind), onSuccess: refresh, onError: notifyError });
   const start = useMutation({ mutationFn: (kind: ServiceKind) => api.startService(kind), onSuccess: refresh, onError: notifyError });
+  const catalog = useCatalog();
 
   const issues: Issue[] = [];
   for (const s of services.filter((s) => s.installed)) {
     const running = s.state === "running";
+    // Running without a service it works through (pgAdmin while PostgreSQL is stopped).
+    const waiting = running ? stoppedNeeds(s.kind, infoFor(catalog.data, s.kind), services).all : [];
+    if (waiting.length)
+      issues.push({
+        id: `needs-${s.kind}`,
+        tone: "warn",
+        kind: s.kind,
+        title: `${s.label} needs ${names(waiting, "and")} running`,
+        detail: `${names(waiting, "and")} ${waiting.length === 1 ? "is" : "are"} stopped, so ${s.label} has nothing to connect to`,
+        actions: (
+          <Button size="sm" onClick={() => waiting.forEach((w) => start.mutate(w.kind))} disabled={start.isPending}>
+            Start {names(waiting, "and")}
+          </Button>
+        ),
+      });
     if (running && s.health?.status === "degraded") {
       issues.push({
         id: `degraded-${s.kind}`,
@@ -63,6 +109,7 @@ export function useIssues(
         detail: s.problem.detail,
         actions: (
           <>
+            <FreePort owner={s.problem.owner} />
             <Button size="sm" onClick={() => onShow(s.kind)}>
               Show fixes
             </Button>
@@ -80,15 +127,10 @@ export function useIssues(
           tone: "warn",
           kind: s.kind,
           title: `Port ${taken.port} is in use`,
-          detail: `${taken.owner ? `${taken.owner.name} (PID ${taken.owner.pid})` : "Another program"} holds it, so ${s.label} can't start on it`,
+          detail: `${holder(taken)} holds it, so ${s.label} can't start on it`,
           actions: (
             <>
-              {taken.owner?.service ? (
-                // Another stack's Windows service: killing it isn't enough, Windows restarts it.
-                <Confirm label={`Stop the ${taken.owner.service} service`} run={() => api.stopWindowsService(taken.owner!.service!)} title="Stops it and sets it to start by hand; Windows asks for administrator approval" />
-              ) : (
-                taken.owner?.stoppable && <Confirm label={`Stop ${taken.owner.name}`} run={() => api.stopProcess(taken.owner!.pid)} />
-              )}
+              <FreePort owner={taken.owner} />
               <Button size="sm" variant="ghost" onClick={() => navigate("settings")}>
                 Change port
               </Button>
@@ -97,14 +139,25 @@ export function useIssues(
         });
     }
   }
-  if (shadows?.length) {
-    const names = [...new Set(shadows.map((s) => s.command))];
+  const node = shadows?.find((s) => s.command === "node");
+  const others = shadows?.filter((s) => s !== node) ?? [];
+  if (others.length) {
+    const names = [...new Set(others.map((s) => s.command))];
     issues.push({
       id: "path",
       tone: "warn",
       title: `${names.slice(0, 3).join(", ")}${names.length > 3 ? "…" : ""} from another install ${names.length === 1 ? "answers" : "answer"} first in terminals`,
-      detail: `${shadows[0].path} is earlier in the system PATH, which Windows reads before yours`,
-      actions: <Confirm label="Put LampRabit first" run={() => api.putCommandsFirst()} title="Puts LampRabit's commands first in the system PATH; Windows asks for administrator approval" refresh="path-shadows" />,
+      detail: `${others[0].path} is earlier in the system PATH, which Windows reads before yours`,
+      actions: <Confirm label="Put LampRabit first" run={() => api.putCommandsFirst()} title="Puts LampRabit's commands first in the system PATH; Windows asks for administrator approval" />,
+    });
+  }
+  if (node) {
+    issues.push({
+      id: "path-node",
+      tone: "warn",
+      title: "Another Node.js answers node before NVM's",
+      detail: `${node.path} is earlier in the system PATH, so switching versions with NVM seems to do nothing`,
+      actions: <Confirm label="Put NVM first" run={() => api.putNodeFirst()} title="Puts NVM's Node first in the system PATH; Windows asks for administrator approval" />,
     });
   }
   for (const t of tunnels ?? []) {
@@ -125,12 +178,12 @@ export function useIssues(
 }
 
 /** Overriding another program or a system setting takes a second click. */
-function Confirm({ label, run, title, refresh = "port-status" }: { label: string; run: () => Promise<void>; title?: string; refresh?: string }) {
-  const queryClient = useQueryClient();
+// What changed shows by itself: every successful mutation refreshes the app's data (main.tsx).
+function Confirm({ label, run, title, onDone }: { label: string; run: () => Promise<void>; title?: string; onDone?: () => void }) {
   const [sure, setSure] = useState(false);
   const act = useMutation({
     mutationFn: run,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [refresh] }),
+    onSuccess: onDone,
     onError: notifyError,
     onSettled: () => setSure(false),
   });

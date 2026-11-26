@@ -1,9 +1,9 @@
-import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Stethoscope, X } from "lucide-react";
 import { api, type Problem, type ServiceKind } from "../lib/api";
-import { useAppStore, notifyError } from "../lib/store";
+import { useAppStore } from "../lib/store";
 import { Button } from "./ui";
+import { FreePort } from "./HomeStatus";
 
 /** Why a service failed, what to do about it, and one-click fixes where possible. */
 export default function ProblemPanel({ kind, problem }: { kind: ServiceKind; problem: Problem }) {
@@ -11,22 +11,9 @@ export default function ProblemPanel({ kind, problem }: { kind: ServiceKind; pro
   const notify = useAppStore((s) => s.notify);
   const navigate = useAppStore((s) => s.navigate);
   const openDiagnostics = useAppStore((s) => s.setDiagnosticsOpen);
-  const [confirmStop, setConfirmStop] = useState(false);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["services"] });
 
   const dismiss = useMutation({ mutationFn: () => api.clearProblem(kind), onSuccess: refresh });
-  const stopOwner = useMutation({
-    // Another stack's Windows service is stopped as a service (admin prompt): Windows would
-    // restart a killed process.
-    mutationFn: () => (problem.owner!.service ? api.stopWindowsService(problem.owner!.service) : api.stopProcess(problem.owner!.pid)),
-    onSuccess: () => {
-      notify("info", `Stopped ${problem.owner!.name}. You can start the service now.`);
-      setConfirmStop(false);
-      dismiss.mutate();
-    },
-    onError: notifyError,
-  });
-
   return (
     <div className="mt-5 rounded-xl border border-line bg-surface-2/40 p-4 text-sm">
       <div className="flex items-start gap-3">
@@ -47,21 +34,7 @@ export default function ProblemPanel({ kind, problem }: { kind: ServiceKind; pro
                 Change port
               </Button>
             )}
-            {(problem.owner?.stoppable || problem.owner?.service) &&
-              (confirmStop ? (
-                <>
-                  <Button size="sm" variant="danger" onClick={() => stopOwner.mutate()} disabled={stopOwner.isPending}>
-                    {problem.owner.service ? `Stop the ${problem.owner.service} service (asks for admin)` : `Stop ${problem.owner.name} (PID ${problem.owner.pid})`}
-                  </Button>
-                  <Button size="sm" onClick={() => setConfirmStop(false)}>
-                    Cancel
-                  </Button>
-                </>
-              ) : (
-                <Button size="sm" onClick={() => setConfirmStop(true)}>
-                  {problem.owner.service ? `Stop the ${problem.owner.service} service…` : `Stop ${problem.owner.name}…`}
-                </Button>
-              ))}
+            <FreePort owner={problem.owner} onDone={() => notify("info", `Stopped ${problem.owner!.name}. You can start the service now.`)} />
             <Button size="sm" variant="ghost" onClick={() => openDiagnostics(true)}>
               <Stethoscope size={14} /> Diagnostics
             </Button>

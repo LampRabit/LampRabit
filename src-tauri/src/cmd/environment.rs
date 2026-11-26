@@ -176,10 +176,19 @@ pub(crate) async fn stop_windows_service(app: AppHandle, state: State<'_, AppSta
 #[tauri::command]
 pub(crate) async fn path_shadows(state: State<'_, AppState>) -> Result<Vec<overrides::Shadow>> {
     let (settings, layout) = state.snapshot().await;
-    if !settings.add_to_path {
-        return Ok(Vec::new());
-    }
-    Ok(overrides::shadows(&shims::dir(&layout)))
+    let mut out = if settings.add_to_path { overrides::shadows(&shims::dir(&layout)) } else { Vec::new() };
+    out.extend(node::nvm_symlink().and_then(|link| overrides::node_shadow(&link)));
+    Ok(out)
+}
+
+/// Puts NVM's Node first in the system PATH, ahead of another Node.js install (asks for admin rights).
+#[tauri::command]
+pub(crate) async fn put_node_first(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    let link = node::nvm_symlink().ok_or_else(|| Error::msg("NVM isn't installed"))?;
+    overrides::system_path_first(&layout, &link, true).await?;
+    logs::system(&app, logs::Level::Info, format!("{} (NVM's Node) now comes first in the system PATH; new terminals use it", link.display()));
+    Ok(())
 }
 
 /// Puts LampRabit's commands first in the system PATH (asks for admin rights).

@@ -61,11 +61,8 @@ pub async fn port_owner(port: u16) -> Option<PortOwner> {
         unix_owner(port).await?
     };
     let lower = name.to_lowercase();
-    let system = pid == 0
-        || pid == 4
-        || lower == "system"
-        || lower == "svchost.exe"
-        || pid == std::process::id();
+    // PID 4 (Windows' http.sys) can be stopped: as the HTTP service, with admin approval.
+    let system = pid == 0 || lower == "svchost.exe" || pid == std::process::id();
     Some(PortOwner {
         note: owner_note(pid, &lower),
         stoppable: !system,

@@ -87,7 +87,7 @@ export interface ExtInfo {
   note: string | null;
 }
 
-export type TunnelProvider = "ngrok" | "cloudflare";
+export type TunnelProvider = "ngrok" | "cloudflare" | "cloudflare-domain";
 
 export interface Tunnel {
   id: string;
@@ -239,8 +239,35 @@ export interface GitTag {
   time: number;
 }
 
-export type GitStashAction = { kind: "save"; message: string; untracked: boolean } | { kind: "apply"; index: number } | { kind: "pop"; index: number } | { kind: "drop"; index: number };
-export type GitTagAction = { kind: "create"; name: string; message: string; commit: string | null } | { kind: "delete"; name: string } | { kind: "push"; name: string; remote: string };
+export type GitStashAction =
+  | { kind: "save"; message: string; untracked: boolean; staged?: boolean }
+  | { kind: "apply"; index: number }
+  | { kind: "pop"; index: number }
+  | { kind: "drop"; index: number }
+  | { kind: "branch"; index: number; name: string }
+  | { kind: "clear" };
+
+/** A PostgreSQL extension; `installedVersion` is set when the database has it. */
+export interface PgExtension {
+  name: string;
+  defaultVersion: string;
+  installedVersion: string | null;
+  comment: string;
+  schema: string | null;
+}
+
+/** A file in a stash; `untracked` when it was a new file when it was stashed. */
+export interface GitStashFile extends GitCommitFile {
+  untracked: boolean;
+}
+export type GitTagAction =
+  | { kind: "create"; name: string; message: string; commit: string | null }
+  | { kind: "delete"; name: string }
+  | { kind: "push"; name: string; remote: string }
+  | { kind: "pushAll"; remote: string }
+  | { kind: "deleteRemote"; name: string; remote: string }
+  | { kind: "fetch"; remote: string }
+  | { kind: "branch"; name: string; branch: string };
 
 export interface GitRepoSettings {
   pull: "merge" | "rebase" | "ff-only" | null;
@@ -596,10 +623,14 @@ export interface NewProject {
   optional: Record<string, boolean>;
   /** The user accepted the risky steps of a template that didn't ship with LampRabit. */
   approveRisky: boolean;
-  /** Node templates. */
+  /** Node templates, and other templates' Node steps (Laravel's frontend build). */
   node: string | null;
   packageManager: PackageManager | null;
+  /** Python templates: how the environment and packages are made. */
+  pythonManager?: PythonManager | null;
 }
+
+export type PythonManager = "pip" | "uv" | "conda";
 
 export interface TemplateVariable {
   id: string;
@@ -658,6 +689,8 @@ export interface ProjectTemplate {
   path: string | null;
   usesPhp: boolean;
   usesNode: boolean;
+  /** Some step runs Node (Laravel's frontend build), so the package manager is offered. */
+  nodeSteps?: boolean;
   /** Lowest Python / Java version, for templates that run on LampRabit's own. */
   python: string | null;
   java: string | null;
@@ -792,6 +825,8 @@ export interface AppInfo {
   projectNode: string | null;
   framework: string | null;
   status: AppStatus;
+  /** Ready-made dev server commands: Laravel's composer run dev and php artisan serve, package.json's dev scripts. */
+  serveCommands: { label: string; command: string }[];
 }
 
 /** A command run for a project, from its run history. */
@@ -918,6 +953,8 @@ export interface Settings {
   profiles: StackProfile[];
   /** What `mysql`, new projects and the database tools use first. */
   defaultDatabase: Database;
+  /** The app each database opens in, by service id; absent means KarotX (or the first installed). */
+  dbClients?: Record<string, string>;
   /** Object storage folders by service id (RustFS, MinIO); data/<id> when absent. */
   storage: Record<string, string>;
   /** Values of the options services declare in their manifest, by service then option (only those changed from the default). */
@@ -926,6 +963,8 @@ export interface Settings {
   autoRestart: string[];
   /** dump() and dd() go to Logs instead of the page. */
   catchDumps: boolean;
+  /** The user's domain on Cloudflare for sharing at <project>.<domain>; empty when unset. */
+  cloudflareDomain?: string;
   /** LampRabit runs its MCP server over HTTP (ports.mcp). */
   mcpServer: boolean;
   /** Log files over logMaxMb are rotated, logKeep old copies kept, the folder under logTotalMb. */
@@ -1089,6 +1128,8 @@ export const api = {
   projectDoctor: (name: string) => invoke<DoctorIssue[]>("project_doctor", { name }),
   mcpStatus: () => invoke<McpStatus>("mcp_status"),
   setMcpServer: (enabled: boolean) => invoke<void>("set_mcp_server", { enabled }),
+  /** The app a database opens in; null goes back to KarotX. Applies at once. */
+  setDbClient: (database: string, tool: string | null) => invoke<void>("set_db_client", { database, tool }),
   mcpConnect: (client: string, on: boolean) => invoke<string>("mcp_connect", { client, on }),
   doctorFix: (name: string, id: string) => invoke<string>("doctor_fix", { name, id }),
   gitVersion: () => invoke<string | null>("git_version"),
@@ -1108,8 +1149,13 @@ export const api = {
   gitSetRepoSettings: (name: string, settings: GitRepoSettings) => invoke<void>("git_set_repo_settings", { name, settings }),
   gitSync: (name: string, action: "fetch" | "pull" | "push", op?: string) => invoke<string>("git_sync", { name, action, op: op ?? null }),
   gitCancel: (op: string) => invoke<boolean>("git_cancel", { op }),
+  /** Pull a remote's branch into the current one, or push the current one to a named remote branch. */
+  gitSyncBranch: (name: string, pull: boolean, remote: string, branch: string, op?: string) => invoke<string>("git_sync_branch", { name, pull, remote, branch, op: op ?? null }),
+  gitRemoteTags: (name: string, remote: string) => invoke<string[]>("git_remote_tags", { name, remote }),
   gitStashes: (name: string) => invoke<GitStash[]>("git_stashes", { name }),
   gitStash: (name: string, action: GitStashAction) => invoke<string>("git_stash", { name, action }),
+  gitStashFiles: (name: string, index: number) => invoke<GitStashFile[]>("git_stash_files", { name, index }),
+  gitStashFileDiff: (name: string, index: number, path: string, untracked: boolean) => invoke<string>("git_stash_file_diff", { name, index, path, untracked }),
   gitStageHunk: (name: string, path: string, hunk: number, unstage: boolean) => invoke<void>("git_stage_hunk", { name, path, hunk, unstage }),
   gitResolve: (name: string, path: string, theirs: boolean) => invoke<void>("git_resolve", { name, path, theirs }),
   gitTags: (name: string) => invoke<GitTag[]>("git_tags", { name }),
@@ -1147,6 +1193,9 @@ export const api = {
   tunnelStop: (id: string) => invoke<void>("tunnel_stop", { id }),
   tunnelList: () => invoke<Tunnel[]>("tunnel_list"),
   ngrokTokenSaved: () => invoke<boolean>("ngrok_token_saved"),
+  cloudflareConnected: () => invoke<boolean>("cloudflare_connected"),
+  /** Opens the browser to sign in to Cloudflare; resolves once that's finished. */
+  cloudflareLogin: () => invoke<void>("cloudflare_login"),
   nodeStatus: () => invoke<NodeStatus>("node_status"),
   nodeAvailable: () => invoke<NodeRelease[]>("node_available"),
   nodeInstall: (version: string) => invoke<void>("node_install", { version }),
@@ -1167,6 +1216,8 @@ export const api = {
   /** Resolves to a note when browsers couldn't be covered (Linux without certutil). */
   trustCa: () => invoke<string | null>("trust_ca"),
   listDatabases: (engine: DbEngine) => invoke<string[]>("list_databases", { engine }),
+  pgExtensions: (database: string) => invoke<PgExtension[]>("pg_extensions", { database }),
+  setPgExtension: (database: string, name: string, action: "enable" | "disable" | "update") => invoke<void>("set_pg_extension", { database, name, action }),
   listBackups: () => invoke<Backup[]>("list_backups"),
   backupDatabase: (engine: DbEngine, database: string) => invoke<Backup>("backup_database", { engine, database }),
   restoreBackup: (engine: DbEngine, path: string, database: string) => invoke<void>("restore_backup", { engine, path, database }),
@@ -1201,6 +1252,11 @@ export const api = {
   pathShadows: () => invoke<{ command: string; path: string }[]>("path_shadows"),
   /** LampRabit's commands first in the system PATH (UAC prompt). */
   putCommandsFirst: () => invoke<void>("put_commands_first"),
+  /** NVM's Node first in the system PATH, ahead of another Node.js install (UAC prompt). */
+  putNodeFirst: () => invoke<void>("put_node_first"),
+  /** Starts the web server for a .test address before it opens, if needed. */
+  /** Starts what a .test address needs; returns the services it started. */
+  prepareUrl: (url: string) => invoke<string[]>("prepare_url", { url }),
   /** The LampRabit folder and Composer's cache out of Windows Security scans (UAC prompt). */
   excludeFromDefender: () => invoke<void>("exclude_from_defender"),
   clearProblem: (kind: ServiceKind) => invoke<void>("clear_problem", { kind }),

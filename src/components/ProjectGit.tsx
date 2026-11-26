@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowLeftRight, ArrowUp, Check, ChevronLeft, Copy, GitBranch, GitCommitHorizontal, GitMerge, KeyRound, Link2, Minus, Pencil, Plus, RefreshCw, RotateCcw, Trash2, Undo2, UserRound, X } from "lucide-react";
+import { ArrowDown, ArrowLeftRight, ArrowUp, Check, ChevronLeft, Copy, GitBranch, GitCommitHorizontal, GitMerge, KeyRound, Link2, Minus, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Search, Tag as TagIcon, Trash2, Undo2, UserRound, X } from "lucide-react";
 import clsx from "clsx";
 import { api, type GitBranch as Branch, type GitFile, type GitRepoSettings, type GitStatus, type Site } from "../lib/api";
 import { convertUrl, isSsh, looksSensitive, nextStep, parseDiff, progressPercent, useGitProgress } from "../lib/git";
@@ -19,17 +19,17 @@ import { Button, inputClass } from "./ui";
  * remote, finish a merge): that action is the one highlighted, the others stay quiet.
  */
 
-type View = "changes" | "history" | "branches" | "remotes";
+type View = "changes" | "history" | "stashes" | "branches" | "tags" | "remotes";
 type SyncAction = "fetch" | "pull" | "push";
 
 export default function ProjectGit({ site }: { site: Site }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
-  const navigate = useAppStore((s) => s.navigate);
   const version = useQuery({ queryKey: ["git-version"], queryFn: api.gitVersion, staleTime: Infinity });
   const active = usePageActive();
   const status = useQuery({ queryKey: ["git-status", site.name], queryFn: () => api.gitStatus(site.name), refetchInterval: active ? 5000 : false, enabled: !!version.data });
   const [view, setView] = useState<View>("changes");
+  const stashCount = useQuery({ queryKey: ["git-stashes", site.name], queryFn: () => api.gitStashes(site.name), enabled: !!status.data?.repo }).data?.length ?? 0;
   // Whatever changed the repository refreshes everything that shows it.
   const refresh = () => {
     for (const key of ["git-status", "git-branches", "git-log", "git-commit", "project-facts", "git-repo-settings", "git-stashes", "git-tags"]) queryClient.invalidateQueries({ queryKey: [key, site.name] });
@@ -55,6 +55,24 @@ export default function ProjectGit({ site }: { site: Site }) {
       refresh();
     },
   });
+  // Pull from, or push to, a branch other than the one this branch tracks.
+  const [other, setOther] = useState<"pull" | "push" | null>(null);
+  const branchSync = useMutation({
+    mutationFn: ({ pull, remote, branch }: { pull: boolean; remote: string; branch: string }) => {
+      const id = `${site.name}:${pull ? "pull" : "push"}:${remote}/${branch}:${Date.now()}`;
+      setOp(id);
+      return api.gitSyncBranch(site.name, pull, remote, branch, id);
+    },
+    onSettled: () => setOp(null),
+    onSuccess: (out, v) => {
+      notify("info", v.pull ? `Pulled ${v.remote}/${v.branch}` : `Pushed to ${v.remote}/${v.branch}`, out.trim() ? out.trim().split("\n").slice(-6) : undefined);
+      refresh();
+    },
+    onError: (e) => {
+      if (String(e) !== "Cancelled.") notifyError(e);
+      refresh();
+    },
+  });
   const abort = useMutation({ mutationFn: () => api.gitAbort(site.name), onSuccess: refresh, onError: notifyError });
   const carryOn = useMutation({ mutationFn: () => api.gitContinue(site.name), onSuccess: refresh, onError: notifyError });
 
@@ -67,7 +85,7 @@ export default function ProjectGit({ site }: { site: Site }) {
           LampRabit uses the Git on your computer, with your credentials and SSH keys. On Windows it can install one for you (MinGit); on Linux use your package manager (sudo apt install git), on
           macOS run xcode-select --install.
         </p>
-        <Button className="mt-3" variant="primary" onClick={() => navigate("services")}>
+        <Button className="mt-3" variant="primary" onClick={() => useAppStore.getState().openService("git")}>
           <GitBranch size={14} /> Install Git from Services
         </Button>
       </div>
@@ -94,7 +112,9 @@ export default function ProjectGit({ site }: { site: Site }) {
   const views: [View, string, ReactNode?][] = [
     ["changes", "Changes", s.files.length ? <Count n={s.files.length} on={view === "changes"} /> : null],
     ["history", "History"],
+    ["stashes", "Stashes", stashCount ? <Count n={stashCount} on={view === "stashes"} /> : null],
     ["branches", "Branches"],
+    ["tags", "Tags"],
     ["remotes", "Remotes", step === "remote" ? <span className="ml-1.5 inline-block size-1.5 rounded-full bg-accent align-middle" aria-label="Needs a remote" /> : null],
   ];
   // Sync buttons: the one the repository needs is filled; the others are quiet; ones that
@@ -142,11 +162,14 @@ export default function ProjectGit({ site }: { site: Site }) {
             {syncButton("fetch", <RefreshCw size={12} />, "Fetch", "Get the remotes' new commits and branches without changing your files", false)}
             {s.upstream && syncButton("pull", <ArrowDown size={12} />, s.behind ? `Pull ${s.behind}` : "Pull", `Bring ${s.upstream}'s commits into ${s.branch}`, step === "pull")}
             {s.branch && s.head && (s.upstream ? syncButton("push", <ArrowUp size={12} />, s.ahead ? `Push ${s.ahead}` : "Push", `Send your commits to ${s.upstream}`, step === "push") : syncButton("push", <ArrowUp size={12} />, "Publish branch", `Push ${s.branch} and track it on the remote`, step === "publish"))}
+            {s.head && <OtherBranchMenu disabled={sync.isPending || branchSync.isPending} onPick={(pull) => setOther(pull ? "pull" : "push")} canPush={!!s.branch} />}
           </>
         )}
       </div>
 
       {sync.isPending && op && <ProgressBar line={progress} label={`${sync.variables === "fetch" ? "Fetching" : sync.variables === "pull" ? "Pulling" : "Pushing"}…`} onCancel={() => void api.gitCancel(op)} />}
+      {branchSync.isPending && op && <ProgressBar line={progress} label={`${branchSync.variables?.pull ? "Pulling from" : "Pushing to"} ${branchSync.variables?.remote}/${branchSync.variables?.branch}…`} onCancel={() => void api.gitCancel(op)} />}
+      {other && <OtherBranchDialog site={site} status={s} pull={other === "pull"} onClose={() => setOther(null)} onRun={(remote, branch) => { setOther(null); branchSync.mutate({ pull: other === "pull", remote, branch }); }} />}
 
       {s.operation && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-sm" role="status">
@@ -164,9 +187,11 @@ export default function ProjectGit({ site }: { site: Site }) {
         </div>
       )}
 
-      {view === "changes" && <Changes site={site} status={s} onChanged={refresh} onIdentity={() => setView("remotes")} onRemotes={() => setView("remotes")} onPush={() => sync.mutate("push")} pushing={sync.isPending && sync.variables === "push"} />}
+      {view === "changes" && <Changes site={site} status={s} onChanged={refresh} onIdentity={() => setView("remotes")} onRemotes={() => setView("remotes")} onPush={() => sync.mutate("push")} pushing={sync.isPending && sync.variables === "push"} onStashes={() => setView("stashes")} />}
       {view === "history" && <History site={site} />}
+      {view === "stashes" && <Stashes site={site} status={s} onChanged={refresh} />}
       {view === "branches" && <Branches site={site} current={s.branch} upstream={s.upstream} onChanged={refresh} />}
+      {view === "tags" && <Tags site={site} onChanged={refresh} />}
       {view === "remotes" && <RemotesAndSettings site={site} status={s} onChanged={refresh} />}
     </div>
   );
@@ -222,6 +247,7 @@ function Changes({
   onRemotes,
   onPush,
   pushing,
+  onStashes,
 }: {
   site: Site;
   status: GitStatus;
@@ -230,6 +256,7 @@ function Changes({
   onRemotes: () => void;
   onPush: () => void;
   pushing: boolean;
+  onStashes: () => void;
 }) {
   const notify = useAppStore((s) => s.notify);
   const files = status.files;
@@ -285,30 +312,27 @@ function Changes({
       onChanged();
     },
   });
-  const stashList = (stashes.data ?? []).length > 0 && (
+  // The stashes themselves are managed on their own tab; here, the newest one and a way there.
+  const newest = stashes.data?.[0];
+  const stashList = newest && (
     <section>
-      <div className="sticky top-0 z-[1] border-b border-line bg-surface px-3 py-1.5 text-xs font-medium text-muted">
-        Stashes <span className="tabular-nums">{stashes.data!.length}</span>
+      <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-line bg-surface px-3 py-1.5 text-xs text-muted">
+        <span className="font-medium">
+          Stashes <span className="tabular-nums">{stashes.data!.length}</span>
+        </span>
+        <button type="button" onClick={onStashes} className="text-[11px] font-medium text-accent-text hover:underline">
+          Manage stashes
+        </button>
       </div>
-      <ul>
-        {stashes.data!.map((st) => (
-          <li key={st.index} className="group flex items-center gap-2 px-3 py-1 hover:bg-surface-2">
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] text-fg">{st.message.replace(/^On [^:]+: /, "")}</span>
-              <span className="block text-[11px] text-muted">{formatAgo(st.time * 1000)}</span>
-            </span>
-            <button type="button" onClick={() => stash.mutate({ kind: "pop", index: st.index })} disabled={stash.isPending} className="text-[11px] font-medium text-accent-text hover:underline" title="Bring the changes back and remove the stash">
-              Restore
-            </button>
-            <button type="button" onClick={() => stash.mutate({ kind: "apply", index: st.index })} disabled={stash.isPending} className="text-[11px] font-medium text-muted opacity-0 group-hover:opacity-100 hover:underline focus-visible:opacity-100" title="Bring the changes back and keep the stash">
-              Apply
-            </button>
-            <button type="button" onClick={() => stash.mutate({ kind: "drop", index: st.index })} disabled={stash.isPending} className="rounded p-0.5 text-muted opacity-0 group-hover:opacity-100 hover:text-danger-text focus-visible:opacity-100" aria-label="Delete this stash" title="Delete this stash">
-              <Trash2 size={12} />
-            </button>
-          </li>
-        ))}
-      </ul>
+      <div className="flex items-center gap-2 px-3 py-1">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] text-fg">{stashParts(newest.message).text}</span>
+          <span className="block text-[11px] text-muted">{formatAgo(newest.time * 1000)}</span>
+        </span>
+        <button type="button" onClick={() => stash.mutate({ kind: "pop", index: newest.index })} disabled={stash.isPending} className="text-[11px] font-medium text-accent-text hover:underline" title="Bring the changes back and remove the stash">
+          Restore
+        </button>
+      </div>
     </section>
   );
   const hasWork = staged.length > 0 || unstaged.length > 0;
@@ -687,6 +711,308 @@ function History({ site }: { site: Site }) {
   );
 }
 
+/** "On main: message" / "WIP on main: abc123 subject" → the branch and the words people wrote. */
+function stashParts(message: string): { branch: string | null; text: string } {
+  const m = /^(?:WIP on|On) ([^:]+): (.*)$/.exec(message);
+  if (!m) return { branch: null, text: message };
+  // A stash saved without a message is named after the last commit: "abc1234 subject".
+  const wip = message.startsWith("WIP on ");
+  return { branch: m[1], text: wip ? `Work in progress (${m[2].replace(/^[0-9a-f]{7,40} /, "")})` : m[2] };
+}
+
+/**
+ * Stashes: work set aside. Save a new one (named, with new files, or only what's staged),
+ * look inside any of them file by file, bring one back (and keep or remove it), turn one into
+ * a branch when it no longer applies, delete one or clear them all.
+ */
+function Stashes({ site, status, onChanged }: { site: Site; status: GitStatus; onChanged: () => void }) {
+  const notify = useAppStore((s) => s.notify);
+  const stashes = useQuery({ queryKey: ["git-stashes", site.name], queryFn: () => api.gitStashes(site.name) });
+  const list = stashes.data ?? [];
+  const [picked, setPicked] = useState(0);
+  const shown = list.find((s) => s.index === picked) ?? list[0];
+  const [message, setMessage] = useState("");
+  const [mode, setMode] = useState<"all" | "tracked" | "staged">("all");
+  const [confirm, setConfirm] = useState<"drop" | "clear" | null>(null);
+  const [branching, setBranching] = useState(false);
+  const [branch, setBranch] = useState("");
+  const stagedCount = status.files.filter((f) => f.staged !== " " && f.staged !== "?" && !f.conflicted).length;
+  const hasWork = status.files.length > 0;
+  const action = useMutation({
+    mutationFn: (a: Parameters<typeof api.gitStash>[1]) => api.gitStash(site.name, a),
+    onSuccess: (_, a) => {
+      const done: Record<string, string> = {
+        save: "Changes stashed: the working tree is clean.",
+        pop: "Restored, and the stash is removed.",
+        apply: "Applied; the stash stays in the list.",
+        drop: "Stash deleted.",
+        branch: `Made branch ${"name" in a ? a.name : ""} with the stash's changes.`,
+        clear: "Every stash deleted.",
+      };
+      notify("info", done[a.kind]);
+      if (a.kind === "save") setMessage("");
+      if (a.kind === "branch") {
+        setBranching(false);
+        setBranch("");
+      }
+      setConfirm(null);
+      setPicked(0);
+      onChanged();
+    },
+    onError: (e) => {
+      notifyError(e);
+      onChanged();
+    },
+  });
+  const save = () => action.mutate({ kind: "save", message: message.trim(), untracked: mode === "all", staged: mode === "staged" });
+
+  return (
+    <div className={panes}>
+      <div className="flex min-h-64 flex-col overflow-hidden rounded-lg border border-line bg-surface">
+        <div className="space-y-2 border-b border-line p-2.5">
+          <input
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && hasWork && save()}
+            placeholder={hasWork ? "Name this stash (optional)" : "Nothing to stash: no changes"}
+            disabled={!hasWork}
+            aria-label="Stash name"
+            className={inputClass}
+          />
+          <div className="flex items-center gap-2">
+            <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)} disabled={!hasWork} aria-label="What to stash" className={clsx(inputClass.replace("w-full", ""), "w-auto py-1 text-xs")}>
+              <option value="all">All changes and new files</option>
+              <option value="tracked">Changes to tracked files only</option>
+              <option value="staged" disabled={stagedCount === 0}>
+                Staged changes only{stagedCount ? ` (${stagedCount})` : ""}
+              </option>
+            </select>
+            <span className="flex-1" />
+            <Button size="sm" variant="primary" onClick={save} disabled={!hasWork || action.isPending || (mode === "staged" && stagedCount === 0)} title="Set the changes aside and get a clean working tree">
+              Stash
+            </Button>
+          </div>
+        </div>
+        <div className="flex items-center border-b border-line px-3 py-1.5 text-xs text-muted">
+          <span className="font-medium">
+            Stashes <span className="tabular-nums">{list.length}</span>
+          </span>
+          <span className="flex-1" />
+          {list.length > 1 &&
+            (confirm === "clear" ? (
+              <span className="flex items-center gap-2">
+                <span>Delete all {list.length}?</span>
+                <button type="button" onClick={() => action.mutate({ kind: "clear" })} disabled={action.isPending} className="text-[11px] font-medium text-danger-text hover:underline">
+                  Delete all
+                </button>
+                <button type="button" onClick={() => setConfirm(null)} className="text-[11px] font-medium hover:underline">
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <button type="button" onClick={() => setConfirm("clear")} className="text-[11px] font-medium text-muted hover:text-danger-text hover:underline" title="Delete every stash (git stash clear)">
+                Clear all
+              </button>
+            ))}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {stashes.isLoading && <p className="p-4 text-sm text-muted">Loading…</p>}
+          {!stashes.isLoading && list.length === 0 && (
+            <p className="p-6 text-center text-sm text-muted">No stashes. Stash your changes to set them aside, switch branches or pull, then bring them back here.</p>
+          )}
+          <ul>
+            {list.map((st) => {
+              const { branch: on, text } = stashParts(st.message);
+              return (
+                <li key={`${st.index}:${st.time}`}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPicked(st.index);
+                      setConfirm(null);
+                      setBranching(false);
+                    }}
+                    aria-current={st.index === shown?.index ? "true" : undefined}
+                    className={clsx("flex w-full flex-col px-3 py-1.5 text-left", st.index === shown?.index ? "bg-accent-soft/50" : "hover:bg-surface-2")}
+                  >
+                    <span className="block truncate text-[13px] text-fg">{text}</span>
+                    <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted">
+                      {on && (
+                        <span className="flex min-w-0 items-center gap-1">
+                          <GitBranch size={11} className="shrink-0" aria-hidden />
+                          <span className="truncate">{on}</span>
+                        </span>
+                      )}
+                      <span className="shrink-0" title={new Date(st.time * 1000).toLocaleString()}>
+                        {on && "· "}
+                        {formatAgo(st.time * 1000)}
+                      </span>
+                      <span className="ml-auto shrink-0 font-mono">#{st.index}</span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </div>
+      <div className="flex min-h-64 min-w-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
+        {shown ? (
+          <StashView
+            key={`${shown.index}:${shown.time}`}
+            site={site}
+            stash={shown}
+            busy={action.isPending}
+            confirm={confirm === "drop"}
+            branching={branching}
+            branch={branch}
+            onBranchName={setBranch}
+            onBranching={setBranching}
+            onConfirm={(on) => setConfirm(on ? "drop" : null)}
+            onRun={(a) => action.mutate(a)}
+          />
+        ) : (
+          <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted">No stashes.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StashView({
+  site,
+  stash,
+  busy,
+  confirm,
+  branching,
+  branch,
+  onBranchName,
+  onBranching,
+  onConfirm,
+  onRun,
+}: {
+  site: Site;
+  stash: { index: number; message: string; time: number };
+  busy: boolean;
+  confirm: boolean;
+  branching: boolean;
+  branch: string;
+  onBranchName: (name: string) => void;
+  onBranching: (on: boolean) => void;
+  onConfirm: (on: boolean) => void;
+  onRun: (a: Parameters<typeof api.gitStash>[1]) => void;
+}) {
+  // Keyed by time too: indexes shift when a stash above is removed.
+  const files = useQuery({ queryKey: ["git-stash-files", site.name, stash.index, stash.time], queryFn: () => api.gitStashFiles(site.name, stash.index) });
+  const [file, setFile] = useState<{ path: string; untracked: boolean } | null>(null);
+  const diff = useQuery({
+    queryKey: ["git-stash-diff", site.name, stash.index, stash.time, file?.path, file?.untracked],
+    queryFn: () => api.gitStashFileDiff(site.name, stash.index, file!.path, file!.untracked),
+    enabled: !!file,
+  });
+  const { branch: on, text } = stashParts(stash.message);
+  const list = files.data ?? [];
+  const totals = list.reduce((t, f) => ({ add: t.add + f.additions, del: t.del + f.deletions }), { add: 0, del: 0 });
+
+  if (file) {
+    const f = list.find((x) => x.path === file.path && x.untracked === file.untracked);
+    return (
+      <>
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-2 py-1.5">
+          <button type="button" onClick={() => setFile(null)} className="flex min-w-0 items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-accent-text hover:bg-surface-2">
+            <ChevronLeft size={13} className="shrink-0" /> <span className="truncate">{text}</span>
+          </button>
+        </div>
+        <DiffTitle path={file.path} from={f?.from} note={file.untracked ? "New file" : f ? letters[f.status] : undefined} extra={f && <LineCounts add={f.additions} del={f.deletions} binary={f.binary} />} />
+        <DiffView text={diff.data} loading={diff.isLoading} error={diff.isError ? String(diff.error) : null} />
+      </>
+    );
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="space-y-3 border-b border-line p-4">
+        <div>
+          <h4 className="text-base font-medium text-fg">{text}</h4>
+          <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
+            {on && (
+              <>
+                Made on <span className="font-medium text-fg">{on}</span> ·
+              </>
+            )}
+            <span title={new Date(stash.time * 1000).toLocaleString()}>{formatAgo(stash.time * 1000)}</span>
+            <span className="font-mono">· stash@{`{${stash.index}}`}</span>
+          </p>
+        </div>
+        {branching ? (
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (branch.trim()) onRun({ kind: "branch", index: stash.index, name: branch.trim() });
+            }}
+          >
+            <input value={branch} onChange={(e) => onBranchName(e.target.value)} placeholder="new-branch-name" aria-label="New branch name" autoFocus className={clsx(inputClass, "w-56 py-1 font-mono text-xs")} />
+            <Button size="sm" variant="primary" type="submit" disabled={!branch.trim() || busy}>
+              Create branch
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onBranching(false)}>
+              Cancel
+            </Button>
+            <p className="basis-full text-[11px] text-muted">Starts the branch at the commit this stash was made on, switches to it and restores the stash there. Your working tree must be clean.</p>
+          </form>
+        ) : confirm ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted">Delete this stash? Its changes are gone for good.</span>
+            <Button size="sm" variant="danger" onClick={() => onRun({ kind: "drop", index: stash.index })} disabled={busy}>
+              Delete
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onConfirm(false)}>
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="primary" onClick={() => onRun({ kind: "pop", index: stash.index })} disabled={busy} title="Bring the changes back and remove the stash (git stash pop)">
+              <Undo2 size={13} /> Restore
+            </Button>
+            <Button size="sm" onClick={() => onRun({ kind: "apply", index: stash.index })} disabled={busy} title="Bring the changes back and keep the stash (git stash apply)">
+              Apply and keep
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onBranching(true)} disabled={busy} title="Restore the stash on a new branch (git stash branch)">
+              <GitBranch size={13} /> New branch
+            </Button>
+            <span className="flex-1" />
+            <Button size="sm" variant="ghost" onClick={() => onConfirm(true)} disabled={busy} title="Delete this stash" aria-label="Delete this stash">
+              <Trash2 size={13} />
+            </Button>
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-3 px-4 pt-3 pb-1 text-xs text-muted">
+        <span className="font-medium text-fg">{files.isLoading ? "Reading the stash…" : `${list.length} ${list.length === 1 ? "file" : "files"}`}</span>
+        {list.length > 0 && <LineCounts add={totals.add} del={totals.del} />}
+      </div>
+      {files.isError && <p className="px-4 text-xs text-danger-text">{String(files.error)}</p>}
+      <ul className="pb-2">
+        {list.map((f) => (
+          <li key={`${f.untracked}:${f.path}`}>
+            <button type="button" onClick={() => setFile({ path: f.path, untracked: f.untracked })} className="flex w-full items-baseline gap-2 px-4 py-1 text-left hover:bg-surface-2" title={`${f.path}: show the changes`}>
+              <span className={clsx("w-3 shrink-0 font-mono text-[11px] font-medium", letterColor(f.untracked ? "?" : f.status))} title={f.untracked ? letters["?"] : letters[f.status]}>
+                {f.untracked ? "U" : f.status}
+              </span>
+              <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                <FileName path={f.path} />
+              </span>
+              <LineCounts add={f.additions} del={f.deletions} binary={f.binary} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Branch and tag names on a commit, as small badges. */
 function Refs({ refs }: { refs: string }) {
   const names = refs
@@ -1017,7 +1343,6 @@ function Branches({ site, current, upstream, onChanged }: { site: Site; current:
           <ul className="overflow-hidden rounded-lg border border-line bg-surface">{remote.map(row)}</ul>
         </section>
       )}
-      <Tags site={site} onChanged={onChanged} />
       {deleting && (
         <Dialog
           open
@@ -1042,65 +1367,315 @@ function Branches({ site, current, upstream, onChanged }: { site: Site; current:
   );
 }
 
-/** Tags (release names): create one on the current commit, push it, delete it. */
+/** "⋯" next to Pull and Push: the same, with a branch this one doesn't track. */
+function OtherBranchMenu({ disabled, canPush, onPick }: { disabled: boolean; canPush: boolean; onPick: (pull: boolean) => void }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !(e.target as HTMLElement).closest("[data-other-branch]")) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [open]);
+  const item = (pull: boolean, label: string, hint: string) => (
+    <button
+      role="menuitem"
+      type="button"
+      onClick={() => {
+        setOpen(false);
+        onPick(pull);
+      }}
+      className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-surface-2"
+    >
+      {pull ? <ArrowDown size={14} className="mt-0.5 shrink-0 text-muted" /> : <ArrowUp size={14} className="mt-0.5 shrink-0 text-muted" />}
+      <span>
+        <span className="block text-sm">{label}</span>
+        <span className="block text-xs text-muted">{hint}</span>
+      </span>
+    </button>
+  );
+  return (
+    <div className="relative" data-other-branch>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Pull from or push to another branch"
+        title="Pull from or push to another branch"
+        className="flex items-center rounded-md px-1.5 py-1 text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50"
+      >
+        <MoreHorizontal size={14} />
+      </button>
+      {open && (
+        <div role="menu" className="motion-pop absolute top-full right-0 z-30 mt-1.5 w-72 rounded-xl border border-line bg-surface p-1 shadow-float">
+          {item(true, "Pull from a branch…", "Merge a remote branch into this one")}
+          {canPush && item(false, "Push to a branch…", "Send this branch's commits to a remote branch of any name")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Pick the remote and branch to pull from or push to. */
+function OtherBranchDialog({ site, status, pull, onClose, onRun }: { site: Site; status: GitStatus; pull: boolean; onClose: () => void; onRun: (remote: string, branch: string) => void }) {
+  const branches = useQuery({ queryKey: ["git-branches", site.name], queryFn: () => api.gitBranches(site.name) });
+  const [remote, setRemote] = useState(status.remotes.find((r) => r.name === "origin")?.name ?? status.remotes[0]?.name ?? "");
+  const [branch, setBranch] = useState(pull ? "" : (status.branch ?? ""));
+  // The remote's branches (origin/main → main), known since the last fetch.
+  const known = (branches.data ?? []).filter((b) => b.remote && b.name.startsWith(`${remote}/`)).map((b) => b.name.slice(remote.length + 1)).filter((b) => b !== "HEAD");
+  const ok = !!remote && !!branch.trim();
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={pull ? `Pull into ${status.branch ?? "HEAD"}` : `Push ${status.branch}`}
+      icon={pull ? <ArrowDown size={18} /> : <ArrowUp size={18} />}
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={!ok} onClick={() => onRun(remote, branch.trim())}>
+            {pull ? "Pull" : "Push"}
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="space-y-3 text-sm"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ok) onRun(remote, branch.trim());
+        }}
+      >
+        <p className="text-muted">
+          {pull
+            ? "Merges the branch you pick into the current one (or rebases, if the repository is set to pull with rebase). Your branch keeps tracking what it tracked."
+            : "Sends the current branch's commits to the branch you name; it's created on the remote if it isn't there. Tracking doesn't change."}
+        </p>
+        <label className="block space-y-1">
+          <span className="text-xs font-medium text-muted">Remote</span>
+          <select value={remote} onChange={(e) => setRemote(e.target.value)} className={inputClass}>
+            {status.remotes.map((r) => (
+              <option key={r.name} value={r.name}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block space-y-1">
+          <span className="text-xs font-medium text-muted">Branch</span>
+          <input value={branch} onChange={(e) => setBranch(e.target.value)} list="other-branches" placeholder="main" className={clsx(inputClass, "font-mono")} data-autofocus />
+          <datalist id="other-branches">
+            {known.map((b) => (
+              <option key={b} value={b} />
+            ))}
+          </datalist>
+        </label>
+        {known.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {known.slice(0, 12).map((b) => (
+              <button key={b} type="button" onClick={() => setBranch(b)} className={clsx("rounded-md border px-2 py-0.5 font-mono text-xs", b === branch ? "border-accent text-accent-text" : "border-line text-muted hover:text-fg")}>
+                {b}
+              </button>
+            ))}
+          </div>
+        )}
+        {known.length === 0 && <p className="text-xs text-muted">No branches of {remote || "the remote"} known yet: Fetch first to list them, or type a name.</p>}
+      </form>
+    </Dialog>
+  );
+}
+
+/**
+ * Tags (release names): create one on the current commit or any commit or branch, see which
+ * are on the remote, push one or all, delete here or on the remote, fetch the remote's, and
+ * start a branch from one.
+ */
 function Tags({ site, onChanged }: { site: Site; onChanged: () => void }) {
   const notify = useAppStore((s) => s.notify);
   const queryClient = useQueryClient();
   const tags = useQuery({ queryKey: ["git-tags", site.name], queryFn: () => api.gitTags(site.name) });
   const status = queryClient.getQueryData<GitStatus>(["git-status", site.name]);
-  const remote = status?.remotes.find((r) => r.name === "origin")?.name ?? status?.remotes[0]?.name;
+  const remotes = status?.remotes ?? [];
+  const [remote, setRemote] = useState(remotes.find((r) => r.name === "origin")?.name ?? remotes[0]?.name ?? "");
+  // Which tags the remote has: one ls-remote, asked for when the view opens.
+  const onRemote = useQuery({ queryKey: ["git-remote-tags", site.name, remote], queryFn: () => api.gitRemoteTags(site.name, remote), enabled: !!remote, staleTime: 60_000, retry: false });
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
+  const [target, setTarget] = useState("");
+  const [filter, setFilter] = useState("");
+  const [confirm, setConfirm] = useState<{ name: string; remote: boolean } | null>(null);
+  const [branching, setBranching] = useState<{ tag: string; branch: string } | null>(null);
   const act = useMutation({
     mutationFn: (action: Parameters<typeof api.gitTag>[1]) => api.gitTag(site.name, action),
     onSuccess: (_, action) => {
       if (action.kind === "create") {
         setName("");
         setMessage("");
+        setTarget("");
+        notify("info", `Tagged ${action.commit || "the current commit"} as ${action.name}`);
       }
       if (action.kind === "push") notify("info", `Pushed ${action.name} to ${action.remote}`);
+      if (action.kind === "pushAll") notify("info", `Pushed every tag to ${action.remote}`);
+      if (action.kind === "deleteRemote") notify("info", `Deleted ${action.name} on ${action.remote}`);
+      if (action.kind === "fetch") notify("info", `Fetched ${action.remote}'s tags`);
+      if (action.kind === "branch") notify("info", `Switched to ${action.branch}, started at ${action.name}`);
+      setConfirm(null);
+      setBranching(null);
       tags.refetch();
+      onRemote.refetch();
       onChanged();
     },
     onError: notifyError,
   });
+  const remoteSet = new Set(onRemote.data ?? []);
+  const list = (tags.data ?? []).filter((t) => !filter || t.name.toLowerCase().includes(filter.toLowerCase()) || t.subject.toLowerCase().includes(filter.toLowerCase()));
+  const unpushed = onRemote.data ? (tags.data ?? []).filter((t) => !remoteSet.has(t.name)).length : 0;
+  // Tags on the remote that aren't here yet.
+  const remoteOnly = onRemote.data ? onRemote.data.filter((n) => !(tags.data ?? []).some((t) => t.name === n)) : [];
+
   return (
-    <section className="space-y-2">
-      <h4 className="px-1 text-xs font-medium text-muted">Tags</h4>
+    <div className="space-y-4">
       <form
-        className="flex flex-wrap gap-2"
+        className="space-y-2 rounded-lg border border-line bg-surface p-3"
         onSubmit={(e) => {
           e.preventDefault();
-          act.mutate({ kind: "create", name: name.trim(), message, commit: null });
+          act.mutate({ kind: "create", name: name.trim(), message, commit: target.trim() || null });
         }}
       >
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="v1.0.0" aria-label="Tag name" className={clsx(inputClass.replace("w-full", ""), "w-32 font-mono")} />
-        <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Release notes (optional)" aria-label="Tag message" className={clsx(inputClass.replace("w-full", ""), "min-w-48 flex-1")} />
-        <Button type="submit" disabled={!name.trim() || act.isPending} title="Tag the current commit">
-          <Plus size={14} /> Tag
-        </Button>
+        <h4 className="text-xs font-medium text-muted">New tag</h4>
+        <div className="flex flex-wrap gap-2">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="v1.0.0" aria-label="Tag name" className={clsx(inputClass.replace("w-full", ""), "w-32 font-mono")} />
+          <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="On HEAD" aria-label="Commit or branch to tag" title="A commit hash or branch; empty tags the current commit" className={clsx(inputClass.replace("w-full", ""), "w-36 font-mono")} />
+          <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Release notes (optional: makes an annotated tag)" aria-label="Tag message" className={clsx(inputClass.replace("w-full", ""), "min-w-48 flex-1")} />
+          <Button type="submit" variant="primary" disabled={!name.trim() || act.isPending} title="Create the tag">
+            <Plus size={14} /> Tag
+          </Button>
+        </div>
       </form>
-      {(tags.data ?? []).length > 0 && (
+
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex h-8 min-w-48 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 focus-within:border-accent">
+          <Search size={13} className="shrink-0 text-muted" aria-hidden />
+          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter tags" aria-label="Filter tags" className="w-full bg-transparent text-sm outline-none placeholder:text-muted" />
+        </label>
+        {remotes.length > 1 && (
+          <select value={remote} onChange={(e) => setRemote(e.target.value)} aria-label="Remote" className={clsx(inputClass.replace("w-full", ""), "h-8 w-32 py-0")}>
+            {remotes.map((r) => (
+              <option key={r.name}>{r.name}</option>
+            ))}
+          </select>
+        )}
+        {remote && (
+          <>
+            <Button size="sm" variant="ghost" onClick={() => act.mutate({ kind: "fetch", remote })} disabled={act.isPending} title={`Get ${remote}'s tags`}>
+              <ArrowDown size={13} /> Fetch tags
+            </Button>
+            <Button size="sm" variant={unpushed ? "secondary" : "ghost"} onClick={() => act.mutate({ kind: "pushAll", remote })} disabled={act.isPending || (tags.data ?? []).length === 0} title={`Send every tag to ${remote}`}>
+              <ArrowUp size={13} /> Push all{unpushed ? ` (${unpushed} new)` : ""}
+            </Button>
+          </>
+        )}
+      </div>
+
+      {remote && onRemote.isError && <p className="text-xs text-muted">Couldn't ask {remote} which tags it has: {String(onRemote.error)}</p>}
+      {remoteOnly.length > 0 && (
+        <p className="text-xs text-muted">
+          {remote} has {remoteOnly.length} tag{remoteOnly.length === 1 ? "" : "s"} you don't ({remoteOnly.slice(0, 4).join(", ")}
+          {remoteOnly.length > 4 ? "…" : ""}): Fetch tags to get them.
+        </p>
+      )}
+
+      {tags.isLoading && <p className="text-sm text-muted">Loading tags…</p>}
+      {tags.data?.length === 0 && <p className="text-sm text-muted">No tags yet. A tag names a commit, usually a release (v1.0.0).</p>}
+      {list.length > 0 && (
         <ul className="overflow-hidden rounded-lg border border-line bg-surface">
-          {tags.data!.map((t) => (
-            <li key={t.name} className="flex items-center gap-2 border-b border-line/60 px-3 py-1.5 last:border-0">
-              <span className="font-mono text-sm text-fg">{t.name}</span>
-              <span className="min-w-0 flex-1 truncate text-[11px] text-muted">
-                {t.subject} · {t.commit} · {formatAgo(t.time * 1000)}
-              </span>
-              {remote && (
-                <Button size="sm" variant="ghost" onClick={() => act.mutate({ kind: "push", name: t.name, remote })} disabled={act.isPending} title={`Push the tag to ${remote}`}>
-                  <ArrowUp size={13} /> Push
+          {list.map((t) => {
+            const pushed = onRemote.data ? remoteSet.has(t.name) : null;
+            return (
+              <li key={t.name} className="flex flex-wrap items-center gap-2 border-b border-line/60 px-3 py-2 last:border-0">
+                <TagIcon size={13} className="shrink-0 text-muted" aria-hidden />
+                <span className="font-mono text-sm text-fg">{t.name}</span>
+                {pushed === false && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">only here</span>}
+                {pushed === true && <span className="text-[11px] text-muted" title={`On ${remote}`}>· on {remote}</span>}
+                <span className="min-w-0 flex-1 truncate text-[11px] text-muted">
+                  {t.subject} · {t.commit} · {formatAgo(t.time * 1000)}
+                </span>
+                <Button size="sm" variant="ghost" onClick={() => navigator.clipboard.writeText(t.name).then(() => notify("info", `Copied ${t.name}`))} aria-label={`Copy ${t.name}`} title="Copy the name">
+                  <Copy size={13} />
                 </Button>
-              )}
-              <Button size="sm" variant="ghost" onClick={() => act.mutate({ kind: "delete", name: t.name })} disabled={act.isPending} aria-label={`Delete ${t.name}`} title="Delete the tag here (not on the remote)">
-                <Trash2 size={13} />
-              </Button>
-            </li>
-          ))}
+                <Button size="sm" variant="ghost" onClick={() => setBranching({ tag: t.name, branch: `from-${t.name}` })} title="Start a branch at this tag and switch to it">
+                  <GitBranch size={13} /> Branch
+                </Button>
+                {remote && pushed !== true && (
+                  <Button size="sm" variant="ghost" onClick={() => act.mutate({ kind: "push", name: t.name, remote })} disabled={act.isPending} title={`Push the tag to ${remote}`}>
+                    <ArrowUp size={13} /> Push
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => setConfirm({ name: t.name, remote: false })} disabled={act.isPending} aria-label={`Delete ${t.name}`} title="Delete the tag…">
+                  <Trash2 size={13} />
+                </Button>
+              </li>
+            );
+          })}
         </ul>
       )}
-    </section>
+
+      {confirm && (
+        <Dialog
+          open
+          onClose={() => setConfirm(null)}
+          title={`Delete ${confirm.name}?`}
+          icon={<Trash2 size={18} />}
+          footer={
+            <>
+              <Button onClick={() => setConfirm(null)} data-autofocus>
+                Keep it
+              </Button>
+              {remote && remoteSet.has(confirm.name) && (
+                <Button variant="danger" onClick={() => act.mutate({ kind: "deleteRemote", name: confirm.name, remote })} disabled={act.isPending}>
+                  Delete on {remote}
+                </Button>
+              )}
+              <Button variant="danger" onClick={() => act.mutate({ kind: "delete", name: confirm.name })} disabled={act.isPending}>
+                Delete here
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-muted">
+            Deleting here leaves {remote || "the remote"}'s copy; deleting on {remote || "the remote"} leaves yours. The commit stays either way.
+          </p>
+        </Dialog>
+      )}
+      {branching && (
+        <Dialog
+          open
+          onClose={() => setBranching(null)}
+          title={`Branch from ${branching.tag}`}
+          icon={<GitBranch size={18} />}
+          footer={
+            <>
+              <Button onClick={() => setBranching(null)}>Cancel</Button>
+              <Button variant="primary" disabled={!branching.branch.trim() || act.isPending} onClick={() => act.mutate({ kind: "branch", name: branching.tag, branch: branching.branch.trim() })}>
+                Create and switch
+              </Button>
+            </>
+          }
+        >
+          <label className="block space-y-1 text-sm">
+            <span className="text-xs font-medium text-muted">New branch</span>
+            <input value={branching.branch} onChange={(e) => setBranching({ ...branching, branch: e.target.value })} className={clsx(inputClass, "font-mono")} data-autofocus />
+          </label>
+        </Dialog>
+      )}
+    </div>
   );
 }
 

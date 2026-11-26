@@ -96,6 +96,11 @@ fn nvm_windows() -> Option<(PathBuf, String)> {
     exe.exists().then(|| (exe, env_var("NVM_SYMLINK").unwrap_or_default()))
 }
 
+/// nvm-windows' symlink to the active version, the folder that should answer `node`.
+pub fn nvm_symlink() -> Option<PathBuf> {
+    nvm_windows().map(|(_, link)| PathBuf::from(link)).filter(|l| !l.as_os_str().is_empty())
+}
+
 /// NVM (nvm-windows, or nvm-sh elsewhere) is there to install Node versions with.
 pub fn nvm_installed() -> bool {
     if cfg!(windows) { nvm_windows().is_some() } else { nvm_sh_dir().is_some() }
@@ -392,10 +397,18 @@ pub async fn install_nvm(app: &AppHandle, client: &reqwest::Client, layout: &Lay
 /// $NVM_DIR/versions/node/v<version>.
 fn versions_dir() -> Option<PathBuf> {
     if cfg!(windows) {
-        nvm_windows().and_then(|(exe, _)| exe.parent().map(PathBuf::from))
+        // nvm-windows installs into `root:` from its settings.txt, which needn't be NVM_HOME.
+        let home = nvm_windows().and_then(|(exe, _)| exe.parent().map(PathBuf::from))?;
+        let settings = std::fs::read_to_string(home.join("settings.txt")).unwrap_or_default();
+        Some(settings_root(&settings).map_or(home, PathBuf::from))
     } else {
         nvm_sh_dir().map(|d| d.join("versions").join("node"))
     }
+}
+
+/// The `root:` line of nvm-windows' settings.txt.
+fn settings_root(text: &str) -> Option<&str> {
+    text.lines().find_map(|l| l.trim().strip_prefix("root:")).map(str::trim).filter(|r| !r.is_empty())
 }
 
 /// The folder with a version's `node` and `npm`.
@@ -445,18 +458,48 @@ fn default_version(installed: &[String]) -> Option<String> {
 /// own version without switching NVM's global one.
 pub fn for_project(chosen: Option<&str>, project: &std::path::Path) -> Result<(String, PathBuf)> {
     let installed = installed_versions();
-    if installed.is_empty() {
-        return Err(Error::msg("No Node.js versions are installed. Install one from Services → Node.js."));
-    }
     let wanted = chosen.map(str::to_string).or_else(|| project_version(project));
+    // A Node that NVM's folder doesn't list (a fresh NVM the app hasn't seen yet, nvm-sh set up
+    // only in .zshrc, Volta, fnm, the nodejs.org installer) still runs the project when it's
+    // the version wanted: a terminal finds it, so LampRabit must too.
+    let on_path = || {
+        system_node().filter(|(v, _)| wanted.as_deref().is_none_or(|spec| resolve(spec, std::slice::from_ref(v)).is_some()))
+    };
+    if installed.is_empty() {
+        return on_path().ok_or_else(|| Error::msg("No Node.js versions are installed. Install one from Services → Node.js."));
+    }
     let version = match &wanted {
-        Some(spec) => resolve(spec, &installed).ok_or_else(|| {
-            Error::msg(format!("This project wants Node {spec}, which isn't installed. Install it from Services → Node.js, or pick another version."))
-        })?,
+        Some(spec) => match resolve(spec, &installed) {
+            Some(v) => v,
+            None => {
+                return on_path().ok_or_else(|| {
+                    Error::msg(format!("This project wants Node {spec}, which isn't installed. Install it from Services → Node.js, or pick another version."))
+                });
+            }
+        },
         None => default_version(&installed).unwrap_or_else(|| installed[0].clone()),
     };
-    let bin = bin_of(&version).ok_or_else(|| Error::msg("NVM isn't installed. Install it from Services → Node.js."))?;
-    Ok((version, bin))
+    match bin_of(&version).filter(|b| b.join(if cfg!(windows) { "node.exe" } else { "node" }).is_file()) {
+        Some(bin) => Ok((version, bin)),
+        None => on_path().ok_or_else(|| Error::msg("NVM isn't installed. Install it from Services → Node.js.")),
+    }
+}
+
+/// The `node` a new terminal would run, with its version: found on the current PATH (see
+/// `overrides::fresh_path`), so it works for Node installed any way at all.
+pub fn system_node() -> Option<(String, PathBuf)> {
+    let exe = if cfg!(windows) { "node.exe" } else { "node" };
+    let dir = std::env::split_paths(&crate::overrides::fresh_path()).find(|d| d.join(exe).is_file())?;
+    let mut cmd = std::process::Command::new(dir.join(exe));
+    cmd.arg("--version").stdin(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(crate::procgroup::CREATE_NO_WINDOW);
+    }
+    let out = cmd.output().ok()?;
+    let version = String::from_utf8_lossy(&out.stdout).trim().trim_start_matches('v').to_string();
+    (out.status.success() && version.split('.').count() == 3).then_some((version, dir))
 }
 
 /// The Node version a project asks for in .nvmrc / .node-version, if any.
@@ -480,6 +523,13 @@ mod tests {
         assert_eq!(resolve("lts/jod", &installed).as_deref(), Some("24.22.1"));
         assert_eq!(resolve("2", &installed), None, "a major must match exactly, not as a prefix");
         assert_eq!(resolve("20", &installed), None);
+    }
+
+    #[test]
+    fn reads_nvm_windows_root() {
+        assert_eq!(settings_root("root: D:\\node versions\r\npath: C:\\nvm4w\\nodejs\r\n"), Some("D:\\node versions"));
+        assert_eq!(settings_root("path: C:\\nvm4w\\nodejs\n"), None);
+        assert_eq!(settings_root("root: \n"), None);
     }
 
     #[test]

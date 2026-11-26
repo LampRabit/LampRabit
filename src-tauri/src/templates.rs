@@ -38,6 +38,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("flask.yaml", include_str!("../templates/flask.yaml")),
     ("fastapi.yaml", include_str!("../templates/fastapi.yaml")),
     ("spring-boot.yaml", include_str!("../templates/spring-boot.yaml")),
+    ("spring-boot-gradle.yaml", include_str!("../templates/spring-boot-gradle.yaml")),
     ("java-webapp.yaml", include_str!("../templates/java-webapp.yaml")),
     ("go.yaml", include_str!("../templates/go.yaml")),
     ("gin.yaml", include_str!("../templates/gin.yaml")),
@@ -579,7 +580,11 @@ pub const PLACEHOLDERS: &[&str] = &[
     "db.password",
     "db.server_version",
     "venv.python",
+    "py",
+    "py.venv",
+    "py.add",
     "mvnw",
+    "gradlew",
     "java_major",
     "db.scheme",
     "db.charset",
@@ -914,6 +919,8 @@ pub struct TemplateInfo {
     pub path: Option<PathBuf>,
     pub uses_php: bool,
     pub uses_node: bool,
+    /// Some step runs Node (Laravel's frontend build): the wizard offers the package manager.
+    pub node_steps: bool,
     /// Lowest Python, Java, Go and Rust versions the template needs (LampRabit's own).
     pub python: Option<String>,
     pub java: Option<String>,
@@ -1029,6 +1036,7 @@ pub fn catalog(layout: &Layout) -> Catalog {
             path,
             uses_php: t.uses_php(),
             uses_node: t.uses_node(),
+            node_steps: t.steps.iter().any(|s| s.needs.iter().any(|n| n == "node")),
             python: t.requires.python.clone(),
             java: t.requires.java.clone(),
             go: t.requires.go.clone(),
@@ -1067,6 +1075,19 @@ pub fn inside(base: &Path, relative: &str) -> Result<PathBuf> {
 /// Written next to your templates the first time the folder is opened. It ends in .txt so
 /// it doesn't show up in the wizard until renamed.
 pub const EXAMPLE: &str = include_str!("../templates/example.yaml.txt");
+
+/// A template's YAML by id: yours (in the templates folder) first, else the built-in one.
+/// The CLI and MCP hand it out so an assistant can start a new template from an existing one.
+pub fn source(layout: &Layout, id: &str) -> Option<String> {
+    let mine = std::fs::read_dir(folder(layout)).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "yaml" || x == "yml"));
+    for path in mine {
+        if let Ok(text) = std::fs::read_to_string(&path)
+            && parse_text(&text).is_ok_and(|t| t.id == id) {
+                return Some(text);
+            }
+    }
+    BUILT_IN.iter().map(|(_, text)| *text).find(|text| parse_text(text).is_ok_and(|t| t.id == id)).map(str::to_string)
+}
 
 #[cfg(test)]
 mod tests {
