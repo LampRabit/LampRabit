@@ -233,8 +233,9 @@ Write `{{name}}` anywhere a step takes text. Unknown names are reported when the
 | `{{db.host}}`, `{{db.port}}` | `127.0.0.1` and the server's port |
 | `{{db.user}}`, `{{db.password}}` | `root` and an empty password |
 | `{{db.server_version}}` | `11.8.9-MariaDB`, `8.4.13` or `18` (Doctrine's `serverVersion`) |
-| `{{venv.python}}` | `.venv\Scripts\python.exe` on Windows, `.venv/bin/python` elsewhere |
+| `{{venv.python}}` | The project environment's Python: `.venv\Scripts\python.exe` on Windows (`.venv\python.exe` for a conda environment), `.venv/bin/python` elsewhere |
 | `{{mvnw}}` | Maven's wrapper: `mvnw.cmd` on Windows, `sh mvnw` elsewhere (zips drop the executable bit) |
+| `{{gradlew}}` | Gradle's wrapper: `gradlew.bat` on Windows, `sh gradlew` elsewhere |
 | `{{java_major}}` | The active Java's major version (`21`) |
 | `{{db.scheme}}`, `{{db.charset}}` | `mysql` and `utf8mb4`, or `postgresql` and `utf8` (database URLs) |
 | `{{db.pdo}}` | PDO's driver name: `mysql` (MariaDB too), `pgsql` or `sqlite`; empty when the project has no database, so `if: db.pdo == pgsql` adds PostgreSQL-only steps |
@@ -254,7 +255,17 @@ With `requires: node: true`:
 | `{{pm.install}}`, `{{pm.add}}` | `npm install` | `pnpm install`, `pnpm add` | `yarn install`, `yarn add` | `bun install`, `bun add` |
 | `{{node_version}}` | The Node.js version chosen in the wizard |
 
-pnpm and Yarn run through `npx` when they aren't installed for that Node version; Bun has to be installed. `{{pm.args}}` separates a script's own arguments: `{{pm.run}} dev {{pm.args}} --port {port}`.
+pnpm and Yarn run through `npx` when they aren't installed for that Node version; Bun has to be installed. `{{pm.args}}` separates a script's own arguments: `{{pm.run}} dev {{pm.args}} --port {port}`. Templates without `requires: node` get the same placeholders for steps with `needs: [node]` (Laravel's frontend build), and the wizard offers the package manager for them.
+
+With `requires: python`, the wizard asks how to make the environment:
+
+| Placeholder | pip | uv | conda |
+|---|---|---|---|
+| `{{py}}` | `pip` | `uv` | `conda` |
+| `{{py.venv}}` | `python -m venv .venv` | `uv init --bare --no-workspace --name <project> --python <x.y>` | `conda create --yes --quiet --prefix .venv python=<x.y> pip` |
+| `{{py.add}}` | `{{venv.python}} -m pip install …` | `uv add` | `{{venv.python}} -m pip install …` |
+
+uv records packages in `pyproject.toml` and `uv.lock`, so write a `requirements.txt` only `if: py != uv`.
 
 YAML reads a value that starts with `{` as a map, so quote values that begin with a placeholder: `"{{project}}"`.
 
@@ -336,6 +347,18 @@ Give at most one of `root`, `port` and `process`. A subdomain pointing at a proc
 ### Making templates in the app
 
 New project → **New template** opens a guided form with the YAML next to it, for anything the form doesn't cover. The form has the template's look (name, icon, colour), its languages (PHP, Node.js, Python, Java, Go and Rust, several at once: a Tauri app is Rust and Node.js), where the code comes from (Git, Composer's create-project, a starter command such as Vite, Next.js, Tauri, Cargo, Go or Django, a checked download, or an empty folder), setup steps suggested for those languages plus steps of your own (commands, PHP, Composer, files to write or copy, `.env` values, each optional or tied to the database), the database servers and how the connection reaches `.env`, how it's served (files, a static build or a dev server), the wizard's questions, processes, subdomains, commands and the closing message. A project's Settings → **Save as a template** opens the editor on a template that recreates that project: a `git clone` of its remote, its Composer and Node installs, `.env` from `.env.example`, Laravel's key and migrations, its database, PHP version, dev server, saved commands, processes and subdomains. Either way the template is checked like one loaded from the folder before it's saved to `<root>/templates/<id>.yaml`.
+
+### Making templates from the command line or an AI assistant
+
+Ask your assistant to "make this project a LampRabit template" (or describe a setup: "a Laravel API with Sanctum and Horizon, on PostgreSQL"). Through LampRabit's MCP server it reads the format (`template_format`), drafts one from the project (`draft_template_from_project`) or starts from a built-in one (`get_template`), wraps the setup in steps, and saves it (`save_template`). The same from a terminal:
+
+```
+lamprabit template from shop > shop.yaml     # or: lamprabit template show laravel
+# edit shop.yaml
+lamprabit template save shop.yaml            # --replace to overwrite your template with that id
+```
+
+Saving checks the template the way the app does; it then shows in New project. A template saved this way is yours: its risky steps (commands, downloads) still need your approval in the wizard, and `create_project` from MCP refuses them.
 
 ## What happens when you click Create
 

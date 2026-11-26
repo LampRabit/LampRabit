@@ -35,5 +35,6 @@ How the maintainer likes agents to work, gathered from every session from 2026-1
 
 - **Next release: 0.8** (the user, 2026-11-24), from `dev-1.0`, shipped with a lot more features: pluggable services plus the backlog items built before it. **Don't release it yet**: only once all of these are built and tested, when the user says so.
 
+- **Keep [docs/since-0.6.md](../../docs/since-0.6.md) current** (the user, 2026-11-25): every feature and bug fix since 0.6.0 gets a user-facing line in the same session, so the website can be updated from it. At release it becomes the CHANGELOG.md section and starts over.
 - Pre-releases for testing (often for macOS); the stable one is marked Latest on GitHub, which the updater needs.
 - Release notes and titles are written by the agent; see `RELEASING.md` and `CHANGELOG.md`.

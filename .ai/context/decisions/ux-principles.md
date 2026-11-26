@@ -40,6 +40,13 @@ The UI was polished to stop looking AI-built (an "unslop" pass), keeping the bra
 
 The palette's items are built in `useItems()` (`components/CommandPalette.tsx`); the CLI and MCP go through `control_command`. Settings rows are indexed from Settings.tsx's source, so a new `<Row label hint>` is searchable without extra work (2026-11-24).
 
+## Title bar, page headers, links (the user, 2026-11-25)
+
+- **The title bar holds only what's the same on every page**: logo, Search, theme, Open www, terminal, Start/Stop all, the window buttons. A page's title, subtitle and actions go in its own header (`PageHeader`, registered with `usePageToolbar`), never in the title bar: page actions there crowded it on every tab.
+- **A link opens what it needs** instead of landing on "service unavailable": `openUrl` (`lib/open.ts`) → `prepare_url` starts the web server, the service behind a tool's domain, its `needs:` and the database a PHP client shows, then opens. Every in-app link to a local address goes through `openUrl`.
+- **An Install button opens that service's page** (`openService(id)`), never the top of Services.
+- **Home's services have three layouts** (rows, tiles three a row, compact four a row), chosen with one button next to the profile button and kept per device. The profile button shows only with services ticked: "Profile" saves a new one, "Update profile" changes the active one. Stack profiles are one row of pills (All services, yours with their service count, New profile, Import/Export), not cards: picking one filters the list and is what the header's Start starts (the user, 2026-11-25: the cards took space for nothing). "Services" is the row's heading (no separate "Profile" label); Import/Export sit in a ⋮ next to the layout switch. A running service's icon and name are accent green in every layout, grey when stopped. Tiles (both sizes) have no fold-out chevron: details show only when something is wrong. Big tiles: open-in-browser at the top right before the checkbox, Start/Stop and restart bottom left, copy and ⋮ bottom right, all borderless. Clicking a tile anywhere but its controls ticks it. Compact tiles: icon-only Start/Stop, the port under the name, no Running/Stopped text (only unusual states like a port in use), and a running service's name is underlined with an open icon, opening it (the user, 2026-11-25).
+
 ## Definition of done for a new feature
 
 1. It has one home. 2. Its actions are in the palette with keywords (and CLI/MCP where sensible). 3. Its config files are reachable with Open/Reveal/Copy path. 4. Its errors have a fix or a docs link. 5. It has an empty state or first-run hint. 6. It has a task-titled docs page.

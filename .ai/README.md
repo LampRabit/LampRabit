@@ -20,6 +20,7 @@ Everything AI agents need for this project lives in `.ai/`. Start here: find the
 | Traps already hit (sysinfo threads, CRLF, Vitest in Git Bash…) | [instructions/pitfalls.md](instructions/pitfalls.md) |
 | Current state, the active branch, the next step | [progress/status.md](progress/status.md) |
 | Timeline of releases and milestones | [progress/history.md](progress/history.md) |
+| Everything since 0.6.0, for the website and release notes | [../docs/since-0.6.md](../docs/since-0.6.md) |
 | What was asked in a past session | [sessions/README.md](sessions/README.md) |
 
 ### Decisions by area (`context/decisions/`)
@@ -70,6 +71,7 @@ Backlog (`plans/backlog/`), each with what exists today, feasibility checked aga
 | Serverless local development | [serverless.md](plans/backlog/serverless.md) | exploratory |
 | Small ideas (deep link, branch-aware snapshots, debug toggles), KarotX, WarenX, unknowns | [small-ideas.md](plans/backlog/small-ideas.md) | ideas |
 | Product improvements, add-ons, accessibility (2026-11-14 notes) | [product-improvements.md](plans/backlog/product-improvements.md) | ideas |
+| Default client per service, Cloudflare sub-domains, signing (2026-11-24 list) | [usability-2026-11-24.md](plans/backlog/usability-2026-11-24.md) | needs answers |
 
 Source specs (kept verbatim; the decisions and plans above are taken from them):
 
@@ -77,6 +79,8 @@ Source specs (kept verbatim; the decisions and plans above are taken from them):
 |---|---|
 | Product spec exported from another LLM (2026-10-29) | [2026-10-29-llm-product-spec.md](plans/source-specs/2026-10-29-llm-product-spec.md) |
 | Feature planning context (2026-11-21): project model, UX principles, Features 1–17, Tools list | [2026-11-21-feature-context.md](plans/source-specs/2026-11-21-feature-context.md) |
+| Usability and flow issues (2026-11-24), 11 items | [2026-11-24-usability-issues.md](plans/source-specs/2026-11-24-usability-issues.md) |
+| The owner's 12-item list (2026-11-25) | [2026-11-25-owner-list.md](plans/source-specs/2026-11-25-owner-list.md) |
 
 ### Tools
 

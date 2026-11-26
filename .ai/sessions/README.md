@@ -7,6 +7,9 @@ Every working session with an AI agent, newest first. Two kinds of files:
 
 | Date | Prompts | Handoff | Topic |
 |---|---|---|---|
+| 2026-11-26 | — | [notes](2026-11-26-tiles-stashes-pg-extensions.md) | Compact tiles with detail, opaque menus (portal), Git Stashes tab, PostgreSQL extensions panel |
+| 2026-11-25 | — | [notes](2026-11-25-owner-list.md) | Owner's 12 items: title bar, Laravel serve commands, links start their service, Git branch pull/push and tags, Python/templates, templates from CLI/MCP, docs/since-0.6.md, Node on a fresh PATH, Home profile button and layouts |
+| 2026-11-24 | — | [notes](2026-11-24-usability-fixes.md) | Usability fixes: freeing ports (admin), stale port errors, .test domains, pgAdmin, NVM, live refresh; second list: dependent services, default database app on Services, pgAdmin 9.19 skipped, pip/uv/conda |
 | 2026-11-21 | (this session) | [handoff](2026-11-21-ai-context-and-feature-plans.md) | `.ai/` folder; feed/Playground dropped; 2026-11-21 feature context filed into plans |
 | 2026-11-15 | [77567282](2026-11-15-77567282.md) | [handoff](2026-11-15-pluggable-services-handoff.md) | Pluggable services: YAML manifests, phase 27 A/B1/B2 on `dev-1.0` |
 | 2026-11-14 | [5f567e1a](2026-11-14-5f567e1a.md) | — | Phases 23/25, pre-release review and refactors, Mac testing, 0.6.0 released as Latest |

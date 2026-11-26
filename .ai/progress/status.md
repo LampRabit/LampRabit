@@ -1,6 +1,6 @@
 # Current status
 
-Last updated 2026-11-24. Keep this short: where things stand and what comes next. History goes in [history.md](history.md).
+Last updated 2026-11-26. Keep this short: where things stand and what comes next. History goes in [history.md](history.md).
 
 ## Released
 
@@ -29,7 +29,7 @@ Plan: [../plans/active/phase-27-pluggable-services.md](../plans/active/phase-27-
 
 The user, 2026-11-24: 0.8 ships from `dev-1.0` with a lot more features, **only once they're all built and tested**. Commits carry no AI attribution.
 
-Done on `dev-1.0` since phase 27: UI polish and Home's status strip + Needs attention (2026-11-23), fixes from the owner's notes (selection Start/Stop, phpMyAdmin after install, other stacks' Windows services and PATH, Windows Security exclusion), **phase 28 command palette**, complete (2026-11-24, [plan](../plans/active/phase-28-command-palette.md)).
+Done on `dev-1.0` since phase 27: UI polish and Home's status strip + Needs attention (2026-11-23), fixes from the owner's notes (selection Start/Stop, phpMyAdmin after install, other stacks' Windows services and PATH, Windows Security exclusion), **phase 28 command palette**, complete (2026-11-24, [plan](../plans/active/phase-28-command-palette.md)). Usability fixes from the user's two 2026-11-24 lists (ports, admin kill, .test domains, NVM, live refresh, Cloudflare on your domain, default database app on Services, dependent services, pgAdmin 9.19 skipped, pip/uv/conda and Gradle projects), uncommitted: [session](../sessions/2026-11-24-usability-fixes.md); code signing stays in the backlog (the user, 2026-11-26; [backlog](../plans/backlog/usability-2026-11-24.md)). The owner's 12-item list of 2026-11-25 (title bar, Laravel serve commands, links start their service, Git branch pull/push and tags, Python/templates, templates from CLI/MCP, Node on a fresh PATH, Home layouts), uncommitted: [session](../sessions/2026-11-25-owner-list.md). 2026-11-26: compact tiles with detail, menus that no dimmed card can fade, a Git Stashes tab, PostgreSQL extensions per database, uncommitted: [session](../sessions/2026-11-26-tiles-stashes-pg-extensions.md). Everything since 0.6.0 is listed in [docs/since-0.6.md](../../docs/since-0.6.md).
 
 ## Next after phase 27
 

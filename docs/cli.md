@@ -21,6 +21,10 @@ It talks to the running app, so everything goes through the same code as the but
 | `lamprabit project edit <name>` | Its folder, in your editor (Settings → General → Editor command) |
 | `lamprabit terminal [<project>]` | A terminal in the project (or `www`) with LampRabit's `php`, `composer`… first on PATH |
 | `lamprabit project create <name> --template <id> [--php <v>] [--database <db>]` | A new project from a template (`lamprabit templates` lists them) |
+| `lamprabit template show <id>` | A template's YAML (yours or built-in), to start a new one from |
+| `lamprabit template example` | The annotated example: every step kind and placeholder |
+| `lamprabit template from <project>` | A draft template that recreates a project's setup (Git remote, packages, `.env`, database, dev server…) |
+| `lamprabit template save <file.yaml> [--replace]` | Check a template and add it to your templates; `-` reads it from stdin |
 | `lamprabit runtimes [--available <id>]` | Installed runtimes, or what `<id>` can install |
 | `lamprabit runtime install <id> [version]` | Download (checksum checked) and use it; a line like `8.4` picks its newest |
 | `lamprabit runtime use <id> <version>` | Switch the version in use |
@@ -53,9 +57,9 @@ By hand, `lamprabit mcp` is the same server over stdio, for example:
 { "mcpServers": { "lamprabit": { "command": "C:\\lampRabit\\shims\\lamprabit.cmd", "args": ["mcp"] } } }
 ```
 
-Tools that only read: `status`, `list_services`, `list_projects`, `read_logs`, `project_doctor`, `git_status`, `list_runtimes`, `list_templates`, `list_config_files`, `list_php_extensions`.
+Tools that only read: `status`, `list_services`, `list_projects`, `read_logs`, `project_doctor`, `git_status`, `list_runtimes`, `list_templates`, `get_template`, `template_format`, `draft_template_from_project`, `list_config_files`, `list_php_extensions`.
 
-Tools that change something, which clients ask about first (`readOnlyHint: false`; stopping and fixing are also `destructiveHint`): `start_service`, `stop_service`, `restart_service`, `start_project`, `stop_project`, `fix_project_issue`, `create_project` (a user template's risky steps are refused), `install_runtime`, `set_php_extension`, `restart_running_services`, `open_project_in_editor`.
+Tools that change something, which clients ask about first (`readOnlyHint: false`; stopping and fixing are also `destructiveHint`): `start_service`, `stop_service`, `restart_service`, `start_project`, `stop_project`, `fix_project_issue`, `create_project` (a user template's risky steps are refused), `save_template`, `install_runtime`, `set_php_extension`, `restart_running_services`, `open_project_in_editor`.
 
 The same actions are in the app's command palette (Ctrl/Cmd+K): the palette, the command line and MCP go through the same requests.
 
