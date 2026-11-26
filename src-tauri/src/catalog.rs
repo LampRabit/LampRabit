@@ -360,6 +360,27 @@ pub async fn requirements(app: &AppHandle, client: &reqwest::Client, settings: &
     Ok(out)
 }
 
+/// How each of a new project's needs gets met: (runtime id or "node", oldest version that
+/// works). New Project installs what's missing instead of sending the user to Services.
+pub async fn project_requirements(app: &AppHandle, client: &reqwest::Client, settings: &Settings, layout: &Layout, list: &[(String, Option<String>)]) -> Vec<Requirement> {
+    let mut out = Vec::new();
+    for (id, min) in list {
+        let runtime: &'static str = if id == "node" {
+            "node"
+        } else {
+            match Runtime::from_id(id) {
+                Some(r) => r.id(),
+                None => continue,
+            }
+        };
+        let need = need(runtime, min.as_deref(), None, "The new project runs on it");
+        let label = Runtime::from_id(runtime).map_or("Node.js", |r| info(r).label).to_string();
+        let action = if runtime == "node" { node_action(app, client, &need).await } else { runtime_action(client, settings, layout, &need, &label).await };
+        out.push(Requirement { runtime, label, why: need.why, range: need.range(), action });
+    }
+    out
+}
+
 async fn runtime_action(client: &reqwest::Client, settings: &Settings, layout: &Layout, need: &Need, label: &str) -> Action {
     let Some(runtime) = Runtime::from_id(need.runtime) else {
         return Action::Unavailable { reason: format!("{label} can't be installed here") };

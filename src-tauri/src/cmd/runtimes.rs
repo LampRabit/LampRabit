@@ -115,6 +115,13 @@ pub(crate) async fn runtime_requirements(app: AppHandle, state: State<'_, AppSta
     catalog::requirements(&app, &state.http, &settings, &layout, runtime, version).await
 }
 
+/// How a new project's needs get met: `[runtime id or "node", oldest version]` pairs.
+#[tauri::command]
+pub(crate) async fn project_requirements(app: AppHandle, state: State<'_, AppState>, needs: Vec<(String, Option<String>)>) -> Result<Vec<catalog::Requirement>> {
+    let (settings, layout) = state.snapshot().await;
+    Ok(catalog::project_requirements(&app, &state.http, &settings, &layout, &needs).await)
+}
+
 /// What installing a starter stack would do, for the first-run wizard.
 #[tauri::command]
 pub(crate) async fn starter_plan(state: State<'_, AppState>, runtimes: Vec<String>) -> Result<Vec<catalog::StarterItem>> {

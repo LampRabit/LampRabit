@@ -5,6 +5,7 @@ import { openUrl } from "../lib/open";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Download,
   ArrowLeft,
   ArrowRight,
   Box,
@@ -35,6 +36,8 @@ import {
 import clsx from "clsx";
 import { api, runtimeLabels, type DbEngine, type PackageManager, type PythonManager, type ProjectProgress, type ProjectTemplate, type Server } from "../lib/api";
 import { useAppStore, notifyError } from "../lib/store";
+import { meet } from "../lib/catalog";
+import { atLeast, projectNeeds } from "../lib/projectNeeds";
 import { Button, Segmented, Switch, inputClass } from "./ui";
 
 /** Icons a template can name (`icon:`); anything else gets a box. */
@@ -73,14 +76,6 @@ export const tiles: Record<string, string> = {
 /** Folder name → database name: lowercase, dashes become underscores. */
 const dbName = (name: string) => name.toLowerCase().replace(/[^a-z0-9_]/g, "_").slice(0, 64);
 const validName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(name);
-/** "8.4.27" >= "8.2" */
-const atLeast = (version: string, minimum: string) => {
-  const [a, b] = [version, minimum].map((v) => v.split(/\D+/).filter(Boolean).map(Number));
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
-  }
-  return true;
-};
 
 /**
  * A template condition, read as the backend reads it (templates.rs): `database`, `!database`,
@@ -174,7 +169,24 @@ export default function NewProject() {
   const phpInUse = php ?? settings.data?.versions.php ?? null;
   const phpTooOld = !!template?.minPhp && !!phpInUse && !atLeast(phpInUse, template.minPhp);
   const dbUse = template?.database ?? "none";
-  const dbMissing = dbUse === "required" && !hasDatabase;
+  // What's missing is installed at the start of Create instead of blocking it: PHP, Node.js
+  // (NVM first), the template's language, uv/Conda/Bun when picked, and a database server
+  // (the default one when the template can use it).
+  const languagesMissing = (["python", "java", "go", "rust"] as const).filter((l) => template?.[l] && !settings.data?.versions[l]);
+  const { toInstall, installEngine } = projectNeeds({
+    template,
+    versions: (settings.data?.versions ?? {}) as Record<string, string | null | undefined>,
+    phpVersions,
+    phpInUse,
+    nodeVersions: nodeStatus.isLoading ? null : nodeVersions,
+    hasDatabase,
+    withDb,
+    pythonManager,
+    packageManager,
+    defaultDatabase: settings.data?.defaultDatabase,
+  });
+  const installNames = toInstall.map(([id, min]) => `${id === "node" ? "Node.js" : (runtimeLabels[id as keyof typeof runtimeLabels] ?? id)}${min ? ` ${min}+` : ""}`);
+  const dbMissing = dbUse === "required" && !hasDatabase && !installEngine;
   const tld = settings.data?.tld ?? "test";
   const domain = `${(name || "my-project").toLowerCase().replace(/_/g, "-")}.${tld}`;
   // What conditions see: the database choice and the variables.
@@ -252,15 +264,11 @@ export default function NewProject() {
       !!template &&
       validName(name) &&
       !taken &&
-      !needsPhp &&
-      !needsNode &&
-      !languageMissing &&
-      !phpTooOld &&
       !dbMissing &&
       !missingRequired &&
       (!usesDb || /^[A-Za-z0-9_]{1,64}$/.test(db)) &&
       (risks.length === 0 || approved),
-    [template, name, taken, needsPhp, needsNode, languageMissing, phpTooOld, dbMissing, missingRequired, usesDb, db, risks.length, approved],
+    [template, name, taken, dbMissing, missingRequired, usesDb, db, risks.length, approved],
   );
 
   // Streamlined 3-step wizard: 1. Template, 2. Configuration, 3. Review
@@ -277,10 +285,6 @@ export default function NewProject() {
     configure:
       validName(name) &&
       !taken &&
-      !needsPhp &&
-      !needsNode &&
-      !languageMissing &&
-      !phpTooOld &&
       !missingRequired &&
       !dbMissing &&
       (!usesDb || chosenEngine === "sqlite" || /^[A-Za-z0-9_]{1,64}$/.test(db)),
@@ -299,7 +303,8 @@ export default function NewProject() {
         ...(template.go ? [["Go", settings.data?.versions.go ?? "not installed"] as [string, string]] : []),
         ...(template.rust ? [["Rust", settings.data?.versions.rust ?? "not installed"] as [string, string]] : []),
         ...(settings.data && settings.data.webServers.length > 1 ? [["Web server", runtimeLabels[server ?? settings.data.webServers[0]]] as [string, string]] : []),
-        ...(dbUse !== "none" ? [["Database", usesDb && chosenEngine ? (chosenEngine === "sqlite" ? "SQLite file" : `${db} on ${runtimeLabels[chosenEngine]}`) : "None"] as [string, string]] : []),
+        ...(dbUse !== "none" ? [["Database", usesDb && (chosenEngine ?? installEngine) ? (chosenEngine === "sqlite" ? "SQLite file" : `${db} on ${runtimeLabels[(chosenEngine ?? installEngine)!]}`) : "None"] as [string, string]] : []),
+        ...(installNames.length > 0 ? [["Installs first", installNames.join(", ")] as [string, string]] : []),
         ...shownVariables.map((v) => [v.label, v.type === "bool" ? (variables[v.id] === "true" ? "Yes" : "No") : (variables[v.id] || "—")] as [string, string]),
         ...shownOptional.filter((o) => optional[o.id] ?? o.default).map((o) => ["Also", o.label] as [string, string]),
       ]
@@ -314,14 +319,45 @@ export default function NewProject() {
     setSteps([]);
     setOutput([]);
     try {
+      let projectPhp = template.usesPhp ? php : null;
+      if (toInstall.length > 0) {
+        // Node.js comes through NVM, so NVM goes first.
+        if (toInstall.some(([id]) => id === "node") && !nodeStatus.data?.manager) {
+          setSteps((s) => [...s, "Installing NVM"]);
+          await api.nvmInstall();
+        }
+        const plan = await api.projectRequirements(toInstall);
+        for (const r of plan) {
+          const a = r.action;
+          if (a.kind === "unavailable") throw new Error(`${r.label}: ${a.reason}`);
+          if (r.runtime === "php") {
+            // PHP: the project gets the version that fits; the default PHP only changes when
+            // there was none.
+            if (a.kind === "install") {
+              setSteps((s) => [...s, `Installing PHP ${a.release.version}`]);
+              await api.installRuntime(a.release);
+              if (needsPhp) await api.setActiveVersion("php", a.release.version);
+              projectPhp = needsPhp ? null : a.release.version;
+            } else if (a.kind === "activate" || a.kind === "ready") {
+              projectPhp = a.version;
+            }
+            continue;
+          }
+          if (a.kind === "ready") continue;
+          const version = a.kind === "install" ? a.release.version : a.version;
+          setSteps((s) => [...s, `${a.kind === "install" || a.kind === "installNode" ? "Installing" : "Switching to"} ${r.label} ${version}`]);
+          await meet([r]);
+        }
+        for (const key of ["installed", "settings", "services", "node"]) await queryClient.invalidateQueries({ queryKey: [key] });
+      }
       const created = await api.createProject({
         name,
         template: template.id,
-        php: template.usesPhp ? php : null,
+        php: projectPhp,
         server,
         ssl,
         database: usesDb ? db : null,
-        engine: usesDb ? chosenEngine : null,
+        engine: usesDb ? (chosenEngine ?? installEngine) : null,
         variables,
         optional,
         approveRisky: approved,
@@ -515,9 +551,9 @@ export default function NewProject() {
                     <h3 className="text-xs font-medium text-muted">2. Stack and runtime</h3>
                     <div className="space-y-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
                       {template && languageMissing && (
-                        <p className="flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger-text">
-                          <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden />
-                          {template.name} runs on {runtimeLabels[languageMissing]} {template[languageMissing]} or newer. Install it on the Services page first.
+                        <p className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg">
+                          <Download size={15} className="mt-0.5 shrink-0 text-muted" aria-hidden />
+                          {template.name} runs on {languagesMissing.map((l) => `${runtimeLabels[l]} ${template[l]} or newer`).join(" and ")}: Create installs {languagesMissing.length === 1 ? "it" : "them"} first.
                         </p>
                       )}
                       <div className="grid gap-4 sm:grid-cols-2">
@@ -533,10 +569,10 @@ export default function NewProject() {
                               ))}
                             </select>
                             {needsPhp ? (
-                              <span className="mt-1.5 block text-xs text-danger-text">Install PHP on the Services page first.</span>
+                              <span className="mt-1.5 block text-xs text-muted">PHP isn't installed yet: Create installs the newest{template.minPhp ? ` (${template.minPhp} or newer)` : ""} first.</span>
                             ) : phpTooOld ? (
-                              <span className="mt-1.5 block text-xs text-danger-text">
-                                {template.name} needs PHP {template.minPhp} or newer.
+                              <span className="mt-1.5 block text-xs text-muted">
+                                {template.name} needs PHP {template.minPhp} or newer: Create uses one that fits for this project, installing it if needed. Your default PHP stays.
                               </span>
                             ) : (
                               template.minPhp && <span className="mt-1.5 block text-xs text-muted">Needs PHP {template.minPhp} or newer.</span>
@@ -552,7 +588,7 @@ export default function NewProject() {
                               <option value="conda">Conda environment{settings.data?.versions.conda ? "" : ", not installed"}</option>
                             </select>
                             {pythonManager !== "pip" && !settings.data?.versions[pythonManager] && (
-                              <span className="mt-1.5 block text-xs text-muted">Install {pythonManager === "uv" ? "uv" : "Conda"} on the Services page first, unless it's already on your PATH.</span>
+                              <span className="mt-1.5 block text-xs text-muted">Create installs {pythonManager === "uv" ? "uv" : "Conda"} first.</span>
                             )}
                           </label>
                         )}
@@ -581,7 +617,7 @@ export default function NewProject() {
                                 ))}
                               </select>
                               {needsNode && (
-                                <span className="mt-1.5 block text-xs text-danger-text">Install Node.js on the Services page first.</span>
+                                <span className="mt-1.5 block text-xs text-muted">Create installs Node.js{nodeStatus.data?.manager ? "" : " (and NVM, which manages it)"} first.</span>
                               )}
                             </label>
                             <label className="block">
@@ -624,12 +660,14 @@ export default function NewProject() {
                           <div className={clsx("text-xs", dbMissing ? "text-danger-text" : "text-muted")}>
                             {hasDatabase
                               ? `${dbLabel}, user root without password`
-                              : dbUse === "required"
-                                ? `${template?.name} needs a database: install ${engineNames} on the Services page first.`
-                                : `Install ${engineNames} on the Services page to create one.`}
+                              : installEngine
+                                ? `Create installs ${runtimeLabels[installEngine]} first (user root without password).`
+                                : dbUse === "required"
+                                  ? `${template?.name} needs ${engineNames}.`
+                                  : `Switch it on to install ${engineNames} with the project.`}
                           </div>
                         </div>
-                        {dbUse === "optional" && <Switch checked={withDb} onChange={(v) => hasDatabase && setWithDb(v)} label="Create a database" />}
+                        {dbUse === "optional" && <Switch checked={withDb} onChange={setWithDb} label="Create a database" />}
                       </div>
                       {usesDb && engines.length > 1 && (
                         <Segmented

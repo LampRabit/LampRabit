@@ -1276,6 +1276,8 @@ export const api = {
   projectFile: (name: string) => invoke<{ file: ProjectFile; matches: boolean } | null>("project_file", { name }),
   saveProjectFile: (name: string) => invoke<void>("save_project_file", { name }),
   applyProcesses: (start: string[], stop: string[]) => invoke<string[]>("apply_processes", { start, stop }),
+  /** How a new project's needs get met: [runtime id or "node", oldest version]. */
+  projectRequirements: (needs: [string, string | null][]) => invoke<Requirement[]>("project_requirements", { needs }),
   runtimeRequirements: (runtime: Runtime, version?: string) => invoke<Requirement[]>("runtime_requirements", { runtime, version: version ?? null }),
   runtimeCatalog: (runtime: Runtime, fresh = false) => invoke<Release[]>("runtime_catalog", { runtime, fresh }),
   installedRuntimes: () => invoke<InstalledRuntime[]>("installed_runtimes"),

@@ -34,6 +34,7 @@ Everything added, changed and fixed on the way to the next release, written for 
 - **Python projects** choose venv + pip, uv or conda; Laravel's frontend step uses the Node package manager you pick.
 - **Git: pull from or push to any branch** (⋯ next to Pull and Push), not only the tracked one.
 - **Git: a Tags view**: tag any commit or branch, filter, see which tags are only local, push one or all, delete here or on the remote, fetch the remote's tags, start a branch from a tag.
+- **New Project installs what's missing**: no more "install it on the Services page first". PHP (a fitting one when yours is too old), Node.js with NVM, Python, Java, Go or Rust, uv, Conda or Bun, and a database server are installed as the first steps of Create.
 - **Git: a Stashes view**: stash with a name (everything, tracked files only, or only what's staged), look inside any stash file by file, restore it, apply and keep it, turn it into a branch, delete one or clear them all.
 - **PostgreSQL extensions** on PostgreSQL's Services page: per database, switch pgcrypto, pg_trgm, citext, hstore, unaccent and the rest on or off, and update them when the server has a newer version.
 - **Templates from the CLI and AI assistants**: `lamprabit template show|example|from|save`, and the MCP tools `get_template`, `template_format`, `draft_template_from_project` and `save_template`, so you can ask your assistant to turn a project's setup into a LampRabit template.

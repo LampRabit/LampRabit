@@ -812,6 +812,7 @@ pub fn run() {
             processes_all,
             restart_frankenphp_workers,
             runtime_requirements,
+            project_requirements,
             get_settings,
             save_settings,
             env_paths,

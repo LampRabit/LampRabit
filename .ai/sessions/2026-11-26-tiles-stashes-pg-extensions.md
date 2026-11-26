@@ -22,6 +22,16 @@ With two screenshots of Home's compact tiles and an open ⋮ menu:
 
 Checks: `tsc`, `npm test` (102), `cargo test --lib manage:: git::` pass. Not tried against a running PostgreSQL (it was stopped); the SQL is the standard catalog query.
 
+## Later the same day
+
+The user: "commit current changes, keep the code signin as backlog and start the other things one by one. start by 27 phase leftovers. let me know if something needed from myside." Then: "Whie creating new project if a dependancy is missing, instead auto-install it instead if not installed."
+
+- Committed the three sessions' work (`29b678c` code, `cde75bc` docs and `.ai/`). `Scrumpad.MD` (the user's scratch file) left uncommitted.
+- Code signing stays in the backlog.
+- Phase 27 E7c done, commit `2e8db7f`: `kind: cli`/`tool`, `commands`, `source.prefix`, `{{root}}`; Bun, Deno, uv, mongosh, Adminer in YAML (details in the phase file).
+- Add/Remove in the running app: computer use isn't available in this session, so it's waiting on the user (a test file was prepared; the CLI's `service check` passes on it). macOS CI needs `dev-1.0` pushed: asked the user.
+- New Project installs missing dependencies (decision in projects.md), `lib/projectNeeds.ts` with tests, `project_requirements` command.
+
 ## Next
 
-The user's "left things": see status.md (E7 rest waiting for their call, Add/Remove clicks in the running app, macOS CI, signing choice).
+Phase 27: the user's Add/Remove click test and the push for macOS CI; then E7's remaining runtimes (new source types). Then the roadmap's next item, the project model (endpoints and kinds).
