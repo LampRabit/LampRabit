@@ -1,0 +1,34 @@
+schema: 1
+id: java
+kind: cli
+name: Java
+category: languages
+blurb: Runs Java apps
+origin: Eclipse Temurin JDKs from Adoptium (checksum checked); java, javac and jar work in LampRabit's terminal, with JAVA_HOME set
+homepage: https://adoptium.net
+license: GPL-2.0-with-classpath-exception
+docs: https://adoptium.net/docs/
+keywords: [jdk, jvm, temurin, openjdk]
+
+source:
+  # Each long-term support line, then its newest JDK for this platform.
+  json:
+    url: https://api.adoptium.net/v3/info/available_releases
+    items: available_lts_releases
+    then:
+      url: "https://api.adoptium.net/v3/assets/latest/{item}/hotspot?architecture={var.arch}&image_type=jdk&os={var.os}&vendor=eclipse"
+      items: "*"
+    version: version.semver
+    download: "{item.binary.package.link}"
+    sha256: "{item.binary.package.checksum}"
+    label: LTS
+  versions: all
+vars:
+  os:
+    - { value: windows, on: [windows] }
+    - { value: linux, on: [linux] }
+    - { value: mac, on: [macos] }
+  arch:
+    - { value: x64, on: [x64] }
+    - { value: aarch64, on: [arm64] }
+binary: "bin/java{{exe}}"

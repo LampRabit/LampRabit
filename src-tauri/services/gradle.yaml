@@ -1,0 +1,39 @@
+schema: 1
+id: gradle
+kind: cli
+name: Gradle
+category: packages
+blurb: Java builds
+origin: Gradle's official distribution from services.gradle.org (SHA-256 checked); gradle works in LampRabit's terminal on the active Java
+homepage: https://gradle.org
+license: Apache-2.0
+docs: https://docs.gradle.org/current/userguide/userguide.html
+keywords: [java, kotlin, build]
+
+source:
+  json:
+    url: https://services.gradle.org/versions/all
+    items: "*"
+    # Final releases only.
+    where: { snapshot: "false", nightly: "false", broken: "false", rcFor: "", milestoneFor: "" }
+    version: version
+    download: "{item.downloadUrl}"
+    sha256: "{item.checksum}"
+  versions: per-major
+  keep: 2
+  archive: zip
+binary: bin/gradle
+
+# Each Gradle runs on Java up to a newest version (Gradle's compatibility matrix).
+needs:
+  - { runtime: java, min: "17", since: "10", why: "Gradle runs on the active Java, and each version only up to a newest Java" }
+  - { runtime: java, min: "17", max: "27", since: "9.8", until: "10", why: "Gradle runs on the active Java, and each version only up to a newest Java" }
+  - { runtime: java, min: "17", max: "26", since: "9.4", until: "9.8", why: "Gradle runs on the active Java, and each version only up to a newest Java" }
+  - { runtime: java, min: "17", max: "25", since: "9.1", until: "9.4", why: "Gradle runs on the active Java, and each version only up to a newest Java" }
+  - { runtime: java, min: "17", max: "24", since: "9", until: "9.1", why: "Gradle runs on the active Java, and each version only up to a newest Java" }
+  - { runtime: java, min: "8", max: "24", since: "8.14", until: "9", why: "Gradle runs on the active Java, and each version only up to a newest Java" }
+  - { runtime: java, min: "8", max: "23", since: "8.10", until: "8.14", why: "Gradle runs on the active Java, and each version only up to a newest Java" }
+  - { runtime: java, min: "8", max: "22", since: "8.8", until: "8.10", why: "Gradle runs on the active Java, and each version only up to a newest Java" }
+  - { runtime: java, min: "8", max: "21", since: "8.5", until: "8.8", why: "Gradle runs on the active Java, and each version only up to a newest Java" }
+  - { runtime: java, min: "8", max: "20", since: "8.3", until: "8.5", why: "Gradle runs on the active Java, and each version only up to a newest Java" }
+  - { runtime: java, min: "8", max: "19", until: "8.3", why: "Gradle runs on the active Java, and each version only up to a newest Java" }

@@ -1,0 +1,23 @@
+schema: 1
+id: erlang
+kind: cli
+name: Erlang
+category: queues
+blurb: Runs RabbitMQ
+origin:
+  - { value: "Official Erlang/OTP builds for Windows (checksum checked)", on: [windows] }
+unavailable: { value: "Erlang has no official Linux or macOS builds: install it with your system's packages (sudo apt install erlang-nox, sudo dnf install erlang, or brew install erlang); RabbitMQ uses it.", on: [linux, macos] }
+homepage: https://www.erlang.org
+license: Apache-2.0
+keywords: [otp, rabbitmq]
+
+source:
+  # The newest release of the two newest OTP lines.
+  github: erlang/otp
+  prefix: OTP-
+  versions: per-major
+  keep: 2
+  label: "OTP {major}"
+  assets:
+    windows-x64: { file: "otp_win64_{version}.zip", archive: zip }
+binary: "bin/erl{{exe}}"

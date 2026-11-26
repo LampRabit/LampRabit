@@ -75,9 +75,9 @@ A source is GitHub, npm, a vendor's JSON API (`json`) or a web page (`page`):
 | `github` | `owner/repo`. Versions come from its releases (or tags), and files from its releases unless `url` says otherwise. |
 | `npm` | A package on npm's registry: its latest version's tarball, checked against npm's SHA-512 (`checksum: npm`). |
 | `versions` | Which versions are offered. `latest` (the default) is the release GitHub marks as latest. `newest` is the newest recent release that has this platform's file, for projects that sometimes ship a release without one platform's build. `per-major` is the newest release of each major version from `min` on (PostgreSQL 14–18). `per-line` is the newest patch of each `major.minor` line, the `keep` newest lines (4 by default). `newest-tag` is the newest `x.y.z` tag, for projects that tag on GitHub but publish elsewhere. Drafts and pre-releases are skipped. |
-| `min`, `keep` | For `per-major` and `per-line`. |
+| `min`, `keep` | For `per-major` and `per-line`: the oldest major offered, and how many majors or lines (`per-line` keeps 4 unless told, `per-major` every one from `min`). |
 | `skip` | Versions never offered (`json` and `page` sources), for a release published broken upstream; the next one down is offered instead. Give the source every release (`items: releases.*` for PyPI) so there is one to fall back to. |
-| `prefix` | Text before the version in every tag, dropped; tags without it are skipped. Bun tags `bun-v1.2.3`, so `prefix: bun-`. |
+| `prefix` | Text before the version, dropped; releases without it are skipped. For GitHub tags (Bun's `bun-v1.2.3`: `prefix: bun-`) and `json` versions (Go's `go1.25.4`: `prefix: go`). Build metadata after `+` is never part of a version (Java's `21.0.5+11` is `21.0.5`). |
 | `tags` | Only tags ending with one of these suffixes, which the version drops; the value is the label shown next to it: `{ -lts: LTS, -stable: Stable }`. |
 | `assets` | The file for each platform. The key is `<os>-<arch>` (`windows-x64`, `linux-arm64`, `macos-arm64`…), an OS (`macos`), or `unix` (Linux and macOS); the most exact key wins. `file` is the file's name, where `{version}` stands for the release's version. `archive` is `zip`, `targz`, `tarxz`, `tarzst` or `file` (a single program). **Quote names that contain `{version}`**, since YAML reads `{` as the start of a map. |
 | `url` | Download from the vendor's own site instead of the GitHub release: `"https://artifacts.elastic.co/downloads/elasticsearch/{file}"` (`{version}`, `{file}`). |
@@ -120,7 +120,7 @@ source:
 
 - `then: { url: ".../{item.release_id}/latest/", items: "releases.*" }` makes one more request per item (MariaDB lists its series first, then each one's latest release); the first request's item is then `parent` (`parent.release_support_type`).
 - Without `items`, the answer is one release (PyPI's `info.version`).
-- Templates (`download`, hashes, labels, filter values) can use `{version}`, `{major}`, `{line}` (`8.4` of 8.4.7), `{key}` (an item's key when the list was an object; `@key` in a path), `{asset}` (the platform's file from `assets`), `{item.<path>}`, `{parent.<path>}`, `{file.<path>}` and `{var.<name>}`. Paths are dotted (`archive.url`, `urls.0.digests.sha256`).
+- Templates (`download`, hashes, labels, filter values) can use `{version}`, `{major}`, `{line}` (`8.4` of 8.4.7), `{key}` (an item's key when the list was an object; `@key` in a path), `{asset}` (the platform's file from `assets`), `{item.<path>}` (`{item}` alone for a list of plain values, like Adoptium's release lines), `{parent.<path>}`, `{file.<path>}` and `{var.<name>}`. Paths are dotted (`archive.url`, `urls.0.digests.sha256`).
 - `label` is a template, or `{ from: <path>, map: { value: label }, else: <label> }`; without `else` the value itself is shown.
 
 #### A web page: `page`

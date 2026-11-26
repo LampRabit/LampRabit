@@ -1,0 +1,25 @@
+schema: 1
+id: phppgadmin
+kind: tool
+name: phpPgAdmin
+category: tools
+blurb: PostgreSQL admin
+origin: The PostgreSQL web interface in PHP (ReimuHakurei's maintained fork for PHP 8); log in as root without a password
+homepage: https://github.com/ReimuHakurei/phpPgAdmin
+license: GPL-2.0
+keywords: [postgresql, postgres, database]
+
+source:
+  # The fork tags its releases v7.14.8-mod; source releases only, over HTTPS from GitHub.
+  github: ReimuHakurei/phpPgAdmin
+  tags: { "-mod": PHP 8 fork }
+  url: "https://github.com/ReimuHakurei/phpPgAdmin/archive/refs/tags/v{version}-mod.zip"
+  assets:
+    windows: { file: "phpPgAdmin-{version}.zip", archive: zip }
+    unix: { file: "phpPgAdmin-{version}.zip", archive: zip }
+  checksum: none
+binary: index.php
+
+needs:
+  - { runtime: postgres, why: phpPgAdmin manages LampRabit's PostgreSQL }
+  - { runtime: php, min: "8.0", why: phpPgAdmin runs on PHP }

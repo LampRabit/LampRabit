@@ -145,17 +145,7 @@ fn info(runtime: Runtime) -> RuntimeInfo {
     let unix = |windows: &'static str, other: &'static str| if win { windows } else { other };
     let (label, blurb, source, unavailable): (&str, &str, &str, Option<&str>) = match runtime {
         Runtime::Php => ("PHP", "Runs your code", unix("Thread-safe builds from windows.php.net", "LampRabit's static builds with common extensions built in, Redis and Memcached clients included"), None),
-        Runtime::Java => ("Java", "Runs Java apps", "Eclipse Temurin JDKs from Adoptium (checksum checked); java, javac and jar work in LampRabit's terminal, with JAVA_HOME set", None),
-        Runtime::Mongotools => ("MongoDB Database Tools", "MongoDB backups", "MongoDB's mongodump and mongorestore (checksum checked); LampRabit's MongoDB backups use them", None),
-        Runtime::Compass => ("MongoDB Compass", "MongoDB GUI", "MongoDB's desktop app from its GitHub releases; opens connected to LampRabit's MongoDB", None),
         Runtime::Sqlite => ("SQLite", "File databases", "The sqlite3 shell from sqlite.org (SHA3 checked). PHP has SQLite built in, so projects don't need this to use it; backups use it to copy safely", None),
-        Runtime::Erlang => (
-            "Erlang",
-            "Runs RabbitMQ",
-            "Official Erlang/OTP builds for Windows (checksum checked)",
-            (!win).then_some("Erlang has no official Linux or macOS builds: install it with your system's packages (sudo apt install erlang-nox, sudo dnf install erlang, or brew install erlang); RabbitMQ uses it."),
-        ),
-        Runtime::Go => ("Go", "Runs Go code", "Official Go releases from go.dev (checksum checked); go and gofmt work in LampRabit's terminal", None),
         Runtime::Rust => (
             "Rust",
             "Runs Rust code",
@@ -166,12 +156,7 @@ fn info(runtime: Runtime) -> RuntimeInfo {
             None,
         ),
         Runtime::Python => ("Python", "Runs Python code", "python-build-standalone (the builds uv uses, checksum checked); python and pip work in LampRabit's terminal", None),
-        Runtime::Phppgadmin => ("phpPgAdmin", "PostgreSQL admin", "The PostgreSQL web interface in PHP (ReimuHakurei's maintained fork for PHP 8); log in as root without a password", None),
-        Runtime::Phpmyadmin => ("phpMyAdmin", "Database admin", "The classic MySQL/MariaDB web interface", None),
         Runtime::Ngrok => ("Ngrok", "Public tunnels", "Share sites on a public URL (free account needed)", None),
-        Runtime::Cloudflared => ("Cloudflare Tunnel", "Public tunnels", "Cloudflare quick tunnels, no account needed", None),
-        Runtime::Composer => ("Composer", "PHP packages", "PHP's package manager; run composer from the LampRabit terminal", None),
-        Runtime::Maven => ("Maven", "Java builds", "Apache Maven from Apache's mirror (SHA-512 checked); mvn works in LampRabit's terminal on the active Java", None),
         Runtime::Git => (
             "Git",
             "Version control",
@@ -179,8 +164,6 @@ fn info(runtime: Runtime) -> RuntimeInfo {
             (!win).then_some("LampRabit uses your system's Git here: install it with your package manager (sudo apt install git), or xcode-select --install on macOS."),
         ),
         Runtime::Conda => ("conda", "Python environments", "Miniforge, conda-forge's installer (checksum checked), installed into LampRabit's folder without changing PATH or your shell; conda and mamba work in LampRabit's terminal", None),
-        Runtime::Gradle => ("Gradle", "Java builds", "Gradle's official distribution from services.gradle.org (SHA-256 checked); gradle works in LampRabit's terminal on the active Java", None),
-        Runtime::Phpredisadmin => ("phpRedisAdmin", "Redis admin", "Browse and edit Redis keys in the browser, like phpMyAdmin", None),
         // Services: from their manifest, above.
         _ => (runtime.id(), "", "", None),
     };
@@ -223,67 +206,15 @@ fn need(runtime: &'static str, min: Option<&str>, max: Option<&str>, why: &'stat
     Need { runtime, min: min.map(str::to_string), max: max.map(str::to_string), prefer: None, why }
 }
 
-/// What a runtime needs at `version` (or at any version, for listing). A service says so in
-/// its manifest (`needs`), which the start-up checks read too.
+/// What a runtime needs at `version` (or at any version, for listing): its manifest's
+/// `needs`, which the start-up checks read too. Runtimes without a manifest need nothing.
 pub fn needs(runtime: Runtime, version: Option<&str>) -> Vec<Need> {
-    if let Some(m) = manifest::get(runtime.id()) {
-        return m
-            .needs
-            .iter()
-            .filter(|n| n.applies(version))
-            .map(|n| Need { runtime: &n.runtime, min: n.min.clone(), max: n.max.clone(), prefer: n.prefer.as_deref(), why: &n.why })
-            .collect();
-    }
-    let major = version.and_then(|v| parts(v).first().copied());
-    match runtime {
-        // Composer 2.2 (its LTS line) still runs on PHP 5.3; 2.3 and later need 7.2.5.
-        Runtime::Composer => {
-            let php = if version.is_some_and(|v| cmp(&parts(v), &[2, 3]).is_lt()) { "5.3.2" } else { "7.2.5" };
-            vec![need("php", Some(php), None, "Composer runs on PHP")]
-        }
-        // Maven 4 needs Java 17; Maven 3 runs on 8 and anything newer.
-        Runtime::Maven => vec![need("java", Some(if major.is_none_or(|m| m >= 4) { "17" } else { "8" }), None, "Maven runs on the active Java")],
-        Runtime::Gradle => {
-            let (min, max) = version.map_or(("17", Some("25")), gradle_java);
-            vec![need("java", Some(min), max, "Gradle runs on the active Java, and each version only up to a newest Java")]
-        }
-        Runtime::Phppgadmin => vec![need("postgres", None, None, "phpPgAdmin manages LampRabit's PostgreSQL"), need("php", Some("8.0"), None, "phpPgAdmin runs on PHP")],
-        Runtime::Phpredisadmin => vec![need("redis", None, None, "phpRedisAdmin browses LampRabit's Redis"), need("php", Some("7.2"), None, "phpRedisAdmin runs on PHP")],
-        Runtime::Phpmyadmin => vec![need("php", None, None, "It runs on PHP")],
-        Runtime::Mongotools | Runtime::Compass => vec![need("mongodb", None, None, "It works with LampRabit's MongoDB")],
-        _ => vec![],
-    }
-}
-
-/// The Java versions each Gradle release can run on, from Gradle's compatibility matrix
-/// (docs.gradle.org/current/userguide/compatibility.html, checked 2026-11-04). Releases newer
-/// than it knows get the newest row without an upper bound.
-fn gradle_java(version: &str) -> (&'static str, Option<&'static str>) {
-    let v = parts(version);
-    let at_least = |m: &[u64]| cmp(&v, m) != std::cmp::Ordering::Less;
-    if at_least(&[10]) {
-        ("17", None)
-    } else if at_least(&[9, 8]) {
-        ("17", Some("27"))
-    } else if at_least(&[9, 4]) {
-        ("17", Some("26"))
-    } else if at_least(&[9, 1]) {
-        ("17", Some("25"))
-    } else if at_least(&[9]) {
-        ("17", Some("24"))
-    } else if at_least(&[8, 14]) {
-        ("8", Some("24"))
-    } else if at_least(&[8, 10]) {
-        ("8", Some("23"))
-    } else if at_least(&[8, 8]) {
-        ("8", Some("22"))
-    } else if at_least(&[8, 5]) {
-        ("8", Some("21"))
-    } else if at_least(&[8, 3]) {
-        ("8", Some("20"))
-    } else {
-        ("8", Some("19"))
-    }
+    let Some(m) = manifest::get(runtime.id()) else { return Vec::new() };
+    m.needs
+        .iter()
+        .filter(|n| n.applies(version))
+        .map(|n| Need { runtime: &n.runtime, min: n.min.clone(), max: n.max.clone(), prefer: n.prefer.as_deref(), why: &n.why })
+        .collect()
 }
 
 use crate::version::release as parts;
@@ -547,7 +478,8 @@ mod tests {
     fn every_runtime_is_grouped_and_named() {
         let catalog = catalog();
         assert!(catalog.groups.iter().all(|g| g.id != "other"), "add new runtimes to a group: {:?}", catalog.groups.iter().find(|g| g.id == "other").map(|g| &g.items));
-        for r in &catalog.runtimes {
+        // Services other tests add from a file (the shared list) aren't LampRabit's own.
+        for r in catalog.runtimes.iter().filter(|r| !r.local) {
             assert!(!r.label.is_empty() && !r.source.is_empty(), "{}", r.id);
             for id in r.needs.iter().chain(&r.suggests) {
                 assert!(*id == "node" || Runtime::from_id(id).is_some(), "{} names {id}", r.id);

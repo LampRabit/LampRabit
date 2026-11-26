@@ -1,0 +1,25 @@
+schema: 1
+id: compass
+kind: cli
+name: MongoDB Compass
+category: tools
+blurb: MongoDB GUI
+origin: MongoDB's desktop app from its GitHub releases (checksum checked); opens connected to LampRabit's MongoDB
+homepage: https://www.mongodb.com/products/tools/compass
+license: SSPL-1.0
+keywords: [mongodb, gui, client]
+
+source:
+  github: mongodb-js/compass
+  assets:
+    windows-x64: { file: "mongodb-compass-{version}-win32-x64.zip", archive: zip }
+    linux-x64: { file: "mongodb-compass-{version}-linux-x64.tar.gz", archive: targz }
+    macos-x64: { file: "mongodb-compass-{version}-darwin-x64.zip", archive: zip }
+    macos-arm64: { file: "mongodb-compass-{version}-darwin-arm64.zip", archive: zip }
+# An Electron app: its executable's name varies, its app bundle doesn't.
+binary:
+  - { value: "MongoDB Compass.app/Contents/Resources/app.asar", on: [macos] }
+  - { value: resources/app.asar }
+
+needs:
+  - { runtime: mongodb, why: It works with LampRabit's MongoDB }

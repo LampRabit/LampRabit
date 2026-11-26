@@ -1,0 +1,25 @@
+schema: 1
+id: phpredisadmin
+kind: tool
+name: phpRedisAdmin
+category: tools
+blurb: Redis admin
+origin: Browse and edit Redis keys in the browser, like phpMyAdmin; its source releases from GitHub, served at phpredisadmin.test
+homepage: https://github.com/erikdubbelboer/phpRedisAdmin
+license: MIT
+keywords: [redis, keys, cache]
+
+source:
+  # Source releases only (no separate archives or checksums): HTTPS from GitHub. Its PHP
+  # dependency, Predis, is added after install.
+  github: erikdubbelboer/phpRedisAdmin
+  url: "https://github.com/erikdubbelboer/phpRedisAdmin/archive/refs/tags/v{version}.zip"
+  assets:
+    windows: { file: "phpRedisAdmin-{version}.zip", archive: zip }
+    unix: { file: "phpRedisAdmin-{version}.zip", archive: zip }
+  checksum: none
+binary: index.php
+
+needs:
+  - { runtime: redis, why: phpRedisAdmin browses LampRabit's Redis }
+  - { runtime: php, min: "7.2", why: phpRedisAdmin runs on PHP }

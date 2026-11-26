@@ -23,7 +23,8 @@ Plan: [../plans/active/phase-27-pluggable-services.md](../plans/active/phase-27-
 | E1–E6: every service (and KarotX) defined only by YAML; only the site engine (`engine:`) stays Rust | done, commits `469dca5`, `6d37942`, `d272dba`, `508bdb0` |
 | E7a keywords/docs/config files, E7b backup hooks (+ smoke round trip, MySQL restore fix) | done, `1325049`, `0785179` |
 | E7c `kind: cli`/`tool`, `commands` (shims), `source.prefix`, `{{root}}`; Bun, Deno, uv, mongosh, Adminer moved to YAML | done 2026-11-26 |
-| E7 later: move Composer, SQLite, Go, Maven, Gradle, Java, Python, Git, conda, Erlang, Compass, Mongotools, phpMyAdmin, phpRedisAdmin, phpPgAdmin (vendor indexes or source zips without checksums: need new source types) | open |
+| E7d Composer, Java, Go, Maven, Gradle, Erlang, cloudflared, Compass, Mongotools, phpMyAdmin, phpRedisAdmin, phpPgAdmin in YAML (the user, 2026-11-26: "continue making the dependencies yamls and make them dynamic too") | done 2026-11-27; Java now offers LTS lines only |
+| E7 rest: PHP, Python, SQLite (SHA3), Git (tag → version), conda, Rust, ngrok still in Rust | open |
 | `scope: project`, connection adapters | **with** Firebase/PocketBase and service binding (the user, 2026-11-26: "start the other things one by one") |
 | Add/Remove a service in the running app (add, install, remove version, remove service) | done: the user tested it 2026-11-26, works; New Project's auto-install also tested and works |
 | macOS through CI (runs when `dev-1.0` is pushed) | **open: waiting for the user's OK to push** |

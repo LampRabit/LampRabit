@@ -372,7 +372,7 @@
         "id": "phpmyadmin",
         "label": "phpMyAdmin",
         "blurb": "Database admin",
-        "source": "The classic MySQL/MariaDB web interface",
+        "source": "The classic MySQL/MariaDB web interface from phpmyadmin.net (SHA-256 checked), served at phpmyadmin.test",
         "unavailable": null,
         "needs": [
           "php"
@@ -382,7 +382,11 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
+        "keywords": [
+          "mysql",
+          "mariadb",
+          "database"
+        ],
         "docs": null
       },
       {
@@ -404,7 +408,7 @@
         "id": "cloudflared",
         "label": "Cloudflare Tunnel",
         "blurb": "Public tunnels",
-        "source": "Cloudflare quick tunnels, no account needed",
+        "source": "Cloudflare's cloudflared from GitHub (checksum checked); quick tunnels need no account",
         "unavailable": null,
         "needs": [],
         "suggests": [],
@@ -412,7 +416,11 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
+        "keywords": [
+          "share",
+          "tunnel",
+          "public url"
+        ],
         "docs": null
       },
       {
@@ -449,7 +457,7 @@
         "id": "composer",
         "label": "Composer",
         "blurb": "PHP packages",
-        "source": "PHP's package manager; run composer from the LampRabit terminal",
+        "source": "PHP's package manager from getcomposer.org (SHA-256 checked); run composer from the LampRabit terminal",
         "unavailable": null,
         "needs": [
           "php"
@@ -459,8 +467,12 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
-        "docs": null
+        "keywords": [
+          "php",
+          "packages",
+          "vendor"
+        ],
+        "docs": "https://getcomposer.org/doc/"
       },
       {
         "id": "mysql",
@@ -495,7 +507,7 @@
         "id": "phpredisadmin",
         "label": "phpRedisAdmin",
         "blurb": "Redis admin",
-        "source": "Browse and edit Redis keys in the browser, like phpMyAdmin",
+        "source": "Browse and edit Redis keys in the browser, like phpMyAdmin; its source releases from GitHub, served at phpredisadmin.test",
         "unavailable": null,
         "needs": [
           "redis",
@@ -506,7 +518,11 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
+        "keywords": [
+          "redis",
+          "keys",
+          "cache"
+        ],
         "docs": null
       },
       {
@@ -564,8 +580,13 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
-        "docs": null
+        "keywords": [
+          "jdk",
+          "jvm",
+          "temurin",
+          "openjdk"
+        ],
+        "docs": "https://adoptium.net/docs/"
       },
       {
         "id": "tomcat",
@@ -681,7 +702,11 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
+        "keywords": [
+          "postgresql",
+          "postgres",
+          "database"
+        ],
         "docs": null
       },
       {
@@ -779,14 +804,19 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
+        "keywords": [
+          "mongodb",
+          "mongodump",
+          "mongorestore",
+          "backup"
+        ],
         "docs": null
       },
       {
         "id": "compass",
         "label": "MongoDB Compass",
         "blurb": "MongoDB GUI",
-        "source": "MongoDB's desktop app from its GitHub releases; opens connected to LampRabit's MongoDB",
+        "source": "MongoDB's desktop app from its GitHub releases (checksum checked); opens connected to LampRabit's MongoDB",
         "unavailable": null,
         "needs": [
           "mongodb"
@@ -796,7 +826,11 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
+        "keywords": [
+          "mongodb",
+          "gui",
+          "client"
+        ],
         "docs": null
       },
       {
@@ -1182,7 +1216,10 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
+        "keywords": [
+          "otp",
+          "rabbitmq"
+        ],
         "docs": null
       },
       {
@@ -1197,8 +1234,10 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
-        "docs": null
+        "keywords": [
+          "golang"
+        ],
+        "docs": "https://go.dev/doc/"
       },
       {
         "id": "rust",
@@ -1229,8 +1268,12 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
-        "docs": null
+        "keywords": [
+          "java",
+          "mvn",
+          "build"
+        ],
+        "docs": "https://maven.apache.org/guides/"
       },
       {
         "id": "gradle",
@@ -1246,8 +1289,12 @@
         "local": false,
         "uiPort": null,
         "open": null,
-        "keywords": [],
-        "docs": null
+        "keywords": [
+          "java",
+          "kotlin",
+          "build"
+        ],
+        "docs": "https://docs.gradle.org/current/userguide/userguide.html"
       },
       {
         "id": "git",

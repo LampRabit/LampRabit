@@ -1,0 +1,33 @@
+schema: 1
+id: go
+kind: cli
+name: Go
+category: languages
+blurb: Runs Go code
+origin: Official Go releases from go.dev (checksum checked); go and gofmt work in LampRabit's terminal
+homepage: https://go.dev
+license: BSD-3-Clause
+docs: https://go.dev/doc/
+keywords: [golang]
+
+source:
+  json:
+    url: "https://go.dev/dl/?mode=json"
+    items: "*"
+    where: { stable: "true" }
+    version: version
+    files: files
+    file: { os: "{var.os}", arch: "{var.arch}", kind: archive }
+    download: "https://go.dev/dl/{file.filename}"
+    sha256: "{file.sha256}"
+  prefix: go
+  versions: all
+vars:
+  os:
+    - { value: windows, on: [windows] }
+    - { value: linux, on: [linux] }
+    - { value: darwin, on: [macos] }
+  arch:
+    - { value: amd64, on: [x64] }
+    - { value: arm64, on: [arm64] }
+binary: "bin/go{{exe}}"

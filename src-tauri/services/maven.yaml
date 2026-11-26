@@ -1,0 +1,31 @@
+schema: 1
+id: maven
+kind: cli
+name: Maven
+category: packages
+blurb: Java builds
+origin: Apache Maven from Apache's mirror (SHA-512 checked); mvn works in LampRabit's terminal on the active Java
+homepage: https://maven.apache.org
+license: Apache-2.0
+docs: https://maven.apache.org/guides/
+keywords: [java, mvn, build]
+
+source:
+  page:
+    url: "https://dlcdn.apache.org/maven/maven-{variant}/"
+    # Final releases only: 4.0.0-rc-4 and the like don't match.
+    link: '^(?P<version>\d+\.\d+\.\d+)/$'
+    variants:
+      - { value: "4", label: "Java 17+" }
+      - { value: "3", label: "Java 8+" }
+    download: "https://dlcdn.apache.org/maven/maven-{variant}/{version}/binaries/{asset}"
+  assets:
+    windows: { file: "apache-maven-{version}-bin.zip", archive: zip }
+    unix: { file: "apache-maven-{version}-bin.tar.gz", archive: targz }
+  checksum: { sha512: "{url}.sha512" }
+binary: bin/mvn
+
+# Maven 4 needs Java 17; Maven 3 runs on 8 and anything newer.
+needs:
+  - { runtime: java, min: "17", since: "4", why: Maven runs on the active Java }
+  - { runtime: java, min: "8", until: "4", why: Maven runs on the active Java }

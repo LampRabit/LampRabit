@@ -64,6 +64,18 @@ const BUILT_IN: &[&str] = &[
     include_str!("../services/bun.yaml"),
     include_str!("../services/deno.yaml"),
     include_str!("../services/uv.yaml"),
+    include_str!("../services/composer.yaml"),
+    include_str!("../services/java.yaml"),
+    include_str!("../services/go.yaml"),
+    include_str!("../services/maven.yaml"),
+    include_str!("../services/gradle.yaml"),
+    include_str!("../services/erlang.yaml"),
+    include_str!("../services/cloudflared.yaml"),
+    include_str!("../services/compass.yaml"),
+    include_str!("../services/mongotools.yaml"),
+    include_str!("../services/phpmyadmin.yaml"),
+    include_str!("../services/phpredisadmin.yaml"),
+    include_str!("../services/phppgadmin.yaml"),
 ];
 
 /// The groups of the Services page a manifest can name.
@@ -1860,7 +1872,7 @@ fn check_source(src: &Source, builtin: bool) -> std::result::Result<(), String> 
 }
 
 /// What `needs:` can name: runtimes whose folder a service can be pointed at.
-const NEEDS: &[&str] = &["java", "erlang", "node", "python", "postgres", "php", "mongodb"];
+const NEEDS: &[&str] = &["java", "erlang", "node", "python", "postgres", "php", "mongodb", "redis"];
 
 /// A path must not climb out of the folder it starts in.
 fn inside(path: &str) -> std::result::Result<(), String> {
@@ -2348,8 +2360,10 @@ pub fn select(m: &Manifest, src: &Source, json: &serde_json::Value) -> Result<Ve
         }
     }
     found.sort_by_key(|f| std::cmp::Reverse(key(f)));
-    if src.versions == Versions::PerLine {
-        found.truncate(src.keep.unwrap_or(4));
+    match src.versions {
+        Versions::PerLine => found.truncate(src.keep.unwrap_or(4)),
+        Versions::PerMajor => found.truncate(src.keep.unwrap_or(usize::MAX)),
+        _ => {}
     }
     if found.is_empty() {
         return Err(Error::msg(unchecked.unwrap_or_else(|| format!("No recent {} release has a download for {} ({}).", m.name, platform(), asset.file))));

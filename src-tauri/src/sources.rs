@@ -209,7 +209,16 @@ pub fn from_json(m: &Manifest, src: &Source, j: &JsonSource, vars: &Vars, entrie
     let mut found = Vec::new();
     for e in &entries {
         let Some(version) = text(lookup(&e.item, &j.version, e.key.as_deref())).filter(|v| !v.is_empty()) else { continue };
-        let version = version.trim_start_matches('v').to_string();
+        // Go writes go1.25.4: `prefix` drops it (an entry without it isn't a release).
+        let version = match &src.prefix {
+            Some(p) => match version.strip_prefix(p.as_str()) {
+                Some(rest) => rest.to_string(),
+                None => continue,
+            },
+            None => version,
+        };
+        // Build metadata isn't part of the version: Java's 21.0.5+11 is 21.0.5.
+        let version = version.trim_start_matches('v').split('+').next().unwrap_or_default().to_string();
         let base = Ctx { item: Some(&e.item), parent: Some(&e.parent), key: e.key.as_deref(), version: Some(&version), ..Ctx::default() };
         let file: Option<Value> = match &j.files {
             None => Some(e.item.clone()),
@@ -247,6 +256,8 @@ pub fn from_json(m: &Manifest, src: &Source, j: &JsonSource, vars: &Vars, entrie
                     }
                 }
             };
+            // A label that comes out empty (`else: ""`) is no label.
+            let label = label.filter(|l| !l.is_empty());
             found.push(finish(m, src, asset, vars, &ctx, url, hash(&j.sha256)?, hash(&j.sha512)?, label)?);
         }
     }
@@ -346,9 +357,8 @@ pub fn choose(src: &Source, found: Vec<Found>) -> Vec<Found> {
                     out.push(v);
                 }
             }
-            if src.versions == Versions::PerLine {
-                out.truncate(src.keep.unwrap_or(4));
-            }
+            // per-line keeps 4 lines unless told; per-major every major unless told.
+            out.truncate(src.keep.unwrap_or(if src.versions == Versions::PerLine { 4 } else { usize::MAX }));
             out
         }
     };
@@ -524,6 +534,9 @@ impl Vars {
                         None => return Err(Error::msg(format!("{{{name}}}: no var named {var}"))),
                     }
                 }
+                // `{item}` alone is the item itself, when it's a plain value (Adoptium's
+                // list of release lines is numbers).
+                "item" => text(ctx.item.cloned()).unwrap_or_default(),
                 _ if ["item.", "parent.", "file."].iter().any(|p| name.starts_with(p)) => text(lookup_ctx(ctx, name)).unwrap_or_default(),
                 _ => return Err(Error::msg(format!("{{{name}}} isn't something a source can use"))),
             };

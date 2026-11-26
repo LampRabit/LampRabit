@@ -259,26 +259,12 @@ impl Runtime {
         match self {
             Self::Php if cfg!(windows) => PathBuf::from(exe("php")),
             Self::Php => PathBuf::from("php-fpm"),
-            Self::Phpmyadmin => PathBuf::from("index.php"),
             Self::Ngrok => PathBuf::from(exe("ngrok")),
-            Self::Cloudflared => PathBuf::from(exe("cloudflared")),
-            Self::Composer => PathBuf::from("composer.phar"),
-            Self::Phpredisadmin => PathBuf::from("index.php"),
-            Self::Java => Path::new("bin").join(exe("java")),
             Self::Python if cfg!(windows) => PathBuf::from("python.exe"),
             Self::Python => Path::new("bin").join("python3"),
-            Self::Phppgadmin => PathBuf::from("index.php"),
-            Self::Mongotools => Path::new("bin").join(exe("mongodump")),
-            // Compass is an Electron app: its executable's name varies, its app bundle doesn't.
-            Self::Compass if cfg!(target_os = "macos") => Path::new("MongoDB Compass.app").join("Contents").join("Resources").join("app.asar"),
-            Self::Compass => Path::new("resources").join("app.asar"),
             Self::Sqlite => PathBuf::from(exe("sqlite3")),
-            Self::Erlang => Path::new("bin").join(exe("erl")),
-            Self::Go => Path::new("bin").join(exe("go")),
             // Written last by `setup_rust`, so a half-finished install doesn't count.
             Self::Rust => PathBuf::from("installed.txt"),
-            Self::Maven => Path::new("bin").join("mvn"),
-            Self::Gradle => Path::new("bin").join("gradle"),
             Self::Git => Path::new("cmd").join("git.exe"),
             // Written last by `setup_conda`, so a half-finished install doesn't count.
             Self::Conda => PathBuf::from("installed.txt"),
@@ -389,22 +375,10 @@ async fn fetch_available(client: &reqwest::Client, runtime: Runtime) -> Result<V
         // Services whose manifest says where their releases are (src-tauri/services/).
         _ if crate::manifest::get(runtime.id()).is_some() => manifest_releases(client, runtime).await?,
         Runtime::Php => php_releases(client).await?,
-        Runtime::Phpmyadmin => phpmyadmin_releases(client).await?,
         Runtime::Ngrok => ngrok_releases(),
-        Runtime::Cloudflared => cloudflared_releases(client).await?,
-        Runtime::Composer => composer_releases(client).await?,
-        Runtime::Phpredisadmin => phpredisadmin_releases(client).await?,
-        Runtime::Java => java_releases(client).await?,
         Runtime::Python => python_releases(client).await?,
-        Runtime::Phppgadmin => phppgadmin_releases(client).await?,
-        Runtime::Mongotools => mongotools_releases(client).await?,
-        Runtime::Compass => compass_releases(client).await?,
         Runtime::Sqlite => sqlite_releases(client).await?,
-        Runtime::Erlang => erlang_releases(client).await?,
-        Runtime::Go => go_releases(client).await?,
         Runtime::Rust => rust_releases(client).await?,
-        Runtime::Maven => maven_releases(client).await?,
-        Runtime::Gradle => gradle_releases(client).await?,
         Runtime::Git => git_releases(client).await?,
         Runtime::Conda => conda_releases(client).await?,
         _ => return Err(unsupported(runtime.id())),
@@ -570,50 +544,6 @@ async fn github_latest(
 }
 
 
-/// The newest Temurin JDK of every LTS line, plus the newest release when it isn't one.
-/// Versions drop the build number ("21.0.5", not "21.0.5+11"), so folders and shims
-/// read like the other runtimes.
-async fn java_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let os = match std::env::consts::OS {
-        "windows" => "windows",
-        "macos" => "mac",
-        "linux" => "linux",
-        _ => return Err(unsupported("Java")),
-    };
-    let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x64" };
-    let archive = if cfg!(windows) { Archive::Zip } else { Archive::TarGz };
-    let info = get_json(client, "https://api.adoptium.net/v3/info/available_releases").await?;
-    let lts: Vec<u64> = info["available_lts_releases"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
-    let mut lines: Vec<u64> = lts.iter().copied().filter(|&v| v >= 8).collect();
-    if let Some(newest) = info["most_recent_feature_release"].as_u64().filter(|v| !lts.contains(v)) {
-        lines.push(newest);
-    }
-    let lts = &lts;
-    let lookups = lines.into_iter().map(|line| async move {
-        let url = format!("https://api.adoptium.net/v3/assets/latest/{line}/hotspot?architecture={arch}&image_type=jdk&os={os}&vendor=eclipse");
-        let assets = get_json(client, &url).await.ok()?;
-        let asset = assets.as_array()?.first()?;
-        let package = &asset["binary"]["package"];
-        let semver = asset["version"]["semver"].as_str()?;
-        Some(Release {
-            runtime: Runtime::Java,
-            version: semver.split('+').next().unwrap_or(semver).to_string(),
-            url: package["link"].as_str()?.to_string(),
-            sha256: package["checksum"].as_str().map(str::to_string),
-            sha512: None,
-            md5: None,
-            sha3_256: None,
-            archive,
-            label: Some(if lts.contains(&line) { "LTS".into() } else { "Latest".into() }),
-        })
-    });
-    let releases: Vec<Release> = futures_util::future::join_all(lookups).await.into_iter().flatten().collect();
-    if releases.is_empty() {
-        return Err(Error::msg("Couldn't load the Java versions from Adoptium. Check your connection and try again."));
-    }
-    Ok(releases)
-}
-
 /// The newest patch of every stable Python line from the latest python-build-standalone
 /// release (its "install_only" archives: a plain Python folder, no debug files).
 async fn python_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
@@ -660,79 +590,9 @@ async fn python_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     Ok(newest.into_values().collect())
 }
 
-/// phpPgAdmin from ReimuHakurei's fork, which supports PHP 8 and current PostgreSQL.
-/// Its releases are tags without uploaded files, so the download is GitHub's source zip,
-/// checked by HTTPS only.
-async fn phppgadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let latest = get_json(client, "https://api.github.com/repos/ReimuHakurei/phpPgAdmin/releases/latest").await?;
-    let tag = latest["tag_name"].as_str().ok_or_else(|| Error::msg("Couldn't read phpPgAdmin's latest release"))?;
-    let version = tag.trim_start_matches('v').trim_end_matches("-mod").to_string();
-    Ok(vec![Release {
-        runtime: Runtime::Phppgadmin,
-        version,
-        url: format!("https://github.com/ReimuHakurei/phpPgAdmin/archive/refs/tags/{tag}.zip"),
-        sha256: None,
-        sha512: None,
-        md5: None,
-        sha3_256: None,
-        archive: Archive::Zip,
-        label: Some("PHP 8 fork".into()),
-    }])
-}
-
 /// Runs a setup command, failing with the last line it printed to stderr.
 async fn run_quiet(program: &Path, args: &[String], cwd: &Path) -> Result<()> {
     run_quiet_env(program, args, cwd, &[]).await
-}
-
-/// The newest MongoDB Database Tools. They're built against old distributions (Ubuntu
-/// 18.04, RHEL 8), which also run on newer ones.
-async fn mongotools_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let arm = cfg!(target_arch = "aarch64");
-    let (name, arch) = match std::env::consts::OS {
-        "windows" if !arm => ("windows", "x86_64"),
-        "macos" => ("macos", "x86_64"),
-        "linux" if arm => ("ubuntu1804", "arm64"),
-        "linux" => ("ubuntu1804", "x86_64"),
-        _ => return Err(unsupported("MongoDB Database Tools")),
-    };
-    let full = get_json(client, "https://downloads.mongodb.org/tools/db/full.json").await?;
-    let newest = full["versions"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|v| v["version"].as_str().is_some_and(|s| !s.contains('-')))
-        .max_by_key(|v| version_key(v["version"].as_str().unwrap_or_default()))
-        .ok_or_else(|| Error::msg("Couldn't read the MongoDB Database Tools releases"))?;
-    let download = newest["downloads"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|d| d["name"].as_str() == Some(name) && d["arch"].as_str() == Some(arch))
-        .ok_or_else(|| unsupported("MongoDB Database Tools"))?;
-    let url = download["archive"]["url"].as_str().unwrap_or_default().to_string();
-    Ok(vec![Release {
-        runtime: Runtime::Mongotools,
-        version: newest["version"].as_str().unwrap_or_default().to_string(),
-        archive: if url.ends_with(".zip") { Archive::Zip } else { Archive::TarGz },
-        sha256: download["archive"]["sha256"].as_str().map(str::to_string),
-        sha512: None,
-        md5: None,
-        sha3_256: None,
-        url,
-        label: None,
-    }])
-}
-
-async fn compass_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
-    let (name, archive) = match std::env::consts::OS {
-        "windows" => ("win32-x64.zip".to_string(), Archive::Zip),
-        "macos" => (format!("darwin-{arch}.zip"), Archive::Zip),
-        "linux" => ("linux-x64.tar.gz".to_string(), Archive::TarGz),
-        _ => return Err(unsupported("MongoDB Compass")),
-    };
-    github_latest(client, Runtime::Compass, "mongodb-js/compass", archive, |n, v| n == format!("mongodb-compass-{v}-{name}")).await
 }
 
 /// The sqlite3 shell from sqlite.org's download page, whose comment block lists every file
@@ -839,142 +699,6 @@ async fn manifest_releases(client: &reqwest::Client, runtime: Runtime) -> Result
 async fn published_hash(client: &reqwest::Client, url: &str, kind: crate::manifest::Hash) -> Option<String> {
     let r = client.get(url).send().await.ok()?.error_for_status().ok()?;
     crate::sources::find_hash(&r.text().await.ok()?, kind)
-}
-
-/// Erlang/OTP for RabbitMQ: the newest of the two latest major versions, from the
-/// official Windows zips. Linux and macOS have no official builds.
-async fn erlang_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    if !cfg!(windows) {
-        return Err(Error::msg(
-            "Erlang has no official Linux or macOS builds. Install it with your system's packages (sudo apt install erlang-nox, sudo dnf install erlang, or brew install erlang); LampRabit's RabbitMQ uses it.",
-        ));
-    }
-    let list = get_json(client, "https://api.github.com/repos/erlang/otp/releases?per_page=40").await?;
-    let mut newest: std::collections::BTreeMap<u32, Release> = Default::default();
-    for r in list.as_array().into_iter().flatten().filter(|r| !r["prerelease"].as_bool().unwrap_or(false)) {
-        let version = r["tag_name"].as_str().unwrap_or_default().trim_start_matches("OTP-").to_string();
-        let Some(major) = version.split('.').next().and_then(|m| m.parse::<u32>().ok()) else { continue };
-        if newest.get(&major).is_some_and(|n| version_key(&n.version) >= version_key(&version)) {
-            continue;
-        }
-        let name = format!("otp_win64_{version}.zip");
-        let Some(asset) = r["assets"].as_array().into_iter().flatten().find(|a| a["name"].as_str() == Some(name.as_str())) else { continue };
-        newest.insert(major, Release {
-            runtime: Runtime::Erlang,
-            url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
-            sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
-            version,
-            sha512: None,
-            md5: None,
-            sha3_256: None,
-            archive: Archive::Zip,
-            label: Some(format!("OTP {major}")),
-        });
-    }
-    let mut releases: Vec<Release> = newest.into_values().rev().take(2).collect();
-    releases.reverse();
-    if releases.is_empty() {
-        return Err(Error::msg("Couldn't find Erlang's Windows builds. Check your connection and try again."));
-    }
-    Ok(releases)
-}
-
-/// The newest Maven 4 and Maven 3 from Apache's mirror, SHA-512 checked like Tomcat. The
-/// tarball keeps the Unix scripts executable; Windows gets the zip.
-async fn maven_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    const MIRROR: &str = "https://dlcdn.apache.org/maven";
-    let (ext, archive) = if cfg!(windows) { ("zip", Archive::Zip) } else { ("tar.gz", Archive::TarGz) };
-    let lookups = [(4, "Java 17+"), (3, "Java 8+")].map(|(line, label)| async move {
-        let listing = client.get(format!("{MIRROR}/maven-{line}/")).send().await.ok()?.error_for_status().ok()?.text().await.ok()?;
-        // Only final releases: 4.0.0-rc-4 and the like are skipped.
-        let version = listing
-            .split("href=\"")
-            .skip(1)
-            .filter_map(|s| s.split('/').next())
-            .filter(|v| v.starts_with(&format!("{line}.")) && v.split('.').all(|p| p.parse::<u32>().is_ok()))
-            .max_by_key(|v| version_key(v))?
-            .to_string();
-        let url = format!("{MIRROR}/maven-{line}/{version}/binaries/apache-maven-{version}-bin.{ext}");
-        let sha512 = client.get(format!("{url}.sha512")).send().await.ok()?.error_for_status().ok()?.text().await.ok()?;
-        let sha512 = sha512.split_whitespace().next()?.to_ascii_lowercase();
-        Some(Release { runtime: Runtime::Maven, version, url, sha256: None, sha512: Some(sha512), md5: None, sha3_256: None, archive, label: Some(label.into()) })
-    });
-    let releases: Vec<Release> = futures_util::future::join_all(lookups).await.into_iter().flatten().collect();
-    if releases.is_empty() {
-        return Err(Error::msg("Couldn't load the Maven versions from dlcdn.apache.org. Check your connection and try again."));
-    }
-    Ok(releases)
-}
-
-/// The newest final release of Gradle's two latest major versions, from services.gradle.org,
-/// with the SHA-256 Gradle publishes for each distribution (one zip for every OS).
-async fn gradle_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let list = get_json(client, "https://services.gradle.org/versions/all").await?;
-    let mut newest: std::collections::BTreeMap<u32, (String, String, String)> = Default::default();
-    for v in list.as_array().into_iter().flatten() {
-        let final_release = !v["snapshot"].as_bool().unwrap_or(true)
-            && !v["nightly"].as_bool().unwrap_or(true)
-            && !v["broken"].as_bool().unwrap_or(true)
-            && v["rcFor"].as_str().unwrap_or_default().is_empty()
-            && v["milestoneFor"].as_str().unwrap_or_default().is_empty();
-        let (Some(version), Some(url), Some(sum)) = (v["version"].as_str(), v["downloadUrl"].as_str(), v["checksumUrl"].as_str()) else { continue };
-        let Some(major) = version.split('.').next().and_then(|m| m.parse::<u32>().ok()) else { continue };
-        if final_release && newest.get(&major).is_none_or(|(n, _, _)| version_key(n) < version_key(version)) {
-            newest.insert(major, (version.to_string(), url.to_string(), sum.to_string()));
-        }
-    }
-    let mut releases = Vec::new();
-    for (version, url, sum_url) in newest.into_values().rev().take(2) {
-        let sha256 = client.get(&sum_url).send().await.ok().and_then(|r| r.error_for_status().ok());
-        let Some(sha256) = (match sha256 {
-            Some(r) => r.text().await.ok().and_then(|t| t.split_whitespace().next().map(str::to_ascii_lowercase)),
-            None => None,
-        }) else {
-            continue;
-        };
-        releases.push(Release { runtime: Runtime::Gradle, version, url, sha256: Some(sha256), sha512: None, md5: None, sha3_256: None, archive: Archive::Zip, label: None });
-    }
-    if releases.is_empty() {
-        return Err(Error::msg("Couldn't load the Gradle versions from services.gradle.org. Check your connection and try again."));
-    }
-    Ok(releases)
-}
-
-/// The supported Go releases (the newest two lines) from go.dev, with their SHA-256s.
-async fn go_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let os = match std::env::consts::OS {
-        "windows" => "windows",
-        "linux" => "linux",
-        "macos" => "darwin",
-        _ => return Err(unsupported("Go")),
-    };
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
-    let list = get_json(client, "https://go.dev/dl/?mode=json").await?;
-    let releases: Vec<Release> = list
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|r| r["stable"].as_bool() == Some(true))
-        .filter_map(|r| {
-            let file = r["files"].as_array()?.iter().find(|f| f["os"] == os && f["arch"] == arch && f["kind"] == "archive")?;
-            let name = file["filename"].as_str()?;
-            Some(Release {
-                runtime: Runtime::Go,
-                version: r["version"].as_str()?.trim_start_matches("go").to_string(),
-                url: format!("https://go.dev/dl/{name}"),
-                sha256: file["sha256"].as_str().map(str::to_string),
-                sha512: None,
-                md5: None,
-                sha3_256: None,
-                archive: if name.ends_with(".zip") { Archive::Zip } else { Archive::TarGz },
-                label: None,
-            })
-        })
-        .collect();
-    if releases.is_empty() {
-        return Err(unsupported("Go"));
-    }
-    Ok(releases)
 }
 
 /// The host rustup installs for: on Windows the GNU toolchain, which links with its own
@@ -1196,34 +920,6 @@ fn git_version_from_tag(tag: &str) -> String {
     }
 }
 
-async fn cloudflared_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
-    let (name, archive) = match std::env::consts::OS {
-        "windows" => (format!("cloudflared-windows-{arch}.exe"), Archive::File),
-        "macos" => (format!("cloudflared-darwin-{arch}.tgz"), Archive::TarGz),
-        _ => (format!("cloudflared-linux-{arch}"), Archive::File),
-    };
-    github_latest(client, Runtime::Cloudflared, "cloudflare/cloudflared", archive, |n, _| n == name).await
-}
-
-/// phpRedisAdmin publishes source releases on GitHub (no separate archives or checksums,
-/// so this relies on HTTPS). Its PHP dependency, Predis, is added after install.
-async fn phpredisadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let latest = get_json(client, "https://api.github.com/repos/erikdubbelboer/phpRedisAdmin/releases/latest").await?;
-    let tag = latest["tag_name"].as_str().ok_or_else(|| Error::msg("unexpected phpRedisAdmin release data"))?;
-    Ok(vec![Release {
-        runtime: Runtime::Phpredisadmin,
-        version: tag.trim_start_matches('v').to_string(),
-        url: format!("https://github.com/erikdubbelboer/phpRedisAdmin/archive/refs/tags/{tag}.zip"),
-        sha256: None,
-        sha512: None,
-        md5: None,
-        sha3_256: None,
-        archive: Archive::Zip,
-        label: None,
-    }])
-}
-
 /// phpRedisAdmin talks to Redis through Predis, normally installed by Composer. LampRabit
 /// adds the exact version its composer.json asks for, with a two-line autoloader, so
 /// neither Composer nor PHP is needed to install it.
@@ -1257,46 +953,6 @@ pub async fn add_predis(client: &reqwest::Client, layout: &Layout, version: &str
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::write(home.join("vendor").join("autoload.php"), "<?php\n// Written by LampRabit in place of Composer's autoloader.\nrequire __DIR__ . '/predis/predis/autoload.php';\n")?;
     Ok(())
-}
-
-/// getcomposer.org lists the current release and the 2.2 LTS line (the last one that
-/// runs on PHP below 7.2.5), each with a published checksum.
-async fn composer_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    const SITE: &str = "https://getcomposer.org";
-    let index = get_json(client, &format!("{SITE}/versions")).await?;
-    let mut seen = Vec::new();
-    let fetches = index["stable"].as_array().into_iter().flatten().filter_map(|r| {
-        let version = r["version"].as_str()?.to_string();
-        let path = r["path"].as_str()?.to_string();
-        if seen.contains(&version) {
-            return None;
-        }
-        seen.push(version.clone());
-        // Composer's LTS line (2.2) is the one kept for PHP 5.3–7.1, not the one to pick
-        // for a new setup; the label says so, and one-click installs don't prefer it.
-        let label = r["lts"].as_bool().unwrap_or(false).then(|| "LTS for PHP 5.3–7.1".to_string());
-        Some(async move {
-            let url = format!("{SITE}{path}");
-            let sha256 = client
-                .get(format!("{url}.sha256sum"))
-                .send()
-                .await
-                .and_then(|r| r.error_for_status())
-                .map_err(http)?
-                .text()
-                .await
-                .map_err(http)?
-                .split_whitespace()
-                .next()
-                .map(str::to_string);
-            // Never install Composer without a checksum: it runs with your project's rights.
-            if sha256.is_none() {
-                return Err(Error::msg(format!("getcomposer.org has no checksum for Composer {version}")));
-            }
-            Ok(Release { runtime: Runtime::Composer, version, url, sha256, sha512: None, md5: None, sha3_256: None, archive: Archive::File, label })
-        })
-    });
-    futures_util::future::join_all(fetches.collect::<Vec<_>>()).await.into_iter().collect()
 }
 
 /// Composer used to live directly in `bin/composer/composer.phar`; moves it into a
@@ -1341,37 +997,6 @@ pub fn remove_garnet(layout: &Layout) -> bool {
         let _ = std::fs::remove_dir_all(bin.join(old));
     }
     !garnet.is_empty()
-}
-
-async fn phpmyadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let info = get_json(client, "https://www.phpmyadmin.net/home_page/version.json").await?;
-    let version = info["version"].as_str().ok_or_else(|| Error::msg("unexpected phpMyAdmin version data"))?;
-    let php = info["releases"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|r| r["version"] == version)
-        .and_then(|r| r["php_versions"].as_str())
-        // ">=7.2,<8.4" -> "PHP <8.4": the upper bound is what users run into.
-        .map(|p| format!("PHP {}", p.rsplit(',').next().unwrap_or(p).trim()));
-    let url = format!("https://files.phpmyadmin.net/phpMyAdmin/{version}/phpMyAdmin-{version}-all-languages.zip");
-    let sha256 = match client.get(format!("{url}.sha256")).send().await {
-        Ok(r) if r.status().is_success() => {
-            r.text().await.ok().and_then(|t| t.split_whitespace().next().map(str::to_string))
-        }
-        _ => None,
-    };
-    Ok(vec![Release {
-        runtime: Runtime::Phpmyadmin,
-        version: version.to_string(),
-        url,
-        sha256,
-        sha512: None,
-        md5: None,
-        sha3_256: None,
-        archive: Archive::Zip,
-        label: php,
-    }])
 }
 
 pub fn installed(layout: &Layout, runtime: Runtime) -> Vec<String> {

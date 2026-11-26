@@ -1,0 +1,24 @@
+schema: 1
+id: phpmyadmin
+kind: tool
+name: phpMyAdmin
+category: tools
+blurb: Database admin
+origin: The classic MySQL/MariaDB web interface from phpmyadmin.net (SHA-256 checked), served at phpmyadmin.test
+homepage: https://www.phpmyadmin.net
+license: GPL-2.0
+keywords: [mysql, mariadb, database]
+
+source:
+  json:
+    url: https://www.phpmyadmin.net/home_page/version.json
+    items: releases
+    version: version
+    download: "https://files.phpmyadmin.net/phpMyAdmin/{version}/phpMyAdmin-{version}-all-languages.zip"
+    label: "PHP {item.php_versions}"
+  archive: zip
+  checksum: { sha256: "{url}.sha256" }
+binary: index.php
+
+needs:
+  - { runtime: php, why: It runs on PHP }

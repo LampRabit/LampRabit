@@ -1,0 +1,20 @@
+schema: 1
+id: cloudflared
+kind: cli
+name: Cloudflare Tunnel
+category: sharing
+blurb: Public tunnels
+origin: Cloudflare's cloudflared from GitHub (checksum checked); quick tunnels need no account
+homepage: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
+license: Apache-2.0
+keywords: [share, tunnel, public url]
+
+source:
+  github: cloudflare/cloudflared
+  assets:
+    windows-x64: { file: cloudflared-windows-amd64.exe, archive: file }
+    linux-x64: { file: cloudflared-linux-amd64, archive: file }
+    linux-arm64: { file: cloudflared-linux-arm64, archive: file }
+    macos-x64: { file: cloudflared-darwin-amd64.tgz, archive: targz }
+    macos-arm64: { file: cloudflared-darwin-arm64.tgz, archive: targz }
+binary: "cloudflared{{exe}}"
