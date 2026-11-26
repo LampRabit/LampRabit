@@ -6,6 +6,8 @@ on:
   pull_request:
   # The release workflow runs these checks before it builds anything.
   workflow_call:
+  # By hand on a branch (dev-1.0), to check macOS and Linux before a pull request.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
